@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "",
+  "generatedAt": "",
+  "framework": "",
+  "activeDomains": [],
+  "domainDefs": [],
+  "count": 0,
+  "domainStats": {
+    "display": 0,
+    "power_boot": 0,
+    "network": 0,
+    "content": 0,
+    "config": 0,
+    "firmware": 0,
+    "other": 0
+  },
+  "displaySubStats": {
+    "波纹摩尔纹": 0,
+    "鬼影拖影": 0,
+    "横竖线条": 0,
+    "花屏乱码": 0,
+    "偏色缺色": 0,
+    "闪烁抖动": 0,
+    "显示不全异常": 0
+  },
+  "productLineStats": {
+    "rx": 0,
+    "vp": 0,
+    "async": 0,
+    "cloud": 0,
+    "mono": 0,
+    "lcd": 0,
+    "app": 0
+  },
+  "qualityStats": {
+    "A": 0,
+    "B": 0,
+    "C": 0,
+    "D": 0
+  },
+  "cases": []
+}

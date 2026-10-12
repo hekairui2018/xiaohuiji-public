@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小灰机 · 问答检测后台</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;overflow:hidden}
+  body{margin:0;background:#eef1f5;color:#172033;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  button,input{font:inherit}
+  /* 顶栏 */
+  .top{height:52px;display:flex;align-items:center;gap:16px;padding:0 18px;background:#111827;color:#fff}
+  .brand{font-weight:700;font-size:16px;white-space:nowrap}
+  .brand small{font-weight:400;color:#9aa6b8;margin-left:8px;font-size:12px}
+  .top .spacer{flex:1}
+  .seg{display:flex;background:#1f2937;border-radius:8px;padding:3px}
+  .seg button{border:0;background:transparent;color:#c7d0de;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
+  .seg button.active{background:#2563eb;color:#fff;font-weight:600}
+  .seg button:hover:not(.active){color:#fff}
+  .toolbtn{border:1px solid #374151;background:#1f2937;color:#c7d0de;border-radius:7px;padding:6px 12px;font-size:13px;cursor:pointer}
+  .toolbtn:hover{color:#fff;border-color:#4b5563}
+  label.auto{display:flex;align-items:center;gap:6px;font-size:12px;color:#9aa6b8;white-space:nowrap;cursor:pointer}
+  /* 统计条 */
+  .stats{flex:0 0 auto;display:flex;gap:10px;padding:10px 18px;background:#fff;border-bottom:1px solid #d8dee8;overflow-x:auto}
+  .stat{flex:0 0 auto;min-width:96px;background:#f7f9fc;border:1px solid #e6ebf2;border-radius:8px;padding:7px 12px}
+  .stat .n{font-size:20px;font-weight:700;line-height:1.1}
+  .stat .l{font-size:12px;color:#667085;margin-top:2px;white-space:nowrap}
+  .stat.warn .n{color:#d97706}.stat.bad .n{color:#dc2626}.stat.ok .n{color:#16a34a}
+  .intents{flex:1 1 auto;display:flex;align-items:center;gap:12px;padding:0 6px;flex-wrap:wrap;min-width:200px}
+  .ipill{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#475467;background:#f7f9fc;border:1px solid #e6ebf2;border-radius:20px;padding:3px 10px;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%}
+  /* 主体 */
+  .app{height:calc(100vh - 52px - 73px);display:grid;grid-template-columns:340px minmax(0,1fr);min-height:0}
+  .side{min-width:0;min-height:0;display:flex;flex-direction:column;background:#fff;border-right:1px solid #d8dee8}
+  .sideHead{flex:0 0 auto;padding:12px 14px;border-bottom:1px solid #edf0f5}
+  .search{width:100%;height:36px;padding:0 11px;border:1px solid #d8dee8;border-radius:7px;background:#fff;color:#172033}
+  .search:focus{outline:none;border-color:#2563eb}
+  .sessions{flex:1;min-height:0;overflow-x:hidden;overflow-y:auto}
+  .session{padding:11px 14px;border-bottom:1px solid #edf0f5;cursor:pointer}
+  .session:hover{background:#f7f9fc}
+  .session.active{padding-left:10px;background:#eaf2ff;border-left:4px solid #2563eb}
+  .sessionTop{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+  .name{overflow:hidden;font-weight:700;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px;min-width:0}
+  .noteTxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .time{color:#667085;white-space:nowrap;font-size:12px}
+  .preview{margin-top:5px;overflow:hidden;color:#667085;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+  .cnt{flex:0 0 auto;margin-left:6px;padding:0 7px;border-radius:10px;background:#e5eaf2;color:#475467;font-size:11px;line-height:17px}
+  .src{font-size:10px;padding:1px 6px;border-radius:4px;color:#fff;white-space:nowrap}
+  .src.web{background:#2563eb}.src.wc{background:#16a34a}
+  /* 备注命名 */
+  .noteButton{flex:0 0 auto;width:20px;height:20px;padding:0;border:0;background:transparent;color:#98a2b3;cursor:pointer;border-radius:5px;opacity:0;font-size:12px;line-height:20px}
+  .session:hover .noteButton,.session.active .noteButton{opacity:1}
+  .noteButton:hover{background:#dbeafe;color:#1d4ed8;opacity:1}
+  .inlineNoteInput{width:100%;min-width:0;height:24px;border:1px solid #2563eb;border-radius:5px;padding:0 6px;font-size:12px;font-weight:600;color:#172033}
+  .sidTail{color:#98a2b3;font-weight:400;font-size:12px;margin-left:6px}
+  /* 右侧详情 */
+  .main{min-width:0;min-height:0;display:flex;flex-direction:column;background:#f3f5f9}
+  .chatHead{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 18px;height:60px;background:#fff;border-bottom:1px solid #d8dee8}
+  .chatTitle{font-weight:700;display:flex;align-items:center;gap:8px}
+  .chatSub{font-size:12px;color:#667085;margin-top:2px}
+  .chatTools{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+  .chatFind{height:30px;width:150px;border:1px solid #d8dee8;border-radius:6px;padding:0 9px;font-size:12px}
+  .chatFind:focus{outline:none;border-color:#2563eb}
+  .findCount{font-size:11px;color:#667085;min-width:32px;text-align:center}
+  button.mini{height:28px;width:26px;border:1px solid #d8dee8;background:#fff;border-radius:6px;cursor:pointer;color:#475467}
+  button.mini:hover{background:#f3f5f9}
+  .flow{flex:1;min-height:0;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+  .empty{margin:auto;color:#98a2b3;font-size:14px;text-align:center;line-height:2}
+  .msg{display:flex;flex-direction:column;max-width:78%}
+  .msg.user{align-self:flex-end;align-items:flex-end}
+  .msg.bot{align-self:flex-start;align-items:flex-start}
+  .bubble{padding:10px 13px;border-radius:12px;font-size:14px;line-height:1.6;word-break:break-word;white-space:normal}
+  .msg.user .bubble{background:#2563eb;color:#fff;border-bottom-right-radius:4px}
+  .msg.bot .bubble{background:#fff;color:#172033;border:1px solid #e4e9f1;border-bottom-left-radius:4px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .msg.sys{align-self:center;align-items:center;max-width:90%}
+  .syscap{background:#eef2f8;color:#475467;border:1px dashed #c6d0e0;border-radius:16px;padding:5px 14px;font-size:12px}
+  .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;font-size:11px;color:#98a2b3;align-items:center}
+  .tag{padding:1px 8px;border-radius:10px;background:#eef1f5;color:#475467;border:1px solid #e6ebf2;white-space:nowrap}
+  .tag.route{color:#fff;border:0}
+  .tag.st-answer{background:#e7f6ec;color:#15803d;border-color:#bfe6cc}
+  .tag.st-clarify{background:#fef3e2;color:#b45309;border-color:#fbe2b8}
+  .tag.st-escalate{background:#fdecec;color:#b91c1c;border-color:#f6c5c5}
+  .tag.imported{background:#f1ecfb;color:#6d28d9;border-color:#e0d4f7}
+  .esc{background:#fdecec;border:1px solid #f6c5c5;color:#b91c1c;border-radius:8px;padding:6px 10px;font-size:12px;margin-top:6px}
+  /* NLU 人工标注条：对/错/该转人工，语料回流 */
+  .labelBar{display:flex;gap:6px;margin-top:6px;justify-content:flex-end;align-items:center}
+  button.lbl{border:1px solid #d8dee8;background:#fff;color:#667085;border-radius:14px;padding:2px 11px;font-size:11px;line-height:1.5;cursor:pointer;opacity:.55}
+  button.lbl:hover{opacity:1;border-color:#9aa6b8}
+  button.lbl.sel-correct{background:#16a34a;border-color:#16a34a;color:#fff;opacity:1}
+  button.lbl.sel-wrong{background:#dc2626;border-color:#dc2626;color:#fff;opacity:1}
+  button.lbl.sel-escalate{background:#d97706;border-color:#d97706;color:#fff;opacity:1}
+  blockquote{margin:6px 0;padding:6px 10px;border-left:3px solid #c6d0e0;background:#f7f9fc;border-radius:0 6px 6px 0;color:#475467}
+  .bubble p{margin:0 0 6px}.bubble p:last-child{margin-bottom:0}
+  .bubble strong{color:inherit}
+  .msg.bot .bubble strong{color:#111827}
+  .msg.user .qaimg{display:block;margin:0 0 6px}
+  .qaimg img{display:block;max-width:200px;max-height:200px;border-radius:8px;border:2px solid rgba(255,255,255,.6);background:#fff;cursor:zoom-in}
+  .qatopo{display:block;max-width:100%;width:100%;margin-top:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:zoom-in;box-sizing:border-box}
+  .topoCap{display:block;margin-top:6px;font-size:12px;color:#94a3b8}
+  mark.xhj-hit{background:#ffe58a;border-radius:2px;padding:0 1px;color:inherit}
+  mark.xhj-hit.active{background:#f97316;color:#fff}
+  @media(max-width:860px){
+    html,body{overflow:auto}
+    .stats{padding:8px 10px}
+    .app{height:auto;grid-template-columns:1fr}
+    .side{border-right:0;border-bottom:1px solid #d8dee8;max-height:42vh}
+    .main{height:70vh}
+    .brand small{display:none}
+    .chatTools{display:none}
+  }
+/* admin-selfcheck-20260920 */
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">小灰机 · 问答检测后台<small>只读检测 · 网页快查 + 企业微信</small></div>
+    <div class="spacer"></div>
+    <div class="seg" id="srcSeg">
+      <button data-src="all" class="active">全部</button>
+      <button data-src="quick-site">网页快查</button>
+      <button data-src="wecom">企业微信</button>
+    </div>
+    <label class="auto"><input type="checkbox" id="autoRefresh" checked> 自动刷新</label>
+    <button class="toolbtn" id="exportBtn">导出CSV</button>
+    <button class="toolbtn" id="refreshBtn">刷新</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="app">
+    <div class="side">
+      <div class="sideHead">
+        <input id="search" class="search" placeholder="搜索客户问题 / 答案 / 备注 / 会话">
+      </div>
+      <div class="sessions" id="sessions"></div>
+    </div>
+    <div class="main">
+      <div class="chatHead">
+        <div style="min-width:0">
+          <div class="chatTitle" id="chatTitle">选择左侧会话</div>
+          <div class="chatSub" id="chatSub"></div>
+        </div>
+        <div class="chatTools">
+          <input id="chatFind" class="chatFind" placeholder="本会话内查找">
+          <span id="chatFindCount" class="findCount"></span>
+          <button class="mini" id="findPrev" title="上一个">↑</button>
+          <button class="mini" id="findNext" title="下一个">↓</button>
+        </div>
+      </div>
+      <div class="flow" id="flow"><div class="empty">在左侧选择一个会话，<br>查看网页 / 企微客户与小灰机的完整问答</div></div>
+    </div>
+  </div>
+
+<script>
+const ROUTE_NAME={presales:"售前参数",aftersales:"售后故障",ordering:"配单选型",software:"软件下载",unknown:"未识别"};
+const ROUTE_COLOR={presales:"#2563eb",aftersales:"#d97706",ordering:"#7c3aed",software:"#0891b2",unknown:"#6b7280"};
+const STATUS_NAME={answer:"已答",clarify:"待澄清",escalate:"转人工"};
+const SRC_NAME={"quick-site":"网页快查",wecom:"企业微信","web-selftest":"自动化自测"};
+const BTN_TAG={ORDER_ADD_MODULE:"加模组",ORDER_ACCEPT_PROVISIONAL:"采用暂定",ORDER_PICK_ASYNC:"选择异步",ORDER_PICK_SYNC:"选择同步",ORDER_ADJUST:"调整参数",RX_STILL:"故障依旧",RX_OK:"故障已解决",SIDE_ASYNC:"异步",SIDE_SYNC:"同步"};
+const NOTE_PREFIX="xhj-admin-note:";
+const TG_WEB="__test_group_web__", TG_WECOM="__test_group_wecom__", TG_IDS=[TG_WEB,TG_WECOM];
+const TEST_KEY="xhj-test-sids";
+function isGroupId(sid){return TG_IDS.indexOf(sid)>=0;}
+function groupIsWecom(gid){return gid===TG_WECOM;}
+function testGroupIdForSource(src){return src==="wecom"?TG_WECOM:TG_WEB;}
+function groupDefaultName(gid){return gid===TG_WECOM?"企微测试":"网页测试";}
+const TEST_SEED=[];
+const TEST_LEGACY_SEED=["w-30r9rbdchsw0","w-r5u7hqzege3c","w-6sv2yav3c6eb"];
+function sameSet(a,b){const x=a.slice().sort(),y=b.slice().sort();return x.length===y.length&&x.every((v,i)=>v===y[i]);}
+function localTestSids(){try{const raw=localStorage.getItem(TEST_KEY);if(raw===null)return TEST_SEED.slice();let a=JSON.parse(raw);if(!Array.isArray(a))a=[];if(a.length&&sameSet(a,TEST_LEGACY_SEED)){a=[];localStorage.setItem(TEST_KEY,JSON.stringify(a));}return a;}catch(e){return [];}}
+function testSids(){if(SRV_READY)return (SRV.testSids||[]).slice();return localTestSids();}
+// 真人/真实设备 sid 只有三种形态：网页设备 w-<base36>（前端 getSid 持久化）、企微单聊 u:<userid>、企微群 g:<chatid>
+function isHumanSid(sid){
+  const t=String(sid==null?"":sid).trim();
+  return /^w-[a-z0-9]+$/i.test(t)||/^u:/i.test(t)||/^g:/i.test(t);
+}
+// 非真人形态（空 sid、__ 内部标记、任意自动化脚本 sid）一律视为自测，归入测试专用框，不再“一脚本一框”
+function isAutoTestSid(sid){
+  const t=String(sid==null?"":sid).trim();
+  if(!t)return true;
+  return !isHumanSid(t);
+}
+function isTestSid(sid){if(isGroupId(sid))return false;if(isAutoTestSid(sid))return true;return testSids().indexOf(sid)>=0;}
+function sourceOfSid(sid){for(const r of ALL){if(r.sid===sid)return r.source;}return "";}
+function testGroupNameOf(sid,src){const s=src||sourceOfSid(sid);return s==="wecom"?"企微测试":"网页测试";}
+function recGroupKey(r){
+  if(testSids().indexOf(r.sid)>=0)return testGroupIdForSource(r.source); // 手动收纳优先（可把真人形态的内部测试企微号也归测试）
+  if(r.source==="web-selftest")return testGroupIdForSource(r.source);    // 前端 ?selftest=1 / localStorage 自测开关
+  if(isHumanSid(r.sid))return r.sid;                                     // 真人/真实设备：同 sid 一个框，新设备/新联系人才新开
+  return testGroupIdForSource(r.source);                                 // 其余自动化自测：网页归「网页测试」、企微归「企微测试」
+}
+function groupLabel(gid){return noteOf(gid)||groupDefaultName(gid);}
+function addToTest(sid){const a=testSids();if(a.indexOf(sid)<0){a.push(sid);SRV.testSids=a;localStorage.setItem(TEST_KEY,JSON.stringify(a));apiPost("/api/test-sids",{sids:a});}}
+function manualSidsInGroup(gid){return testSids().filter(sid=>testGroupIdForSource(sourceOfSid(sid))===gid);}
+function clearTestGroup(gid){const rm=new Set(manualSidsInGroup(gid));const a=testSids().filter(x=>!rm.has(x));SRV.testSids=a;localStorage.setItem(TEST_KEY,JSON.stringify(a));apiPost("/api/test-sids",{sids:a});if(curSid===gid)curSid=null;}
+function ungroupButton(g){if(!g.merged||manualSidsInGroup(g.sid).length===0)return "";return "<button class=\"noteButton\" data-untest=\"1\" title=\"把手动归入的会话移出本组\">&#8635;</button>";}
+
+let ALL=[], filterSrc="all", kw="", curSid=null, timer=null;
+let editingNoteKey="", noteDraft="";
+let SRV={notes:{},testSids:[]}, SRV_READY=false;
+function apiPost(url,obj){return fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)}).then(r=>r.json()).catch(()=>null);}
+/* ---- NLU 人工标注（对/错/该转人工），权威存后端 data/nlu-labels.jsonl，换机随 git 不丢 ---- */
+let LABELS={};
+async function loadLabels(){try{const r=await fetch("/api/nlu-labels",{cache:"no-store"});const d=await r.json();if(d&&d.labels)LABELS=d.labels;}catch(e){}}
+function recHash(s){let h=5381;const t=String(s==null?"":s);for(let i=0;i<t.length;i++){h=((h<<5)+h+t.charCodeAt(i))>>>0;}return h.toString(36);}
+function recKey(r){return [r.date||"",r.ts||"",r.sid||"",recHash(r.q)].join("|");}
+const LABEL_META=[["correct","\u2713 对","回答正确"],["wrong","\u2713 错","答错了/答非所问"],["escalate","\u21A4 转人工","这条本该转人工"]];
+function labelBarHtml(r){
+  if(!(r.q||(Array.isArray(r.images)&&r.images.length)))return "";
+  const k=recKey(r),ke=encodeURIComponent(k),cur=(LABELS[k]||{}).label||"";
+  const btns=LABEL_META.map(([v,t,title])=>'<button type="button" class="lbl '+(cur===v?"sel-"+v:"")+'" data-labelbtn="'+v+'" data-key="'+ke+'" title="'+title+'">'+t+"</button>").join("");
+  return '<div class="labelBar" data-labelbar="'+ke+'">'+btns+"</div>";
+}
+async function migrateLocalState(){
+  try{
+    if(localStorage.getItem("xhj-admin-state-migrated")==="v1")return;
+    const notes=Object.assign({},SRV.notes);let changed=false;
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.indexOf(NOTE_PREFIX)===0){const sid=k.slice(NOTE_PREFIX.length);const v=(localStorage.getItem(k)||"").trim();if(v&&!notes[sid]){notes[sid]=v;changed=true;}}
+    }
+    let testSids=SRV.testSids.slice();
+    if(testSids.length===0){const loc=localTestSids();if(loc.length){testSids=loc;changed=true;}}
+    if(changed){
+      for(const sid of Object.keys(notes)){if(!SRV.notes[sid])await apiPost("/api/note",{sid,name:notes[sid]});}
+      if(testSids.length)await apiPost("/api/test-sids",{sids:testSids});
+    }
+    SRV.notes=notes;SRV.testSids=testSids;
+    localStorage.setItem("xhj-admin-state-migrated","v1");
+  }catch(e){}
+}
+async function loadState(){
+  try{
+    const r=await fetch("/api/state",{cache:"no-store"});const d=await r.json();
+    SRV.notes=(d&&d.notes)||{};SRV.testSids=Array.isArray(d&&d.testSids)?d.testSids:[];SRV_READY=true;
+    await migrateLocalState();
+  }catch(e){SRV_READY=false;}
+}
+
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function md(text){
+  const lines=esc(text).split("\n");
+  let html="",quote=[];
+  const flush=()=>{ if(quote.length){html+="<blockquote>"+quote.join("<br>")+"</blockquote>";quote=[];} };
+  const inline=s=>s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+  for(const raw of lines){
+    const l=raw;
+    const m=l.match(/^\s*&gt;\s?(.*)$/);
+    if(m){ quote.push(inline(m[1])); continue; }
+    flush();
+    if(l.trim()===""){ html+="<p>&nbsp;</p>"; }
+    else{ html+="<p>"+inline(l)+"</p>"; }
+  }
+  flush();
+  return html;
+}
+function shortSid(sid){const s=String(sid||"");const m=s.replace(/^u:/,"").replace(/^w-/,"");return m.slice(-6);}
+function srcCls(s){return s==="wecom"?"wc":"web";}
+function btnLabel(q){
+  const m=String(q||"").match(/^\[([A-Z_]+)\]$/);
+  if(!m)return null;
+  return BTN_TAG[m[1]]||m[1];
+}
+function fmtTime(ts,full){ if(!ts)return""; const p=ts.split(" "); if(full)return ts; return (p[0]||"").slice(5)+" "+(p[1]||"").slice(0,5); }
+function today(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function modelName(v){
+  const m=String(v||"");
+  if(!m)return "";
+  if(/ordering/i.test(m))return "本地·配单";
+  if(/presales|product|firmware|chip/i.test(m))return "本地·售前";
+  if(/aftersales/i.test(m))return "本地·售后";
+  if(/software/i.test(m))return "本地·软件";
+  if(/deepseek/i.test(m))return "DeepSeek";
+  if(/manual/i.test(m))return "人工";
+  if(/^local|xiaohuiji/i.test(m))return "本地中枢";
+  return m;
+}
+
+/* ---- 会话备注命名（权威存后端 admin-state.json，本机 localStorage 仅离线兜底；不改原始记录）---- */
+function noteOf(sid){if(!sid)return "";const v=SRV.notes[sid]||localStorage.getItem(NOTE_PREFIX+sid)||"";return (v||"").trim();}
+function cleanQ(q){return String(q||"").replace(/\[[A-Z0-9_]+\]/g," ").replace(/\s+/g," ").trim();}
+const GREET_RE=/^(你好|您好|hi|hello|哈喽|在吗|在不在|有人吗|谢谢|感谢|多谢|好的|收到|测试|test|嗯+|哦+|噢+|好|对|行)[!！。.?？~，,\s]*$/i;
+function isSubstantive(t){
+  if(!t)return false;
+  if(GREET_RE.test(t))return false;
+  if(/^[\d\s、,，.．]+$/.test(t))return false;
+  return t.replace(/\s+/g,"").length>=2;
+}
+function autoNameOf(sid){
+  if(!sid)return "";
+  const msgs=ALL.filter(r=>r.sid===sid);
+  let first="";
+  for(const r of msgs){const t=cleanQ(r.q);if(isSubstantive(t)){first=t;break;}}
+  if(!first){for(let i=msgs.length-1;i>=0;i--){const t=cleanQ(msgs[i].q);if(isSubstantive(t)){first=t;break;}}}
+  if(!first)return "";
+  const core=first.replace(/\s+/g,"");
+  return core.length>16?core.slice(0,16)+"…":core;
+}
+function nameOf(sid,src){
+  if(isGroupId(sid))return groupLabel(sid);
+  if(isTestSid(sid))return testGroupNameOf(sid,src);
+  if(!sid)return "";
+  return noteOf(sid)||autoNameOf(sid)||shortSid(sid);
+}
+function beginNote(sid){
+  editingNoteKey=sid; noteDraft=noteOf(sid); curSid=sid;
+  const gs=group(filtered());
+  renderSessions(gs); renderFlow(gs);
+}
+function saveNote(sid,val){
+  const v=(val==null?"":String(val)).trim();
+  if(v){SRV.notes[sid]=v;localStorage.setItem(NOTE_PREFIX+sid,v);}else{delete SRV.notes[sid];localStorage.removeItem(NOTE_PREFIX+sid);}
+  apiPost("/api/note",{sid,name:v});
+  editingNoteKey=""; noteDraft="";
+  const gs=group(filtered());
+  renderSessions(gs); renderFlow(gs);
+}
+
+function filtered(){
+  const k=kw.trim().toLowerCase();
+  return ALL.filter(r=>{
+    if(filterSrc!=="all"&&r.source!==filterSrc)return false;
+    if(k){
+      const hay=((r.q||"")+" "+(r.a||"")+" "+String(r.sid||"")+" "+noteOf(r.sid)+(isTestSid(r.sid)?" "+groupLabel(recGroupKey(r)):"")).toLowerCase();
+      if(!hay.includes(k))return false;
+    }
+    return true;
+  });
+}
+function group(records){
+  const map=new Map();
+  for(const r of records){
+    const key=recGroupKey(r);
+    if(!map.has(key))map.set(key,{sid:key,source:r.source,msgs:[],members:new Set(),merged:isGroupId(key)});
+    const g=map.get(key);g.msgs.push(r);g.members.add(r.sid);
+  }
+  return [...map.values()].map(g=>{
+    g.msgs.sort((a,b)=>((a.ts||"")<(b.ts||""))?-1:((a.ts||"")>(b.ts||"")?1:0));
+    g.memberCount=g.members.size;
+    g.first=g.msgs[0].ts; g.last=g.msgs[g.msgs.length-1].ts; g.count=g.msgs.length;
+    g.lastQ=g.msgs[g.msgs.length-1].q||"";
+    return g;
+  }).sort((a,b)=>a.last<b.last?1:-1);
+}
+
+function renderStats(records){
+  const sessions=new Set(records.map(r=>r.sid)).size;
+  const td=today();
+  let todayN=0,answer=0,clarify=0,escalate=0;const routes={};
+  for(const r of records){
+    if(r.date===td)todayN++;
+    if(r.status==="answer")answer++;else if(r.status==="clarify")clarify++;else if(r.status==="escalate")escalate++;
+    const rt=r.route||"unknown";routes[rt]=(routes[rt]||0)+1;
+  }
+  const stat=(cls,n,l)=>`<div class="stat ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  let html=stat("",sessions,"会话数")+stat("",records.length,"消息总数")+stat("",todayN,"今日消息")
+    +stat("ok",answer,"已答")+stat("warn",clarify,"待澄清")+stat("bad",escalate,"转人工");
+  let ip="";
+  for(const k of ["presales","aftersales","ordering","software","unknown"]){
+    if(routes[k])ip+=`<span class="ipill"><span class="dot" style="background:${ROUTE_COLOR[k]}"></span>${ROUTE_NAME[k]} ${routes[k]}</span>`;
+  }
+  html+=`<div class="intents">${ip}</div>`;
+  document.getElementById("stats").innerHTML=html;
+}
+
+function renderSessions(groups){
+  const box=document.getElementById("sessions");
+  if(!groups.length){box.innerHTML='<div class="empty" style="padding:30px 16px">没有匹配的记录</div>';return;}
+  box.innerHTML=groups.map(g=>{
+    const bl=btnLabel(g.lastQ);
+    const preview=bl?("［按钮］"+bl):(g.lastQ||"");
+    const editing=g.sid===editingNoteKey;
+    let nameInner;
+    if(editing){
+      nameInner=`<input class="inlineNoteInput" data-note-key="${encodeURIComponent(g.sid)}" value="${esc(noteDraft!=null?noteDraft:noteOf(g.sid))}" placeholder="备注名称">`;
+    }else if(g.merged){
+      nameInner=`<span class="noteTxt">${esc(groupLabel(g.sid))}</span><button class="noteButton" data-edit="${encodeURIComponent(g.sid)}" title="重命名">&#9998;</button>${ungroupButton(g)}`;
+    }else{
+      nameInner=`<span class="noteTxt">${esc(nameOf(g.sid))}</span><button class="noteButton" data-addtest="1" title="归入对应测试组">&#8862;</button><button class="noteButton" data-edit="${encodeURIComponent(g.sid)}" title="备注命名">&#9998;</button>`;
+    }
+    const srcTxt=g.merged?(groupIsWecom(g.sid)?"企微测试":"网页测试"):(SRC_NAME[g.source]||g.source);
+    return `<div class="session ${g.sid===curSid?"active":""}" data-sid="${encodeURIComponent(g.sid)}">
+      <div class="sessionTop">
+        <div class="name"><span class="src ${g.merged?(groupIsWecom(g.sid)?"wc":"web"):srcCls(g.source)}">${srcTxt}</span>${nameInner}<span class="cnt">${g.count}</span></div>
+        <div class="time">${esc(fmtTime(g.last))}</div>
+      </div>
+      <div class="preview">${esc(preview)}</div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".session").forEach(el=>{
+    const sid=decodeURIComponent(el.dataset.sid);
+    el.onclick=()=>{
+      curSid=sid;
+      const cf=document.getElementById("chatFind"); if(cf)cf.value="";
+      document.getElementById("chatFindCount").textContent="";
+      renderSessions(groups); renderFlow(groups);
+    };
+    const eb=el.querySelector("[data-edit]");
+    if(eb)eb.onclick=e=>{e.stopPropagation();beginNote(sid);};
+    const ab=el.querySelector("[data-addtest]");
+    if(ab)ab.onclick=e=>{e.stopPropagation();addToTest(sid);const gs=group(filtered());renderSessions(gs);renderFlow(gs);};
+    const ub=el.querySelector("[data-untest]");
+    if(ub)ub.onclick=e=>{e.stopPropagation();if(confirm("把手动归入「"+groupLabel(sid)+"」的会话移出、恢复独立？")){clearTestGroup(sid);const gs=group(filtered());renderSessions(gs);renderFlow(gs);}};
+    const inp=el.querySelector(".inlineNoteInput");
+    if(inp){
+      inp.onclick=e=>e.stopPropagation();
+      inp.oninput=e=>{noteDraft=e.target.value;};
+      inp.onkeydown=e=>{
+        e.stopPropagation();
+        if(e.key==="Enter"){e.preventDefault();saveNote(sid,inp.value);}
+        else if(e.key==="Escape"){e.preventDefault();editingNoteKey="";noteDraft="";renderSessions(groups);renderFlow(groups);}
+      };
+      inp.onblur=()=>{ if(editingNoteKey===sid)saveNote(sid,inp.value); };
+      requestAnimationFrame(()=>{inp.focus();inp.select();});
+    }
+  });
+}
+
+function tag(text,cls){return `<span class="tag ${cls||""}">${text}</span>`;}
+function renderFlow(groups){
+  const g=groups.find(x=>x.sid===curSid);
+  const title=document.getElementById("chatTitle"),sub=document.getElementById("chatSub"),flow=document.getElementById("flow");
+  if(!g){title.textContent="选择左侧会话";sub.textContent="";flow.innerHTML='<div class="empty">在左侧选择一个会话，<br>查看网页 / 企微客户与小灰机的完整问答</div>';return;}
+  if(g.merged){
+    const __wc=groupIsWecom(g.sid);
+    title.innerHTML=`<span class="src ${__wc?"wc":"web"}">${__wc?"企微测试":"网页测试"}</span> ${esc(groupLabel(g.sid))}<span class="sidTail">${g.memberCount} 个会话</span>`;
+    sub.textContent=`${esc(g.first)} ~ ${esc(g.last)} · 含 ${g.memberCount} 个来源会话 · 共 ${g.count} 条`;
+  }else{
+    const __nm=nameOf(g.sid),__tail=shortSid(g.sid);
+    const disp=__nm===__tail?esc(__tail):(esc(__nm)+'<span class="sidTail">'+esc(__tail)+'</span>');
+    title.innerHTML=`<span class="src ${srcCls(g.source)}">${SRC_NAME[g.source]||g.source}</span> 客户 ${disp}`;
+    sub.textContent=`${esc(g.first)} ~ ${esc(g.last)} · 共 ${g.count} 条 · ${g.source==="wecom"?"企业微信渠道":"网页快查渠道"}`;
+  }
+  flow.innerHTML=g.msgs.map(r=>{
+    const rc=r.route||"unknown";
+    const metaTags=[
+      g.merged?tag(shortSid(r.sid),""):"",
+      `<span class="tag route" style="background:${ROUTE_COLOR[rc]||ROUTE_COLOR.unknown}">${esc(ROUTE_NAME[rc]||rc)}</span>`,
+      r.status?tag(STATUS_NAME[r.status]||r.status,"st-"+r.status):"",
+      r.model?tag(esc(modelName(r.model))):"",
+      (r.ms&&String(r.ms).trim())?tag(String(r.ms).replace(/[^\d]/g,"")+"ms"):"",
+      r.ok===false?tag("应答异常","st-escalate"):"",
+      r.imported?tag("历史回填","imported"):""
+    ].filter(Boolean).join("");
+    const meta=`<div class="meta">${esc(fmtTime(r.ts,true))} ${metaTags}</div>`;
+    const escBar=r.escalate?`<div class="esc">已转人工：${esc(r.escalate)}</div>`:"";
+    const bl=btnLabel(r.q);
+    if(bl){
+      return `<div class="msg sys"><div class="syscap">客户点击按钮：${esc(bl)}</div>${meta}</div>`;
+    }
+    const imgs=Array.isArray(r.images)?r.images.filter(x=>/^\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_-]{6,40}\.(png|jpe?g|gif|webp)$/i.test(x)):[];
+    const imgHtml=imgs.map(f=>{const u="/api/qa-image?f="+encodeURIComponent(f);return `<a href="${u}" target="_blank" rel="noopener" class="qaimg"><img src="${u}" loading="lazy" alt="客户图片"></a>`;}).join("");
+    const userBubble=(r.q||imgs.length)?`<div class="msg user"><div class="bubble">${imgHtml}${esc(r.q||"")}</div>${meta}${labelBarHtml(r)}</div>`:"";
+    const topoHtml=r.topo?(function(){const tu="/api/qa-topo?f="+encodeURIComponent(r.topo);return '<a href="'+tu+'" target="_blank" rel="noopener"><img class="qatopo" src="'+tu+'" loading="lazy" alt="配单接收拓扑图"></a><span class="topoCap">配单接收拓扑图（点击看大图）</span>';})():"";
+    return userBubble+`<div class="msg bot"><div class="bubble">${md(r.a||"")}${escBar}${topoHtml}</div></div>`;
+  }).join("");
+  flow.scrollTop=flow.scrollHeight;
+}
+
+/* ---- 会话内关键词查找（高亮 + 上下跳）---- */
+function doFind(move){
+  const inp=document.getElementById("chatFind"),cnt=document.getElementById("chatFindCount"),flow=document.getElementById("flow");
+  const q=inp.value.trim();
+  renderFlow(group(filtered())); // 先得到干净 DOM
+  if(!q){cnt.textContent="";return;}
+  const escRe=q.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const walker=document.createTreeWalker(flow,NodeFilter.SHOW_TEXT,null);
+  const nodes=[];let n;while((n=walker.nextNode()))nodes.push(n);
+  const hits=[];
+  nodes.forEach(tn=>{
+    const text=tn.nodeValue; if(!text)return;
+    const re=new RegExp(escRe,"gi"); let m;const parts=[];let last=0,hit=false;
+    while((m=re.exec(text))){
+      hit=true;
+      if(m.index>last)parts.push(document.createTextNode(text.slice(last,m.index)));
+      const mk=document.createElement("mark");mk.className="xhj-hit";mk.textContent=m[0];
+      parts.push(mk);hits.push(mk);
+      last=m.index+m[0].length;
+      if(m[0].length===0)re.lastIndex++;
+    }
+    if(hit){
+      if(last<text.length)parts.push(document.createTextNode(text.slice(last)));
+      const frag=document.createDocumentFragment();parts.forEach(p=>frag.appendChild(p));
+      tn.parentNode.replaceChild(frag,tn);
+    }
+  });
+  if(!hits.length){cnt.textContent="0/0";return;}
+  if(move===0||(window.__findIdx==null)||window.__findQ!==q){window.__findIdx=0;window.__findQ=q;}
+  else if(move===1)window.__findIdx=(window.__findIdx+1)%hits.length;
+  else if(move===-1)window.__findIdx=(window.__findIdx-1+hits.length)%hits.length;
+  hits.forEach((h,i)=>h.classList.toggle("active",i===window.__findIdx));
+  cnt.textContent=(window.__findIdx+1)+"/"+hits.length;
+  hits[window.__findIdx].scrollIntoView({block:"center",behavior:"smooth"});
+}
+
+/* ---- 导出当前筛选为 CSV（Excel 可直接打开，带 BOM）---- */
+function csvCell(v){const s=String(v==null?"":v);return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
+function fileStamp(){const d=new Date(),p=x=>String(x).padStart(2,"0");return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes());}
+function exportCsv(){
+  const recs=filtered();
+  if(!recs.length){alert("当前筛选下没有可导出的记录");return;}
+  const head=["时间","渠道","会话名称","客户问题","按钮","AI回答","意图","状态","模型","耗时ms","转人工","应答异常"];
+  const lines=[head];
+  recs.forEach(r=>lines.push([
+    r.ts||"",SRC_NAME[r.source]||r.source||"",nameOf(r.sid,r.source),r.q||"",btnLabel(r.q)||"",r.a||"",
+    ROUTE_NAME[r.route]||r.route||"",STATUS_NAME[r.status]||r.status||"",modelName(r.model),
+    r.ms?String(r.ms).replace(/[^\d]/g,""):"",r.escalate||"",r.ok===false?"是":""
+  ]));
+  const csv=lines.map(c=>c.map(csvCell).join(",")).join("\r\n");
+  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download="xhj-qa-"+fileStamp()+".csv";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+function refresh(){
+  const recs=filtered();
+  renderStats(recs);
+  const groups=group(recs);
+  if(!curSid||!groups.some(g=>g.sid===curSid))curSid=groups.length?groups[0].sid:null;
+  renderSessions(groups);
+  renderFlow(groups);
+}
+
+async function load(){
+  try{
+    const res=await fetch("/api/logs",{cache:"no-store"});
+    const data=await res.json();
+    ALL=data.records||[];
+    if(editingNoteKey)return; // 正在改备注名时不重建 DOM，避免输入被打断
+    refresh();
+  }catch(e){document.getElementById("stats").innerHTML='<div class="stat bad"><div class="n">!</div><div class="l">读取失败 '+esc(e.message)+'</div></div>';}
+}
+
+document.getElementById("srcSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  document.querySelectorAll("#srcSeg button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");filterSrc=b.dataset.src;refresh();
+});
+document.getElementById("search").addEventListener("input",e=>{kw=e.target.value;refresh();});
+document.getElementById("refreshBtn").onclick=load;
+document.getElementById("exportBtn").onclick=exportCsv;
+document.getElementById("autoRefresh").onchange=e=>{
+  clearInterval(timer);
+  if(e.target.checked)timer=setInterval(load,30000);
+};
+const cf=document.getElementById("chatFind");
+cf.addEventListener("input",()=>doFind(0));
+cf.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();doFind(e.shiftKey?-1:1);}});
+document.getElementById("findPrev").onclick=()=>doFind(-1);
+document.getElementById("findNext").onclick=()=>doFind(1);
+/* 标注按钮事件委托（DOM 每次重渲染都有效） */
+document.getElementById("flow").addEventListener("click",function(e){
+  const b=e.target.closest("[data-labelbtn]");if(!b)return;
+  e.preventDefault();e.stopPropagation();
+  const key=decodeURIComponent(b.dataset.key||"");
+  const r=ALL.find(x=>recKey(x)===key);if(!r)return;
+  const payload={key,sid:r.sid,source:r.source,qts:r.ts,q:r.q,route:r.route,model:r.model,status:r.status,escalate:r.escalate,label:b.dataset.labelbtn};
+  b.disabled=true;
+  apiPost("/api/nlu-label",payload).then(d=>{
+    b.disabled=false;
+    if(d&&d.ok){
+      LABELS=d.labels||LABELS;
+      const bar=document.querySelector('[data-labelbar="'+encodeURIComponent(key)+'"]');
+      if(bar){const cur=(LABELS[key]||{}).label||"";bar.querySelectorAll("[data-labelbtn]").forEach(x=>x.classList.toggle("sel-"+x.dataset.labelbtn,x.dataset.labelbtn===cur));}
+    }
+  });
+});
+loadState().then(loadLabels).then(load);
+timer=setInterval(load,30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 0,
+  "description": "",
+  "terminology": {
+    "receiverSeriesField": "",
+    "receiverModelTail": "",
+    "asyncSuffix": ""
+  },
+  "firmwareFamilies": {
+    "63": {
+      "label": "",
+      "receiverSeriesField": "",
+      "receiverSeriesFieldMode": ""
+    },
+    "65": {
+      "label": "",
+      "receiverSeriesField": "",
+      "receiverSeriesFieldMode": ""
+    },
+    "97": {
+      "label": "",
+      "receiverSeriesField": "",
+      "receiverSeriesFieldMode": "",
+      "requiresExactFile": false
+    },
+    "99": {
+      "label": "",
+      "receiverSeriesField": "",
+      "receiverSeriesFieldMode": ""
+    },
+    "common": {
+      "label": "",
+      "receiverSeriesField": "",
+      "receiverSeriesFieldMode": "",
+      "note": ""
+    }
+  },
+  "dedicatedMarkers": [],
+  "modelDisplayNames": {
+    "C16": "",
+    "C36": "",
+    "D16": "",
+    "D36": "",
+    "C08L": "",
+    "C16L": "",
+    "C16H": ""
+  },
+  "asyncFamilies": [],
+  "safety": {
+    "requireExplicitFirmwareType": false,
+    "requireExactDeviceModelForSuffix": false,
+    "requireVariantWhenModelHasMultipleTails": false,
+    "neverInferFirmwareFromChipDigits": false,
+    "neverTreatSharedTailAsInterchangeable": false,
+    "neverGenerateFirmwareFileName": false
+  }
+}

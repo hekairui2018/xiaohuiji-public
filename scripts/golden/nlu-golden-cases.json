@@ -1,0 +1,66 @@
+{
+  "_meta": {
+    "description": "小灰机路由 NLU golden 用例。layer=det：禁用模型，确定性层必须命中（零成本，CI/收工必跑）；layer=llm：开启 DeepSeek 的端到端语义用例（可选 --llm，受模型波动影响，默认不阻塞）。",
+    "fields": "id / q 客户原话 / intent 期望意图 / boundary 期望边界 kind(normal=正常业务) / layer / note",
+    "intents": "presales | aftersales | ordering | software | unknown",
+    "boundary_kinds": "normal | competitor-product | bidding-doc | non-led | multi-screen | oversized | irregular-shape"
+  },
+  "cases": [
+    { "id": "b-comp-01", "q": "诺瓦的接收卡和卡莱特的比怎么样", "intent": "presales", "boundary": "competitor-product", "layer": "det", "note": "友商控制品牌→前置转人工" },
+    { "id": "b-comp-02", "q": "你们有没有诺瓦TB6芯片的替代", "intent": "presales", "boundary": "competitor-product", "layer": "det" },
+    { "id": "b-comp-03", "q": "卡莱特的播放盒多少钱", "intent": "presales", "boundary": "competitor-product", "layer": "det" },
+    { "id": "b-comp-04", "q": "仰邦的控制卡有吗", "intent": "presales", "boundary": "competitor-product", "layer": "det" },
+    { "id": "b-comp-05", "q": "灵信的方案给一份", "intent": "presales", "boundary": "competitor-product", "layer": "det" },
+    { "id": "b-comp-06", "q": "Novastar receiver card price", "intent": "presales", "boundary": "competitor-product", "layer": "det", "note": "英文友商同样拦截" },
+
+    { "id": "b-bid-01", "q": "帮我做个控标参数 方案PPT", "intent": "presales", "boundary": "bidding-doc", "layer": "det" },
+    { "id": "b-bid-02", "q": "这个项目要龙芯飞腾国产化应答和偏离表", "intent": "presales", "boundary": "bidding-doc", "layer": "det" },
+    { "id": "b-bid-03", "q": "投标文件里的技术应答怎么写", "intent": "presales", "boundary": "bidding-doc", "layer": "det" },
+    { "id": "b-bid-04", "q": "麒麟系统信创招标参数", "intent": "presales", "boundary": "bidding-doc", "layer": "det" },
+
+    { "id": "b-non-01", "q": "H4K拼接屏怎么配", "intent": "presales", "boundary": "non-led", "layer": "det", "note": "H4K 非 LED 控制系统" },
+    { "id": "b-non-02", "q": "液晶拼接墙55寸的方案", "intent": "presales", "boundary": "non-led", "layer": "det" },
+    { "id": "b-non-03", "q": "DLP拼接大屏多少钱", "intent": "presales", "boundary": "non-led", "layer": "det" },
+    { "id": "b-non-04", "q": "会议室投影仪怎么选", "intent": "presales", "boundary": "non-led", "layer": "det" },
+
+    { "id": "b-ok-01", "q": "灰度C16L和诺瓦哪个好", "intent": "presales", "boundary": "normal", "layer": "det", "note": "含灰度实体，绝不误判友商" },
+    { "id": "b-ok-02", "q": "VP2430技术参数是多少", "intent": "presales", "boundary": "normal", "layer": "det", "note": "普通技术参数≠标书" },
+    { "id": "b-ok-03", "q": "LCD Player软件下载", "intent": "software", "boundary": "normal", "layer": "det", "note": "灰度 LCD 软件≠非 LED" },
+    { "id": "b-ok-04", "q": "VP2430检测报告有吗", "intent": "presales", "boundary": "normal", "layer": "det", "note": "检测报告≠招投标" },
+    { "id": "b-ok-05", "q": "强力巨彩P2.5模组配你们的卡", "intent": "unknown", "boundary": "normal", "layer": "det", "note": "屏厂模组不算友商；确定性层不抢配单，意图交模型层见 llm-01" },
+    { "id": "i-pre-01", "q": "VP620有接线图吗", "intent": "presales", "boundary": "normal", "layer": "det", "note": "索取接线图资料、无屏体规格→售前，不被配单出图误带" },
+    { "id": "i-pre-02", "q": "给个R716的接线图", "intent": "presales", "boundary": "normal", "layer": "det", "note": "无屏体规格单纯要设备接线资料→售前" },
+
+    { "id": "i-ord-01", "q": "P2.5 长15米高0.4米 多少张卡", "intent": "ordering", "boundary": "normal", "layer": "det", "note": "长条配单仍进配单，不前置转人工" },
+    { "id": "i-ord-02", "q": "1920×1080 P3 同步 怎么配", "intent": "ordering", "boundary": "normal", "layer": "det" },
+    { "id": "i-ord-03", "q": "我有两块屏 一块P3一块P4 分别配", "intent": "ordering", "boundary": "multi-screen", "layer": "det", "note": "多屏进配单 specialist 逐块引导" },
+    { "id": "i-ord-04", "q": "宴会厅三块屏怎么配", "intent": "ordering", "boundary": "multi-screen", "layer": "det" },
+    { "id": "i-ord-05", "q": "弧形屏怎么配", "intent": "ordering", "boundary": "irregular-shape", "layer": "det" },
+    { "id": "i-ord-06", "q": "L形折角屏配单", "intent": "ordering", "boundary": "irregular-shape", "layer": "det" },
+    { "id": "i-ord-07", "q": "宽14高15，14张716卡，620帮忙画个接线图", "intent": "ordering", "boundary": "normal", "layer": "det", "note": "给屏体规格+卡数+要画接线图=配单交付，不被接线/线缆规则抢售前" },
+    { "id": "i-ord-08", "q": "P3 10宽8高 帮我出个拓扑图", "intent": "ordering", "boundary": "normal", "layer": "det", "note": "模组排列+要拓扑图进配单" },
+    { "id": "i-ord-09", "q": "宽6米高3米的屏画个接线图", "intent": "ordering", "boundary": "normal", "layer": "det", "note": "个位米数+画接线图，不被线缆距离规则误截" },
+
+    { "id": "i-af-01", "q": "C16L花屏怎么处理", "intent": "aftersales", "boundary": "normal", "layer": "det" },
+    { "id": "i-af-02", "q": "R712黑屏不亮", "intent": "aftersales", "boundary": "normal", "layer": "det" },
+    { "id": "i-af-03", "q": "找不到设备 搜不到接收卡", "intent": "aftersales", "boundary": "normal", "layer": "det" },
+    { "id": "i-af-04", "q": "网口CRC错误包一直涨", "intent": "aftersales", "boundary": "normal", "layer": "det" },
+
+    { "id": "i-sw-01", "q": "屏掌控安卓版下载", "intent": "software", "boundary": "normal", "layer": "det" },
+    { "id": "i-sw-02", "q": "复位的教学视频", "intent": "software", "boundary": "normal", "layer": "det" },
+    { "id": "i-sw-03", "q": "HDPlayer软件下载", "intent": "software", "boundary": "normal", "layer": "det" },
+    { "id": "i-sw-04", "q": "HDSet安装包在哪下", "intent": "software", "boundary": "normal", "layer": "det" },
+    { "id": "i-sw-05", "q": "R716怎么接线", "intent": "software", "boundary": "normal", "layer": "det", "note": "设备接线操作→操作教学视频，不进配单（锁定既有行为）" },
+
+    { "id": "i-unk-01", "q": "asdfghqwer乱码", "intent": "unknown", "boundary": "normal", "layer": "det" },
+    { "id": "i-unk-02", "q": "你好", "intent": "unknown", "boundary": "normal", "layer": "det" },
+    { "id": "i-unk-03", "q": "256×128", "intent": "unknown", "boundary": "normal", "layer": "det", "note": "裸模组分辨率残句，无配单锚点→追问而非乱配" },
+
+    { "id": "tag-01", "q": "[ORDER_ADD_MODULE] 再加一组模组", "intent": "ordering", "boundary": "normal", "layer": "det", "note": "内部按钮 tag 最高优先" },
+    { "id": "tag-02", "q": "[RX_STILL] 先静置观察", "intent": "aftersales", "boundary": "normal", "layer": "det" },
+
+    { "id": "llm-01", "q": "强力巨彩P2.5模组配你们的卡", "intent": "ordering", "boundary": "normal", "layer": "llm", "note": "模型层应识别配单意图（确定性层保守不抢）" },
+    { "id": "llm-02", "q": "我想给门店门头做个滚动走字的屏，帮我看看用什么控制", "intent": "presales", "boundary": "normal", "layer": "llm", "note": "无任何尺寸规格的泛选型咨询→售前推荐/引导给规格；给了屏体规格才算带载才进ordering" },
+    { "id": "llm-03", "q": "客户发来一句：我们展厅想升级，现在的屏有时候闪，想顺便换套控制，预算好说", "intent": "aftersales", "boundary": "normal", "layer": "llm", "note": "故障+更换，模型应抓住闪=售后切入口" }
+  ]
+}

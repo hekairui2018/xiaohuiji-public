@@ -1,0 +1,51 @@
+node_modules/
+release-info.json
+*.log
+.env
+tmp/
+# 阿里云OSS密钥配置与上传失败清单，禁止提交
+scripts/.oss-config.json
+scripts/oss-upload-failures.json
+# 各类本地备份文件不入库
+*.bak
+*.bak-*
+
+# ===== 大文件 / 二进制 / 生成产物：一律不入库（走 OSS / 云盘，见 docs/01_当前状态与交接-开工收工读.md）=====
+# 规格书源档约 0.8GB，已全部上传阿里云 OSS，线上默认走 OSS，不进 git
+frontend/official-files/
+# 生成产物（双语视频等成品），归档在 OSS/云盘
+output/
+# 运行时客户问答数据（日志/截图/拓扑），属运营数据、随本机引擎累积，不随代码库走
+data/qa-log/
+data/qa-images/
+data/qa-topo/
+# 视频 / 固件 / 安装包 / 压缩包 / 浏览器缓存与本地数据库，均非源码
+*.mp4
+*.mov
+*.mkv
+*.bin
+*.exe
+*.msi
+*.zip
+*.rar
+*.7z
+*.tgz
+*.gz
+*.ftz
+*.ort
+*.dll
+*.dylib
+*.so
+*.db
+*.db-wal
+*.db-shm
+*.bdic
+*.pma
+*.map
+data/ssm-cache/
+
+# 企微桥运行时拉取的语料，随本机引擎累积、不随代码库走（换机各自保留本地，pull 前先备份）
+wecom-bridge/data/records.jsonl
+
+# HD固件升级助手运行日志公网回传落盘（运营数据，随本机累积，不入库）
+data/huidulogs/

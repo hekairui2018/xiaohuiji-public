@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "",
+  "generatedAt": "",
+  "specialist": "",
+  "scope": "",
+  "source": "",
+  "count": 0,
+  "categoryStats": {
+    "波纹摩尔纹": 0,
+    "鬼影拖影": 0,
+    "横竖线条": 0,
+    "花屏乱码": 0,
+    "偏色缺色": 0,
+    "闪烁抖动": 0,
+    "显示不全异常": 0
+  },
+  "qualityStats": {
+    "A": 0,
+    "B": 0,
+    "C": 0,
+    "D": 0
+  },
+  "cases": []
+}

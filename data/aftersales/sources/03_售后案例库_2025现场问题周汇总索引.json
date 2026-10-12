@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "",
+  "generatedAt": "",
+  "title": "",
+  "purpose": "",
+  "sourcePolicy": "",
+  "source": {
+    "fileName": "",
+    "sourcePathType": "",
+    "companyMicrodiskPath": "",
+    "sizeBytes": 0,
+    "sha256": ""
+  },
+  "workbook": {
+    "sheetCount": 0,
+    "sheets": [],
+    "imageReferenceCount": 0,
+    "uniqueReferencedImageCount": 0,
+    "unreferencedImageCount": 0,
+    "totalMediaCount": 0
+  },
+  "count": 0,
+  "referenceCount": 0,
+  "counts": {
+    "byCategory": {
+      "单双色": 0,
+      "异步全彩": 0,
+      "视频处理": 0,
+      "云平台": 0,
+      "LCD": 0,
+      "显示效果&接收卡&HDSet": 0,
+      "APP": 0
+    },
+    "byStatus": {
+      "closed_loop": 0,
+      "tracking": 0,
+      "reference": 0
+    },
+    "byEvidenceUse": {
+      "usable_case": 0,
+      "tracking_only": 0,
+      "reference_only": 0
+    },
+    "byEvidenceRole": {
+      "field_fault_screening": 0,
+      "rd_followup": 0,
+      "rd_bug_lifecycle": 0
+    },
+    "rdBugByLifecycle": {
+      "tracking": 0,
+      "closed_loop": 0,
+      "closed_insufficient_solution": 0
+    },
+    "duplicatesLinked": 0
+  },
+  "cases": [],
+  "entries": [],
+  "imageManifest": [],
+  "unreferencedMedia": []
+}

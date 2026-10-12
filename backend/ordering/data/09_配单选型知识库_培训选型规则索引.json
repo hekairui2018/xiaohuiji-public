@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "",
+  "updatedAt": "",
+  "purpose": "",
+  "sources": [],
+  "selectionRules": {
+    "singleColorWeight": 0,
+    "dualColorWeight": 0,
+    "directFullColorWeight": 0,
+    "receiverQualityWidthPx": {
+      "indoorCommon": 0,
+      "outdoorCommon": 0,
+      "module160x80Or80x40": 0,
+      "module40x20": 0
+    },
+    "receiverQualityRule": "",
+    "pitchAliasRule": "",
+    "singleDualArchitectureRule": "",
+    "hubRule": "",
+    "communicationRule": "",
+    "fullColorRule": "",
+    "splicerRule": ""
+  },
+  "directControllers": [],
+  "splicer": {
+    "model": "",
+    "defaultChassis": "",
+    "outputPortsPerGroup": 0,
+    "maxPointsPerGroup": 0,
+    "maxWPerGroup": 0,
+    "maxHPerGroup": 0,
+    "maxPointsPerPort": 0,
+    "inputBoardRules": {
+      "4K": {
+        "name": "",
+        "signalsPerBoard": 0
+      },
+      "2K": {
+        "name": "",
+        "signalsPerBoard": 0
+      },
+      "camera": {
+        "name": "",
+        "signalsPerBoard": 0
+      }
+    },
+    "outputBoardRule": {
+      "name": "",
+      "portsPerBoard": 0
+    },
+    "controlBoard": "",
+    "triggers": [],
+    "sourcePages": []
+  }
+}

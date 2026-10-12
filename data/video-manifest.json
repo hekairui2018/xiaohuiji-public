@@ -1,0 +1,13 @@
+{
+  "bucket": "",
+  "region": "",
+  "prefix": "",
+  "updatedAt": "",
+  "counts": {
+    "uploaded": 0,
+    "skipped": 0,
+    "failed": 0,
+    "pendingBig": 0
+  },
+  "items": []
+}

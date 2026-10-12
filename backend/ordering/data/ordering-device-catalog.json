@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "",
+  "updatedAt": "",
+  "policy": {
+    "unknownValue": "",
+    "featureStates": [],
+    "lifecycleStates": [],
+    "selectionPolicies": [],
+    "outputPortsMeaning": "",
+    "conflictHandling": "",
+    "absenceHandling": ""
+  },
+  "sources": [],
+  "devices": []
+}

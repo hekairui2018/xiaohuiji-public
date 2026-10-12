@@ -1,0 +1,191 @@
+{
+  "doc": "",
+  "version": "",
+  "sources": [],
+  "principle": [],
+  "detect": {
+    "scope": "",
+    "strip_word_lex": "",
+    "geometry": "",
+    "exclude": ""
+  },
+  "indoor_outdoor": "",
+  "receivers": {
+    "R712": {
+      "iface": "",
+      "recW": 0,
+      "recH": 0,
+      "maxPoints": 0,
+      "note": ""
+    },
+    "R708": {
+      "iface": "",
+      "recW": 0,
+      "recH": 0,
+      "note": ""
+    }
+  },
+  "controllers": {
+    "C16C": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidths": [],
+      "foldCanvas": "",
+      "iface": ""
+    },
+    "C36C": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidths": [],
+      "foldCanvas": "",
+      "iface": ""
+    },
+    "C16L": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidth": 0,
+      "foldWidthCustom": 0,
+      "foldCanvas": "",
+      "iface": "",
+      "threshold": "",
+      "minVer": ""
+    },
+    "A3L": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidth": 0,
+      "perPortPoints": 0,
+      "ports": 0
+    },
+    "A4L": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidth": 0,
+      "perPortPoints": 0,
+      "ports": 0
+    },
+    "A5L": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidth": 0,
+      "perPortPoints": 0,
+      "ports": 0
+    },
+    "A6L": {
+      "family": "",
+      "maxPoints": 0,
+      "physW": 0,
+      "physH": 0,
+      "foldWidth": 0,
+      "perPortPoints": 0,
+      "ports": 0,
+      "unlock": ""
+    },
+    "H6": {
+      "family": "",
+      "totalPoints": 0,
+      "ports": 0,
+      "minWidth": 0,
+      "canvasPoint": 0,
+      "maxWidth": 0,
+      "note": ""
+    },
+    "A7": {
+      "family": "",
+      "totalPoints": 0,
+      "ports": 0,
+      "minWidth": 0,
+      "canvasPoint": 0,
+      "maxWidth": 0,
+      "note": ""
+    },
+    "H8": {
+      "family": "",
+      "totalPoints": 0,
+      "ports": 0,
+      "minWidth": 0,
+      "canvasPoint": 0,
+      "maxWidth": 0,
+      "note": ""
+    },
+    "B8L": {
+      "family": "",
+      "totalPoints": 0,
+      "ports": 0,
+      "minWidth": 0,
+      "canvasPoint": 0,
+      "maxWidth": 0,
+      "note": ""
+    },
+    "A8": {
+      "family": "",
+      "totalPoints": 0,
+      "ports": 0,
+      "minWidth": 0,
+      "canvasPoint": 0,
+      "maxWidth": 0,
+      "note": ""
+    },
+    "_H4K_excluded": {
+      "note": ""
+    },
+    "VPX20_sync": {
+      "family": "",
+      "foldWidth": 0,
+      "perPortPoints": 0,
+      "controllers": {
+        "VP210": 0,
+        "VP410": 0,
+        "VP620": 0,
+        "VP820": 0,
+        "VP1620": 0
+      },
+      "note": ""
+    }
+  },
+  "cx6_fold_rule": {
+    "align": "",
+    "folds": "",
+    "card_strip_width": ""
+  },
+  "a_series_card_rule": {
+    "maxBoardsPerPort": "",
+    "portCount": "",
+    "boardsPerPort": "",
+    "folds": "",
+    "outputs_n": "",
+    "cards": ""
+  },
+  "a3l_single_rule": "",
+  "c16l_card_rule": "",
+  "playbox_sync_card_rule": "",
+  "playbox_scene": {
+    "default": "",
+    "scenes": {
+      "official": "",
+      "generic": "",
+      "meeting": "",
+      "poster": ""
+    },
+    "ui": "",
+    "explicit_oversized": "",
+    "wecom": ""
+  },
+  "cable": {
+    "ethernet": "",
+    "fiber": ""
+  },
+  "golden_cases": []
+}
