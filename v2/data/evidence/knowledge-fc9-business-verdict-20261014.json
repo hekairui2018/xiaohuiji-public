@@ -1,0 +1,104 @@
+{
+  "date": "",
+  "commit": "",
+  "setReference": {
+    "file": "",
+    "sha256": ""
+  },
+  "engineeringSetReference": {
+    "file": "",
+    "sha256": ""
+  },
+  "baseline": "",
+  "candidate": "",
+  "before": {
+    "products": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "aftersales": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "ordering": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    }
+  },
+  "after": {
+    "products": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "aftersales": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "ordering": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    }
+  },
+  "improvedSamples": [],
+  "regressedSamples": [],
+  "invalidFixtureExpectations": [],
+  "unchangedOutput": 0,
+  "changedReplies": [],
+  "rows": [],
+  "activeUnchanged": false,
+  "scope": "",
+  "runnerSHA256": "",
+  "fullRegression": {
+    "tests": 0,
+    "passed": 0,
+    "receipt": ""
+  },
+  "businessFailures": [],
+  "independentFixtureErrors": [],
+  "originalIntegrity": [],
+  "candidateChecksumUnchanged": false,
+  "completeSourceRecordsWithoutChecks": 0,
+  "nextKnowledgeGaps": [],
+  "activationRecommendation": {
+    "defaultDevelopmentActive": false,
+    "explicitCandidateShadowUse": false,
+    "reasons": []
+  },
+  "activationGates": []
+}

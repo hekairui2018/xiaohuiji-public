@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "2.0",
+  "modelId": "",
+  "verificationStatus": "",
+  "documents": [],
+  "verifiedClaims": {
+    "generalConventional": [],
+    "generalPWM": [],
+    "scanRange": "",
+    "specialLoadingPitches": []
+  },
+  "unknownConditions": [],
+  "policy": ""
+}

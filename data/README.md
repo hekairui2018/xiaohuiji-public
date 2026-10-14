@@ -1,3 +1,3 @@
-# Data structure
+# Internal material placeholder
 
-Business datasets and runtime records are represented by empty structure templates. Public source code is unchanged. Supply your own authorized product, firmware, video, software and aftersales data before exercising data-dependent functionality.
+Internal documents, original product evidence, business cases and deployment records are not published. Obtain your own authorized data; no production files or functions were removed from the original project.

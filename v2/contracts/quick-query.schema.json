@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["modelId"],
+  "additionalProperties": false,
+  "properties": {"modelId": {"type": "string", "minLength": 1, "maxLength": 128}, "revisionId": {"type": ["string", "null"]}, "documentVersion": {"type": ["string", "null"], "maxLength": 32}}
+}

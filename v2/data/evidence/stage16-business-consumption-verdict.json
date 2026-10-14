@@ -1,0 +1,97 @@
+{
+  "date": "",
+  "candidate": "",
+  "scope": "",
+  "setReference": {
+    "file": "",
+    "sha256": ""
+  },
+  "engineeringSetReference": {
+    "file": "",
+    "sha256": ""
+  },
+  "before": {
+    "products": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "aftersales": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "ordering": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    }
+  },
+  "after": {
+    "products": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "aftersales": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    },
+    "ordering": {
+      "samples": 0,
+      "failedSamples": 0,
+      "pendingSamples": 0,
+      "checks": {
+        "passed": 0,
+        "failed": 0,
+        "pending": 0
+      }
+    }
+  },
+  "improved": [],
+  "regressed": [],
+  "changedReplies": [],
+  "orderingOutputsUnchanged": false,
+  "rows": [],
+  "invalidFixtureExpectations": [],
+  "fullRegression": {
+    "tests": 0,
+    "passed": 0,
+    "originalTestsRetained": 0,
+    "receipt": ""
+  },
+  "sources": [],
+  "candidateUnchanged": false,
+  "activeUnchanged": false,
+  "receipts": {
+    "baseline": "",
+    "current": ""
+  },
+  "limits": []
+}

@@ -1,1 +1,1 @@
-// Third-party internal reference material omitted from this public code-review snapshot.
+// Third-party reference omitted. Supply your own authorized source.

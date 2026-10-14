@@ -1,3 +1,3 @@
 # Internal material placeholder
 
-The original internal material is not published in this code-review repository. Obtain an authorized copy separately to restore this dataset or document. The production project is unchanged.
+Internal documents, original product evidence, business cases and deployment records are not published. Obtain your own authorized data; no production files or functions were removed from the original project.

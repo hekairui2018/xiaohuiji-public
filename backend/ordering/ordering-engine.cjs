@@ -171,7 +171,8 @@ function loadVerifiedModulePresets() {
         sourceLine: 0,
         sourceFile: String(profile.evidence?.[0]?.name || ""),
         sourcePath: "公司培训资料",
-        evidenceStatus: profile.status
+        evidenceStatus: profile.status,
+        verifiedMatch: { ...match }
       };
     }).filter((row) => row.pitch && row.w && row.h && row.card);
   } catch {
@@ -582,7 +583,7 @@ function parseRequest(message) {
     /(?:模组|单元板)(?:(?!整屏|屏体|大屏|显示屏|屏幕)[^\n]){0,48}?(?:分辨率|像素|点数)[^\n\d]{0,8}(\d{2,4})\s*[xX×*]\s*(\d{2,4})/i,
     /(?:模组|单元板)[^\n\d]{0,16}(?:分辨率|像素|点数)[^\n\d]{0,8}(\d{2,4})\s*[xX×*]\s*(\d{2,4})/i,
     /(?:分辨率|像素|点数)[^\n\d]{0,8}(\d{2,4})\s*[xX×*]\s*(\d{2,4})[^\n]{0,12}(?:模组|单元板)/i,
-    /(?:单色|双色|全彩)?[^\n\d]{0,8}(\d{2,4})\s*[xX×*]\s*(\d{2,4})\s*[,;]?\s*(?=HUB)/i
+    /(?:单色|双色|全彩)?[^\n\d]{0,8}(\d{2,4})\s*[xX×*]\s*(\d{2,4})\s*[,;]?\s*(?:\d{1,3}\s*(?:S|扫)\s*[,;]?\s*)?(?=HUB)/i
   ]);
   if (!statedModulePixels && bareModulePair && !bareModuleCount) statedModulePixels = bareModulePair;
   let moduleMm = numberPair(text, [
@@ -1384,6 +1385,20 @@ function validateInputConsistency(input) {
 
 function choosePreset(input) {
   let rows = MODULE_PRESETS.filter((row) => !input.pitch || samePitchFamily(row.pitch, input.pitch));
+  input.verifiedProfileGaps = [];
+  rows = rows.filter(row => {
+    if (!row.verifiedMatch) return true;
+    const m = row.verifiedMatch, gaps = [];
+    if (!input.pitch || !samePitchFamily(row.pitch, input.pitch)) gaps.push("点间距");
+    if (!input.modulePixels || input.modulePixels[0] !== m.modulePixels[0] || input.modulePixels[1] !== m.modulePixels[1]) gaps.push("单块模组分辨率");
+    if (m.scan && input.scan !== String(m.scan).toUpperCase()) gaps.push(`扫描方式（档案为${m.scan}，当前${input.scan || "未提供"}）`);
+    if (m.interface && input.iface !== String(m.interface).toUpperCase().replace(/^HUB75[BE]$/, "HUB75")) gaps.push(`接口（档案为${m.interface}）`);
+    if (m.color === "1R1G1B" && (input.colorMode !== "full" || input.colorModeAssumed)) gaps.push("全彩颜色类型");
+    if (m.environment === "indoor" && !input.indoor) gaps.push("室内使用环境");
+    if (m.environment === "outdoor" && !input.outdoor) gaps.push("户外使用环境");
+    if (gaps.length) input.verifiedProfileGaps.push({ key: row.key, pixels: [row.w, row.h], gaps });
+    return gaps.length === 0;
+  });
   if (input.presetKey) rows = rows.filter((row) => row.key === input.presetKey);
   if (input.iface) rows = rows.filter((row) => row.iface === input.iface);
   if (input.outdoor) { const outdoorRows = rows.filter((row) => /户外/.test(row.label)); if (outdoorRows.length) rows = outdoorRows; }
@@ -2225,7 +2240,13 @@ function calculateCore(input) {
     return { ok: false, input, missing: ["LED点间距（如P1.25、P2、P2.5）"] };
   }
   const matches = input.cabinetCount ? [] : choosePreset(input);
+  if (!input.pitch && !input.cabinetCount && (input.verifiedProfileGaps || []).some(p =>
+    input.modulePixels && p.pixels[0] === input.modulePixels[0] && p.pixels[1] === input.modulePixels[1] && p.gaps.includes("点间距"))) {
+    return { ok: false, input, missing: ["请补充点间距；相同像素模组可能属于不同带载档案"] };
+  }
   if (!matches.length && !input.cabinetCount) {
+    const verified = (input.verifiedProfileGaps || []).filter(p => input.modulePixels && p.pixels[0] === input.modulePixels[0] && p.pixels[1] === input.modulePixels[1]);
+    if (verified.length) return { ok: false, input, missing: [...new Set(verified.flatMap(p => p.gaps))].map(s => `请核对已验证模组的${s}`) };
     const samePitch = MODULE_PRESETS.filter((row) => input.pitch && samePitchFamily(row.pitch, input.pitch));
     const availableSizes = [...new Set(samePitch.map((row) => `${row.w}×${row.h}`))];
     const detail = input.pitch && input.modulePixels && availableSizes.length ? `P${input.pitch} 我这边没对上这个分辨率的模组规格。请补充：单块模组像素是多少（如 128×64），或者告诉我点间距和模组尺寸，我重新配。` : "模组分辨率、接口或点间距与现有带载表不匹配";

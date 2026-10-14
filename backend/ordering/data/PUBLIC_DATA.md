@@ -1,3 +1,3 @@
-# Ordering data templates
+# Internal material placeholder
 
-Internal device and training datasets are not published. JSON keys and container shapes are retained with empty values. Restore authorized data to run data-dependent selection and SSM regression cases.
+Internal documents, original product evidence, business cases and deployment records are not published. Obtain your own authorized data; no production files or functions were removed from the original project.

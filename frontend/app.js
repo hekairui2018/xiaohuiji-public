@@ -54,7 +54,9 @@ let triagePath = null;
 let lastNumericOptions = null;
 // 从后端响应里提炼一段可被下一轮检索的纯文本（用于历史上下文）
 function assistantTextOf(data) {
-  if (data.status === "answer" && data.pyramid) {
+  if (data.status === "answer" && data.model === "v2-rules" && data.result && data.result.bom) {
+    bubble.appendChild(renderV2Ordering(data.result));
+  } else if (data.status === "answer" && data.pyramid) {
     const p = data.pyramid;
     return [p.conclusion, p.scene, ...(p.steps || []).map((s) => s.action), p.fallback].filter(Boolean).join(" ");
   }
@@ -298,6 +300,9 @@ function addAssistantMessage(data) {
     const _nearby = (data.presales.chipFirmware && data.presales.chipFirmware.nearby) || [];
     _nearby.forEach((o) => _numOpts.push({ label: o.chip, value: o.q || o.chip }));
   }
+  if (data.result && data.result.resources && data.result.resources.view) {
+    (data.result.resources.view.nearby || []).forEach(o => _numOpts.push({ label: o.chip, value: o.chip }));
+  }
   lastNumericOptions = _numOpts.length ? { options: _numOpts, at: Date.now() } : null;
 
   if (data.status === "answer" && data.pyramid) {
@@ -324,6 +329,15 @@ function addAssistantMessage(data) {
       });
       bubble.appendChild(opts);
     }
+  } else if (data.model === "v2-rules" && data.status === "answer" && data.result && data.result.resources) {
+    const resources = data.result.resources;
+    if (resources.kind === "software") bubble.appendChild(renderSoftware({ items: resources.items, isList: resources.items.length !== 1 }));
+    else if (resources.kind === "videos") bubble.appendChild(renderVideoAnswer(resources.items.map(v => ({ ...v, url: v.publicUrl }))));
+    else if (resources.kind === "chips" && resources.view) {
+      const card = document.createElement("div"); card.innerHTML = renderChipFirmwareCard(resources.view); bubble.appendChild(card);
+      if (resources.view.nearby.length) bubble.appendChild(renderNearbyChips(resources.view.nearby));
+    } else if (["firmware", "documents"].includes(resources.kind)) bubble.appendChild(renderV2ResourceLinks(resources));
+    else bubble.textContent = data.reply;
   } else if (data.model === "local-ordering" && data.status === "answer") {
     bubble.appendChild(renderOrdering(data));  // 配单：选型清单 + 拓扑图 + 明细折叠
     if (data.followUp && Array.isArray(data.followUp.options) && data.followUp.options.length) {
@@ -1732,7 +1746,7 @@ async function renderVideoCategory(qArg) {
     searchResults.innerHTML = `<div class="search-empty" style="color:#c00">操作视频加载失败：${escHtml(err.message)}</div>`;
     return;
   }
-  const groups = (vd && Array.isArray(vd.groups)) ? vd.groups : [];
+  const groups = vd && Array.isArray(vd.topicGroups) ? vd.topicGroups : (vd && Array.isArray(vd.groups)) ? vd.groups : [];
   const total = (vd && typeof vd.total === "number")
     ? vd.total
     : groups.reduce((s, g) => s + (g.videos ? g.videos.length : 0), 0);

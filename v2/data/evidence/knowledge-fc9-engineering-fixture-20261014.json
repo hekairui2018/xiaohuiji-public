@@ -1,0 +1,36 @@
+{
+  "id": "",
+  "expectedStatus": "",
+  "inputOrigin": "",
+  "input": {
+    "schemaVersion": "2.0",
+    "operation": "",
+    "controlMode": "",
+    "architecture": "",
+    "environment": "",
+    "module": {
+      "pitchMm": 0,
+      "pixelWidth": 0,
+      "pixelHeight": 0,
+      "scan": {
+        "numerator": 0,
+        "denominator": 0
+      },
+      "interface": "",
+      "color": {
+        "r": 0,
+        "g": 0,
+        "b": 0
+      }
+    },
+    "screen": {
+      "moduleColumns": 0,
+      "moduleRows": 0
+    },
+    "providedDevices": []
+  },
+  "gridReference": {
+    "file": "",
+    "sha256": ""
+  }
+}

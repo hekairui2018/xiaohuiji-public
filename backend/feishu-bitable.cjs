@@ -39,6 +39,7 @@ const EXPECTED_FIELDS = [
   { name: '发送型号', type: 1 },
   { name: 'FPGA版本', type: 1 },
   { name: '应用版本', type: 1 },
+  { name: '驱动芯片', type: 1 },
   { name: '接收卡型号', type: 1 },
   { name: '接收卡版本', type: 1 },
   { name: 'HDSet版本', type: 1 },
@@ -328,17 +329,20 @@ async function buildFields(rec) {
 
   const fields = {
     [primaryField]: key,
-    'APP版本': rec.app_version || '',
     '上报类型': reasonCn(rec.reason),          // 单选，写中文字符串（不存在的选项飞书会自动新增）
     '客户端时间': rec.client_ts || '',
     '上传次数': Number(rec.upload_count) || 1,
     '日志附件': [{ file_token: fileToken }] // 日志不再写全文，一律附件承载
   };
+  // Only explicit nonempty fields update these columns; older records must not erase manual values.
+  for (const [column, key] of [['驱动芯片', 'chips'], ['应用版本', 'device_app_version'], ['APP版本', 'app_version']]) {
+    const value = typeof rec[key] === 'string' ? rec[key].trim() : '';
+    if (value) fields[column] = value;
+  }
   // 现场台账拆分列：老版本没有独立字段时回退旧汇总字段（发送型号←产品型号；接收卡两列留空）
   if (rec.device_code) fields['发送型号'] = rec.device_code;
   else if (rec.product_models) fields['发送型号'] = rec.product_models;
   if (rec.fpga_version) fields['FPGA版本'] = rec.fpga_version;
-  if (rec.device_app_version) fields['应用版本'] = rec.device_app_version;
   if (rec.recv_models) fields['接收卡型号'] = rec.recv_models;
   if (rec.recv_versions) fields['接收卡版本'] = rec.recv_versions;
   if (rec.hdset_version) fields['HDSet版本'] = rec.hdset_version;

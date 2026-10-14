@@ -1,0 +1,52 @@
+{
+  "time": "",
+  "knowledgeVersion": "",
+  "knowledgeHashUnchanged": false,
+  "products": 0,
+  "cases": 0,
+  "files": 0,
+  "documentFiles": 0,
+  "uniqueDocumentHashes": 0,
+  "duplicateGroups": 0,
+  "classification": {
+    "公司工程经验候选（记录归属待核验）": 0,
+    "来源不明或证据不足": 0,
+    "原厂原始资料候选（内容标识待核验）": 0,
+    "二次整理资料（AI归属待核实）": 0,
+    "二次整理结构化资料（生成方式待核实）": 0
+  },
+  "coverage": {
+    "仅有索引（同名线索未证明同版本）": 0,
+    "未发现清单关联（或非知识文件）": 0,
+    "仅有索引": 0,
+    "未发现现有索引关联（待核实）": 0,
+    "已绑定哈希证据（完整解析仍待确认）": 0,
+    "提取失败": 0
+  },
+  "extractionFailures": 0,
+  "walkErrors": [],
+  "completeParsingConfirmed": 0,
+  "limitations": [],
+  "sameNameDifferentContents": 0,
+  "originalTrace": {
+    "productsWithOriginalCandidates": 0,
+    "casesWithOriginalCandidates": 0,
+    "checksWithLiteralOriginalSupport": 0,
+    "solutionsWithLiteralOriginalSupport": 0,
+    "note": ""
+  },
+  "longPathMetadataRecovered": 0,
+  "presentations": {
+    "files": 0,
+    "priorityCandidates": 0,
+    "note": ""
+  },
+  "sourceSnapshotPolicy": "",
+  "artifacts": [],
+  "sourceDataIntegrity": {
+    "checked": 0,
+    "unchanged": 0,
+    "businessDataImported": false,
+    "knowledgeSchemaChanged": false
+  }
+}

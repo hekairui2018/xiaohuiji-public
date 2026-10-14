@@ -1,13 +1,13 @@
 // 转发层：把一条文本 + 最近历史 POST 给本地核心 3789，拿回统一结果。
 // 核心响应已由 attachWeCom 附好 wecomMarkdown / wecomCard / wecomOptions，本层不做业务加工。
-export async function askCore({ coreUrl, source, coreTimeoutMs = 45000 }, message, history, sessionId = "", images = []) {
+export async function askCore({ coreUrl, coreSource, source = "wecom", coreTimeoutMs = 45000 }, message, history, sessionId = "", images = []) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), coreTimeoutMs);
   try {
     const resp = await fetch(coreUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, history, source, sessionId, images }),
+      body: JSON.stringify({ message, history, source: coreSource || source, sessionId, images }),
       signal: ctrl.signal,
     });
     if (!resp.ok) throw new Error(`core http ${resp.status}`);

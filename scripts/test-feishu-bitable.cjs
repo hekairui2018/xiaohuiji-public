@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../backend/feishu-bitable.cjs'), 'utf8');
 const names = ['APP版本', '上报类型', '日期', '客户端时间', '服务器接收时间',
   '上传次数', '日志附件', '入库时间', '发送型号', 'FPGA版本', '应用版本',
-  '接收卡型号', '接收卡版本', 'HDSet版本', 'HDPlayer版本'];
+  '接收卡型号', '接收卡版本', 'HDSet版本', 'HDPlayer版本', '驱动芯片'];
 const rec = { machine_id: 'test-machine', devKey: 'A3L-00-test', device_code: 'A3L-00-test',
   device_class: 'async', log_date: '2026-10-12', app_version: 'test-build', reason: 'done',
   content: 'test log', client_ts: '2026-10-12T10:30:00+08:00',
@@ -34,7 +34,7 @@ function fixture(options = {}) {
       }
       if (url.includes('/fields?')) {
         state.fieldsReads++;
-        const fields = names.map((field_name) => ({ field_name, type: 1, is_primary: false }));
+        const fields = names.filter(name=>!(options.missingFields||[]).includes(name)).map((field_name) => ({ field_name, type: 1, is_primary: false }));
         if (!options.noPrimary) fields.push({ field_name: state.primary, type: options.primaryType || 1, is_primary: true });
         if (options.paginate && !url.includes('page_token=')) return ok({ items: fields.slice(0, 5), has_more: true, page_token: 'next' });
         return ok({ items: options.paginate ? fields.slice(5) : fields, has_more: false });
@@ -178,4 +178,30 @@ test('并发首次同步只读取一次字段结构，避免重复补建', async
   assert.deepEqual(results, ['日期-时间', '日期-时间', '日期-时间']);
   assert.equal(state.fieldsReads, 1);
   assert.equal(state.fieldCreates.length, 0);
+});
+
+test('驱动芯片与各类版本分别使用真实独立字段，不从汇总或日志猜测', async () => {
+  const { fb,state }=fixture();
+  await fb.syncHuiduRecord({...rec,chips:'  ICND2153  ',app_version:'2.1.3+20261014-093000',device_app_version:'APP-DEVICE-1',fpga_version:'FPGA-2',hdset_version:'HDSet-3',hdplayer_version:'HDPlayer-4',version_info:'不得使用此汇总'});
+  const fields=state.rows[0].fields;
+  assert.equal(fields['驱动芯片'],'ICND2153');assert.equal(fields['应用版本'],'APP-DEVICE-1');assert.equal(fields['APP版本'],'2.1.3+20261014-093000');
+  assert.equal(fields['FPGA版本'],'FPGA-2');assert.equal(fields['HDSet版本'],'HDSet-3');assert.equal(fields['HDPlayer版本'],'HDPlayer-4');
+});
+
+test('缺失或仅空白的芯片及应用/APP版本不清空同一行已有人工值', async () => {
+  const { fb,state }=fixture();await fb.syncHuiduRecord(rec);
+  Object.assign(state.rows[0].fields,{'驱动芯片':'人工芯片','应用版本':'人工设备版本','APP版本':'已有助手版本'});
+  for(const empty of [undefined,'','   ']){
+    assert.equal((await fb.syncHuiduRecord({...rec,chips:empty,device_app_version:empty,app_version:empty})).action,'updated');
+    const fields=state.mutations.at(-1).body.fields;
+    for(const name of ['驱动芯片','应用版本','APP版本'])assert.equal(Object.hasOwn(fields,name),false);
+    assert.equal(state.rows.length,1);assert.equal(state.rows[0].fields['驱动芯片'],'人工芯片');assert.equal(state.rows[0].fields['应用版本'],'人工设备版本');assert.equal(state.rows[0].fields['APP版本'],'已有助手版本');
+  }
+});
+
+test('旧记录无真实芯片/设备应用字段时不从FPGA/软件/正文回填，缺芯片列仅补文本列', async () => {
+  const {fb,state}=fixture({missingFields:['驱动芯片']});
+  await fb.syncHuiduRecord({...rec,fpga_version:'FPGA-only',hdset_version:'HDSet-only',hdplayer_version:'HDPlayer-only',version_info:'APP guessing forbidden',content:'芯片FM6363 应用V1.0，仅正文不作字段'});
+  assert.equal(state.rows[0].fields['驱动芯片'],undefined);assert.equal(state.rows[0].fields['应用版本'],undefined);
+  assert.deepEqual(state.fieldCreates,[{field_name:'驱动芯片',type:1}]);
 });

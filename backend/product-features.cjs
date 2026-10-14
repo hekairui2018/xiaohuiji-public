@@ -1,25 +1,10 @@
 // 产品特点结构化提取（业务逻辑层）
 // 目标：接口只留“类型×数量”，带载/分辨率取干净数字，最后一行用一句话讲差异化卖点。
 // 数据源：product-specs-index.keyParameters（规格书）+ product-index.facts（含“选型速查”浓缩行）。
-const fs = require("fs");
-const path = require("path");
-const DATA_DIR = path.join(__dirname, "..", "data");
-function loadJson(file) {
-  return JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), "utf8").replace(/^﻿/, ""));
-}
-let _specs = null, _index = null;
-function specsMap() {
-  if (_specs) return _specs;
-  const raw = loadJson("product-specs-index.json");
-  _specs = {};
-  (raw.products || []).forEach((p) => { _specs[p.displayName || p.product] = p; });
-  return _specs;
-}
-function indexList() {
-  if (_index) return _index;
-  _index = loadJson("product-index.json").products || [];
-  return _index;
-}
+const { loadProductData } = require("./product-data.cjs");
+const { receiverLoadEvidence } = require("./product-parameters.cjs");
+const specsMap = () => loadProductData().specs;
+const indexList = () => loadProductData().products;
 const hasCN = (s) => /[一-龥]/.test(String(s));
 // 取某字段下所有候选句（? 分隔），优先中文句、去掉产品名前缀
 function fieldSentences(kp, key) {
@@ -39,6 +24,8 @@ function stripName(s) {
 // OCR 常把一个数字内部拆开（2 30 / 1 920），匹配前先去掉数字之间的空格
 const despaceNum = (s) => String(s).replace(/(\d)\s+(?=\d)/g, "$1");
 function extractLoad(kp, quick, facts, cluster) {
+  const conditional = cluster === "rx" ? receiverLoadEvidence(kp, facts) : null;
+  if (conditional) return conditional.text;
   const blob = despaceNum([...fieldSentences(kp, "load"), ...(facts || [])].join(" "));
   // 1) 单双色门头卡：单色/双色带载不同，必须分开标
   if (cluster === "mono") {

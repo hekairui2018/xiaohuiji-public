@@ -1,0 +1,130 @@
+{
+  "date": "",
+  "instance": {
+    "ok": false,
+    "generation": 0,
+    "aiEnabled": false,
+    "datasetVersion": "",
+    "counts": {
+      "products": 0,
+      "modules": 0,
+      "receivers": 0
+    },
+    "knowledgeVersion": "",
+    "knowledgeCounts": {
+      "products": 0,
+      "cases": 0,
+      "sourceSupportedChecks": 0,
+      "sourceSupportedSolutions": 0,
+      "rejectedDocuments": 0
+    },
+    "trial": {
+      "instance": "",
+      "host": "",
+      "port": 0,
+      "pid": 0,
+      "computer": "",
+      "startedAt": "",
+      "sourceCommit": "",
+      "sourceFingerprint": "",
+      "knowledgeSHA256": "",
+      "configFile": "",
+      "dataDirectory": "",
+      "modelMode": "",
+      "sessions": ""
+    }
+  },
+  "knowledgeSnapshotUnchanged": false,
+  "sharedActiveVersion": "",
+  "sharedCandidateVersion": "",
+  "fixedHTTP": {
+    "count": 0,
+    "metrics": {
+      "products": {
+        "samples": 0,
+        "failedSamples": 0,
+        "pendingSamples": 0,
+        "checks": {
+          "passed": 0,
+          "failed": 0,
+          "pending": 0
+        }
+      },
+      "aftersales": {
+        "samples": 0,
+        "failedSamples": 0,
+        "pendingSamples": 0,
+        "checks": {
+          "passed": 0,
+          "failed": 0,
+          "pending": 0
+        }
+      },
+      "ordering": {
+        "samples": 0,
+        "failedSamples": 0,
+        "pendingSamples": 0,
+        "checks": {
+          "passed": 0,
+          "failed": 0,
+          "pending": 0
+        }
+      }
+    },
+    "execution": {
+      "mode": "",
+      "base": ""
+    },
+    "expectationCorrections": {
+      "schemaVersion": "1.0",
+      "corrections": []
+    },
+    "receipt": ""
+  },
+  "browser": {
+    "checks": [],
+    "uncaughtErrors": [],
+    "receipt": ""
+  },
+  "independent": {
+    "count": 0,
+    "passedWithinAssertedScope": 0,
+    "failed": 0,
+    "unableToJudge": 0,
+    "originLimit": "",
+    "receipt": "",
+    "remaining": []
+  },
+  "resources": {
+    "entries": 0,
+    "available": 0,
+    "indexOnly": [],
+    "actualUnavailable": [],
+    "receipt": ""
+  },
+  "originalAccess": [],
+  "sourceIntegrity": [],
+  "regression": {
+    "passed": 0,
+    "total": 0,
+    "receipt": ""
+  },
+  "model": {
+    "offline": "",
+    "online": "",
+    "reason": ""
+  },
+  "safety": {
+    "firstGenerationModified": false,
+    "productionDeployed": false,
+    "githubPushed": false,
+    "defaultActiveSwitched": false
+  },
+  "conclusion": "",
+  "knownCoverageReduction": {
+    "cases": [],
+    "reason": "",
+    "priorAftersalesPendingChecks": 0,
+    "currentAftersalesPendingChecks": 0
+  }
+}

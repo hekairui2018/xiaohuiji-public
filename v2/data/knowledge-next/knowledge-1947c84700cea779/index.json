@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "2.0",
+  "sources": [],
+  "buildProvenance": [],
+  "products": [],
+  "cases": [],
+  "assets": {
+    "software": [],
+    "manuals": [],
+    "videos": [],
+    "softwareCatalog": []
+  },
+  "rejectedDocuments": [],
+  "parameterConflicts": [],
+  "receiverEvidence": {
+    "schemaVersion": "2.0",
+    "modelId": "",
+    "verificationStatus": "",
+    "documents": [],
+    "verifiedClaims": {
+      "generalConventional": [],
+      "generalPWM": [],
+      "scanRange": "",
+      "specialLoadingPitches": []
+    },
+    "unknownConditions": [],
+    "policy": ""
+  },
+  "duplicateGroups": [],
+  "policy": ""
+}

@@ -1,0 +1,30 @@
+{
+  "versionId": "",
+  "sha256": "",
+  "counts": {
+    "products": 0,
+    "cases": 0,
+    "sourceSupportedChecks": 0,
+    "sourceSupportedSolutions": 0,
+    "rejectedDocuments": 0
+  },
+  "baseVersion": "",
+  "baseSHA256": "",
+  "parentVersion": "",
+  "parentSHA256": "",
+  "associationCounts": {
+    "products": 0,
+    "documents": 0,
+    "claims": 0,
+    "cases": 0,
+    "firmware": 0,
+    "software": 0,
+    "officialDocuments": 0,
+    "engineeringDocuments": 0,
+    "trainingDocuments": 0,
+    "projectDocuments": 0,
+    "unknownFirmware": 0,
+    "aiSummary": 0
+  },
+  "activated": false
+}

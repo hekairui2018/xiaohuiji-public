@@ -1,0 +1,21 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const sp = require('../backend/specialist/aftersales-specialist.js');
+const db = JSON.parse(fs.readFileSync(path.join(__dirname,'../data/aftersales/aftersales-cases.json'),'utf8'));
+test('Suspended unconfirmed source is not stated as solved or verified', () => {
+  const c = db.cases.find(x => x.id === 'AS-1187');
+  const source = JSON.parse(fs.readFileSync(path.join(__dirname,'../data/aftersales/sources',c.sourceFile),'utf8').replace(/^\uFEFF/,''));
+  const rows = Array.isArray(source) ? source : source.cases || source.rows;
+  const raw = rows.find(x => x.id === c.originalId && x.source?.locator === c.source?.locator);
+  assert.ok(raw && /状态：挂起/.test(raw.sourceExcerpt));
+  assert.match(raw.solution, /未填写/);
+  const result = sp.handle(raw.customerWording, []);
+  assert.equal(result.bestId, c.id);
+  assert.doesNotMatch(result.reply, /已解决|已经解决|验证过的/);
+  assert.match(result.reply, /历史案例/);
+  assert.ok(result.reply.includes(c.id));
+  assert.ok(result.reply.includes(c.source.locator));
+});

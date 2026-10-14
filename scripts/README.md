@@ -1,4 +1,3 @@
-﻿# 工具脚本
+# Internal material placeholder
 
-构建、扫描、数据处理等一次性脚本放这里。
-
+Internal documents, original product evidence, business cases and deployment records are not published. Obtain your own authorized data; no production files or functions were removed from the original project.

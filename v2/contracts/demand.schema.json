@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "operation"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"enum": ["2.0"]},
+    "requestId": {"type": "string", "maxLength": 128},
+    "operation": {"enum": ["ordering", "aftersales", "consultation"]},
+    "scene": {"type": ["string", "null"]},
+    "environment": {"enum": ["indoor", "outdoor", null]},
+    "screen": {"type": "object", "additionalProperties": false, "properties": {
+      "moduleColumns": {"type": "integer", "minimum": 1}, "moduleRows": {"type": "integer", "minimum": 1},
+      "pixelWidth": {"type": "integer", "minimum": 1}, "pixelHeight": {"type": "integer", "minimum": 1},
+      "physicalWidthMm": {"type": "number", "exclusiveMinimum": 0}, "physicalHeightMm": {"type": "number", "exclusiveMinimum": 0}
+    }},
+    "cabinet": {"type":"object", "additionalProperties":false, "properties": {
+      "moduleColumns":{"type":"integer","minimum":1},"moduleRows":{"type":"integer","minimum":1},
+      "columns":{"type":"integer","minimum":1},"rows":{"type":"integer","minimum":1}
+    }},
+    "module": {"type": "object", "additionalProperties": false, "properties": {
+      "pitchMm": {"type": "number", "exclusiveMinimum": 0},
+      "pixelWidth": {"type": "integer", "minimum": 1}, "pixelHeight": {"type": "integer", "minimum": 1},
+      "physicalWidthMm": {"type": "number", "exclusiveMinimum": 0}, "physicalHeightMm": {"type": "number", "exclusiveMinimum": 0},
+      "interface": {"type": "string"},
+      "driverFamily": {"enum": ["conventional", "pwm", null]},
+      "scan": {"type": "object", "required": ["numerator", "denominator"], "additionalProperties": false, "properties": {
+        "numerator": {"type": "integer", "minimum": 1}, "denominator": {"type": "integer", "minimum": 1}
+      }},
+      "color": {"type": "object", "required": ["r", "g", "b"], "additionalProperties": false, "properties": {
+        "r": {"type": "integer", "minimum": 0}, "g": {"type": "integer", "minimum": 0}, "b": {"type": "integer", "minimum": 0}
+      }}
+    }},
+    "architecture": {"enum": ["receiver", "direct", null]},
+    "controlMode": {"enum": ["sync", "async", null]},
+    "requirements": {"type": "object"},
+    "providedDevices": {"type": "array", "items": {"type": "object", "required": ["modelId"], "additionalProperties": false, "properties": {"modelId": {"type": "string"}, "revisionId": {"type": ["string", "null"]}}}},
+    "symptoms": {"type": "array", "items": {"type": "string"}},
+    "observations": {"type": "array", "items": {"type": "object", "required": ["checkId", "result"], "additionalProperties": false, "properties": {"checkId": {"type": "string"}, "result": {"enum": ["pass", "fail", "unknown", "completed"]}, "text": {"type": "string"}}}},
+    "topic": {"type": "string", "maxLength": 4096},
+    "provenance": {"type": "object"}
+  }
+}

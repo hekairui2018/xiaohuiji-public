@@ -1,7 +1,7 @@
 {
   "_说明": "复制本文件为 .oss-config.json 并填入真实值；.oss-config.json 已被 .gitignore 忽略，不会提交。",
-  "AccessKeyId": "LTAIxxxxxxxxxxxxxxxx",
-  "AccessKeySecret": "xxxxxxxxxxxxxxxxxxxxxxxx",
+  "AccessKeyId": "YOUR_OSS_ACCESSKEYID",
+  "AccessKeySecret": "YOUR_OSS_ACCESSKEYSECRET",
   "Region": "oss-cn-shenzhen",
   "Bucket": "your-bucket",
   "Endpoint": "https://oss-cn-shenzhen.aliyuncs.com",

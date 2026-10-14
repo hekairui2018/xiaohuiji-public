@@ -15,6 +15,8 @@ scripts/oss-upload-failures.json
 frontend/official-files/
 # 生成产物（双语视频等成品），归档在 OSS/云盘
 output/
+!v2/domain/ordering/output/
+!v2/domain/ordering/output/*.cjs
 # 运行时客户问答数据（日志/截图/拓扑），属运营数据、随本机引擎累积，不随代码库走
 data/qa-log/
 data/qa-images/

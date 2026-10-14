@@ -1,0 +1,33 @@
+{
+  "scope": "",
+  "productTextReview": [],
+  "nearModelGaps": [],
+  "versionReview": [],
+  "caseEvidenceReview": [],
+  "assetCoverage": {
+    "scope": "",
+    "candidate": "",
+    "firmware": [],
+    "softwareDownloaders": [],
+    "manuals": [],
+    "chipSource": [],
+    "errors": [],
+    "summary": {
+      "firmwareRelationships": 0,
+      "uniqueFirmwareFiles": 0,
+      "uniqueFirmwareExactMatches": 0,
+      "uniqueFirmwareMissingInInventory": 0,
+      "alreadyPinnedUniqueFirmware": 0,
+      "newFirmwarePins": 0,
+      "manualsTotal": 0,
+      "manualsExactMatches": 0,
+      "manualsMissingInInventory": 0,
+      "newManualPins": 0,
+      "softwareDownloadersTotal": 0,
+      "softwareDownloadersExactMatches": 0,
+      "hashedPhysicalFiles": 0,
+      "readErrors": 0
+    }
+  },
+  "activationAssessment": ""
+}

@@ -1,0 +1,92 @@
+{
+  "candidateVersion": "",
+  "parentVersion": "",
+  "activeUnchanged": false,
+  "schemaVersion": "2.0",
+  "delta": {
+    "newProducts": 0,
+    "newCases": 0,
+    "products": 0,
+    "claims": 0,
+    "documents": 0,
+    "cases": 0,
+    "firmware": 0,
+    "software": 0,
+    "newlyVerifiedClaims": 0
+  },
+  "sourceCountUnit": "",
+  "sourceCounts": {
+    "official": 0,
+    "engineering": 0,
+    "training": 0,
+    "project": 0,
+    "ai_summary": 0,
+    "unknown": 0
+  },
+  "newOriginalSources": [],
+  "existingCounts": {
+    "products": 0,
+    "cases": 0,
+    "claims": 0
+  },
+  "verifiedClaims": 0,
+  "caseVerification": {
+    "verified": 0,
+    "reference_only": 0,
+    "unknown": 0
+  },
+  "caseVerificationScope": "",
+  "parameterCoverage": [],
+  "missingFieldCounts": {
+    "absent": 0,
+    "wholeValueUnverified": 0
+  },
+  "missingFields": [],
+  "modelGroups": {
+    "A3_A4_A4L": [],
+    "C": [],
+    "VP": [],
+    "receivers": []
+  },
+  "parameterConflicts": [],
+  "quarantinedDocuments": 0,
+  "activationAssessment": {
+    "ready": false,
+    "reasons": []
+  },
+  "sourceAudit": {
+    "file": "",
+    "sha256": "",
+    "scope": "",
+    "productTextReview": [],
+    "nearModelGaps": [],
+    "versionReview": [],
+    "caseEvidenceReview": [],
+    "assetCoverage": {
+      "scope": "",
+      "candidate": "",
+      "firmware": [],
+      "softwareDownloaders": [],
+      "manuals": [],
+      "chipSource": [],
+      "errors": [],
+      "summary": {
+        "firmwareRelationships": 0,
+        "uniqueFirmwareFiles": 0,
+        "uniqueFirmwareExactMatches": 0,
+        "uniqueFirmwareMissingInInventory": 0,
+        "alreadyPinnedUniqueFirmware": 0,
+        "newFirmwarePins": 0,
+        "manualsTotal": 0,
+        "manualsExactMatches": 0,
+        "manualsMissingInInventory": 0,
+        "newManualPins": 0,
+        "softwareDownloadersTotal": 0,
+        "softwareDownloadersExactMatches": 0,
+        "hashedPhysicalFiles": 0,
+        "readErrors": 0
+      }
+    },
+    "activationAssessment": ""
+  }
+}

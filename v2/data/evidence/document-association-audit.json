@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "2.0",
+  "baselineCount": 0,
+  "currentQuarantine": 0,
+  "byCategory": {
+    "other-exact-model": 0,
+    "exact-pro-plus-identity-format": 0,
+    "identity-not-established": 0,
+    "hardware-variant": 0,
+    "accessory-applicability": 0,
+    "invalid-null-source-join": 0
+  },
+  "sources": [],
+  "rows": []
+}
