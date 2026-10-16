@@ -1,7 +1,7 @@
 'use strict';
 // Actual existing-client controls; no customer fixture, model or cloud calls.
 const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process'),assert=require('node:assert/strict');
-const work=path.resolve(process.argv[2]||'tmp/v2-offline-browser'),base=process.env.XHJ_TRIAL_BASE||'http://127.0.0.1:4520';
+const work=path.resolve(process.argv[2]||'tmp/v2-offline-browser'),base=process.env.XHJ_TRIAL_BASE||'http://127.0.0.1:8520';
 fs.mkdirSync(work,{recursive:true});const pause=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
  const fd=fs.openSync(path.join(work,'browser-launch.log'),'a');

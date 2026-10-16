@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-17",
+  "change": "V2 default application port 8520; loopback-only resource port 8521",
+  "functionalRegression": {"passed": 7, "failed": 0, "newBlindSet": false},
+  "actualHTTP": {
+    "loopback": {"health": 200, "quick": 200, "huiai": 200, "resourceSearch": 200},
+    "hostLANAddress": {"health": 200, "quick": 200, "huiai": 200, "resourceSearch": 200},
+    "crossOriginDenied": 403,
+    "otherLANComputerTested": false
+  },
+  "sourceIndexExposedToLAN": false,
+  "modelRequired": false,
+  "v1Changed": false,
+  "activeKnowledgeChanged": false,
+  "originalDocumentsChanged": false,
+  "rollback": "Stop the verified V2 instance, start with --port 4520 --resource-port 4521; runtime data and knowledge are unchanged."
+}
