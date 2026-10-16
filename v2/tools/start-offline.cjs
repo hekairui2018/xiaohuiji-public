@@ -1,0 +1,42 @@
+'use strict';
+// One local-only application + read-only index process. No model/tool-trial import.
+const fs=require('node:fs'),path=require('node:path'),{spawn}=require('node:child_process'),{parseArgs}=require('node:util');
+const {createApp}=require('../app/bootstrap.cjs'),{loadKnowledge}=require('../adapters/data/load-knowledge.cjs');
+const {createServer}=require('../adapters/http/server.cjs'),{createOfflineKnowledge}=require('../adapters/http/offline-knowledge.cjs');
+const root=path.resolve(__dirname,'../..');
+async function startOffline(options={}){
+ const port=Number(options.port||4520),resourcePort=Number(options['resource-port']||4521);
+ for(const n of [port,resourcePort])if(!Number.isInteger(n)||n<1024||n>65535||[3789,3790,3791,4389,4499,4510,4512,8080].includes(n))throw Error('Choose separate local trial ports');
+ if(port===resourcePort)throw Error('Application and resource ports must differ');
+ const index=path.resolve(options.index||path.join(root,'tmp/resource-index-stage1-20261016'));
+ if(!fs.existsSync(path.join(index,'resources.db')))throw Error('Authorized resource index is missing; provide --index. No automatic scan or download.');
+ const dir=path.resolve(options.knowledge||path.join(root,'v2/data/knowledge-next'));
+ const manifestFile=options.manifest||'candidate-manifest.json',knowledge=loadKnowledge(dir,{manifestFile});
+ const app=createApp({knowledge}),resourceBase='http://127.0.0.1:'+resourcePort;
+ const dataDirectory=path.resolve(options.data||path.join(root,'tmp/v2-offline-runtime'));
+ for(const protectedDir of ['backend','frontend','data','v2/data'].map(p=>path.join(root,p)))if(dataDirectory===protectedDir||dataDirectory.startsWith(protectedDir+path.sep))throw Error('V2 runtime data must not use V1 or knowledge directories');
+ const logs=require('../external-services/feishu-logs.cjs').createFeishuLogs({directory:path.join(dataDirectory,'logs'),configFile:options['feishu-config']||path.join(dataDirectory,'feishu.env')});
+ const images=require('../external-services/local-images.cjs').createLocalImages(path.join(dataDirectory,'images'));
+ const child=spawn(options.python||process.env.XHJ_PYTHON||'python',[path.join(root,'v2/resource-index/server.py'),'--port',String(resourcePort),'--work',index],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});
+ let childError;child.on('error',e=>{childError=e;});child.stderr.on('data',d=>process.stderr.write(d));
+ let ready=false;
+ for(let i=0;i<60;i++){
+  if(childError)throw childError;if(child.exitCode!==null)throw Error('Read-only index process exited; check port and Python runtime');
+  try{const r=await fetch(resourceBase+'/health',{signal:AbortSignal.timeout(500)});if(r.ok&&(await r.json()).pid===child.pid){ready=true;break;}}catch{}
+  await new Promise(r=>setTimeout(r,100));
+ }
+ if(!ready){child.kill();throw Error('Local index did not become ready');}
+ const offlineKnowledge=createOfflineKnowledge({knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images});
+ const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host:'127.0.0.1',port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge});
+ try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});}catch(e){child.kill();throw e;}
+ const runtime={instance:'v2-offline',host:'127.0.0.1',port,resourcePort,pid:process.pid,indexPid:child.pid,knowledgeVersion:knowledge.version,startedAt:new Date().toISOString()};
+ fs.writeFileSync(path.join(dataDirectory,'runtime.json'),JSON.stringify(runtime,null,2));
+ server.on('request',(req,res)=>{if(!req.url.startsWith('/api/')||req.url.startsWith('/api/health')||req.url.startsWith('/api/huidu/log'))return;const start=Date.now();res.once('finish',()=>{try{logs.activity({sessionId:'v2-runtime',route:req.url.split('?')[0],method:req.method,status:res.statusCode,elapsedMs:Date.now()-start});}catch{console.error('V2 runtime log could not be retained locally');}});});
+ const close=()=>new Promise(resolve=>{logs.close();server.closeAllConnections();server.close(()=>{child.kill();resolve();});});
+ for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>close().then(()=>process.exit(0)));
+ child.on('exit',()=>{if(server.listening)console.error('Resource process stopped: product lookup and ordering remain available, original search is temporarily unavailable.');});
+ console.log(JSON.stringify({instance:'v2-offline',url:'http://127.0.0.1:'+port,quick:'/quick',consultation:'/huiai',knowledgeVersion:knowledge.version,modelCalls:0,resourcePort,pid:process.pid,indexPid:child.pid}));
+ return {server,close};
+}
+if(require.main===module){const {values}=parseArgs({options:Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config'].map(k=>[k,{type:'string'}]))});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
+module.exports={startOffline};

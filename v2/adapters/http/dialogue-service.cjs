@@ -17,12 +17,14 @@ function formatReply(result){
  if(result.bom)return [`整屏：${result.plan.screen.pixelWidth}×${result.plan.screen.pixelHeight} 像素`,...result.bom.map(x=>`${x.kind==='module'?'模组':x.kind==='receiver'?'接收卡':'主控'} ${x.kind==='module'?'P'+result.plan.module.dotPitch.spacing+' '+result.plan.module.resolution.join('×'):x.modelId}：${x.quantity}`),result.plan.architecture==='direct'?`直控：${result.plan.directOutputs.length} 个逻辑HUB接口区域；实际排线待核对，不生成接收卡SSM`:`网口：${result.plan.ports.length} 个`].join('\n');
  return result.missing_parameters?.map(x=>x.reason).join('\n')||result.reason||'请提供问题或标准需求参数。';
 }
-function createDialogueService(app){const sessions=createDiagnosticSessions({understandInput:app.understandInput}),ordering=createOrderingSessions(app);return async input=>{
+function createDialogueService(app,{operation=null}={}){const sessions=createDiagnosticSessions({understandInput:app.understandInput}),ordering=createOrderingSessions(app);return async input=>{
  if(!input||typeof input!=='object'||Array.isArray(input))return {status:'invalid_request',reply:'请提供聊天请求对象。'};
  let request=input.demand||input.message||input;
  if(typeof request==='string'&&request.trim().startsWith('{')){try{request=JSON.parse(request);}catch{return {status:'invalid_request',reply:'标准需求JSON格式不正确。'};}}
- const continued=typeof request==='string'?(sessions.continue(input.sessionId,request)||ordering.continue(input.sessionId,request)):null;
- const result=await app.dialogue(continued||request),reply=formatReply(result);
+ const continued=typeof request==='string'?((operation?null:sessions.continue(input.sessionId,request))||ordering.continue(input.sessionId,request)):null;
+ let demand=continued||request;
+ if(operation){if(typeof demand==='string')demand=app.understandInput(demand,operation).demand;if(!demand||demand.operation!==operation)return {status:'invalid_request',model:'v2-rules',reply:'此入口只处理工程配单，请填写屏幕需求。'};}
+ const result=await app.dialogue(demand),reply=formatReply(result);
  ordering.save(input.sessionId,result);
  if(result.diagnosis&&input.sessionId)sessions.save(input.sessionId,result.normalizedDemand,result);
  else if(result.operation&&input.sessionId)sessions.clear(input.sessionId);

@@ -4,6 +4,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
+import os
 from pathlib import Path
 import shutil
 from urllib.parse import parse_qs, urlsplit
@@ -32,7 +33,7 @@ def create_server(work, port=0):
             u=urlsplit(self.path);q=parse_qs(u.query);first=lambda k,d='':q.get(k,[d])[0]
             try:
                 if u.path=='/':return self.send(200,PAGE,'text/html; charset=utf-8')
-                if u.path=='/health':return self.send(200,{'ok':True,'mode':'isolated-resource-candidate','aiEnabled':False})
+                if u.path=='/health':return self.send(200,{'ok':True,'mode':'isolated-resource-candidate','aiEnabled':False,'pid':os.getpid()})
                 if u.path=='/search':return self.send(200,engine.query(work,first('q'),first('mode','all'),first('model') or None,int(first('limit','10')),first('version') or None))
                 if u.path=='/read':return self.send(200,engine.read_block(work,int(first('block'))))
                 if u.path=='/resource' or u.path.startswith('/v2/resources/original/'):

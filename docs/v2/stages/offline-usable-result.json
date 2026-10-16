@@ -1,0 +1,92 @@
+{
+  "date": "2026-10-17",
+  "delivery": "V2 standalone no-model usable site",
+  "readyForLocalTrial": true,
+  "customerProductionDeployed": false,
+  "v1ModifiedByThisDelivery": false,
+  "activeKnowledgeChanged": false,
+  "originalFilesWritten": false,
+  "sourceDataHashesUnchanged": true,
+  "modelUsed": false,
+  "knowledgeTraining": false,
+  "regression": {
+    "v2Node": {
+      "passed": 131,
+      "failed": 0
+    },
+    "existingFeishuWriter": {
+      "passed": 14,
+      "failed": 0
+    },
+    "resourcePython": {
+      "passed": 19,
+      "failed": 0
+    }
+  },
+  "actualHttp": {
+    "knowledgeVersion": "knowledge-fc9f11a1e72de750",
+    "products": 312,
+    "cases": 2231,
+    "exactA3L": true,
+    "softwareItems": 1,
+    "firmwareItems": 6,
+    "videoCategories": 1,
+    "specFiles": 521,
+    "manualFiles": 33,
+    "actualLocalPdfHashMatched": true,
+    "legacyRelativeDocumentLinkStatus": 200,
+    "referenceCases": true,
+    "conditionsAndMissingFields": true,
+    "twoRoundFactsPersisted": true,
+    "customerIsolation": true,
+    "orderingBomTopology": true,
+    "ssmCrcPackets": 25,
+    "feishuMissingConfigDoesNotBlock": true,
+    "pendingLogsRetained": 6,
+    "cloudWrites": 0
+  },
+  "actualBrowser": {
+    "quickFileSearch": true,
+    "actualPdfDownload": true,
+    "bodySearch": true,
+    "originalContextRead": true,
+    "historyCases": true,
+    "caseConditionsVisible": true,
+    "orderingBOMAndSSMButton": true,
+    "localImageOCR": true,
+    "newSession": true,
+    "modelRequests": 0,
+    "unhandledBrowserErrors": 0,
+    "requestCount": 22
+  },
+  "representativeResourceLinks": [
+    {
+      "kind": "software",
+      "status": 200
+    },
+    {
+      "kind": "firmware",
+      "status": 200
+    },
+    {
+      "kind": "video",
+      "status": 200
+    }
+  ],
+  "feishu": {
+    "implemented": true,
+    "originalWriterReusedUnchanged": true,
+    "mockFailureRetryUpsertAttachmentPassed": true,
+    "realTableWritten": false,
+    "v2CredentialsConfigured": false,
+    "knowledgeSyncImplemented": false
+  },
+  "limitations": [
+    "Existing historical case excerpts are not all independently checked originals. Missing fields remain unknown.",
+    "Condition matching is lexical/structured; complex free-form reasoning is not claimed.",
+    "Known unsupported ordering hardware branches remain protected.",
+    "Local OCR needs installed Windows OCR language.",
+    "External software/firmware/video representative HEAD success is not whole-catalog validation.",
+    "Local-only binding; customer deployment and V2 Feishu target/configuration are not yet enabled."
+  ]
+}
