@@ -1,0 +1,14 @@
+# Public source checkout: generated and private inputs must not be staged.
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-*
+*.sqlite*
+*.zip
+*.gguf
+*.safetensors
+.env
+/data/
+private-data/
+local-results/

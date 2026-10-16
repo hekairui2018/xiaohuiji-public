@@ -1,0 +1,204 @@
+{
+  "containsQuestions": false,
+  "containsOriginalEvidence": false,
+  "anonymousOutcomes": {
+    "S01": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "S02": {
+      "A": {
+        "grade": "partial",
+        "failureTypes": [
+          "key-action-omission",
+          "outcome-understatement"
+        ]
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "S04": {
+      "A": {
+        "grade": "failed",
+        "failureTypes": [
+          "unsupported-conclusion",
+          "conflict-selection",
+          "outcome-understatement"
+        ]
+      },
+      "B": {
+        "grade": "failed",
+        "failureTypes": [
+          "unsupported-conclusion",
+          "conflict-selection",
+          "case-boundary-error"
+        ]
+      }
+    },
+    "S05": {
+      "A": {
+        "grade": "partial",
+        "failureTypes": [
+          "unsupported-conclusion",
+          "case-boundary-error"
+        ]
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "S07": {
+      "A": {
+        "grade": "partial",
+        "failureTypes": [
+          "scope-omission",
+          "target-version-unconfirmed"
+        ]
+      },
+      "B": {
+        "grade": "partial",
+        "failureTypes": [
+          "scope-omission",
+          "target-version-unconfirmed"
+        ]
+      }
+    },
+    "S08": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "S09": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "S10": {
+      "A": {
+        "grade": "partial",
+        "failureTypes": [
+          "scope-omission",
+          "outcome-omission"
+        ]
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "P01": {
+      "A": {
+        "grade": "failed",
+        "failureTypes": [
+          "version-mix",
+          "wrong-date-binding",
+          "unsupported-conclusion"
+        ]
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "L02": {
+      "A": {
+        "grade": "partial",
+        "failureTypes": [
+          "key-action-omission"
+        ]
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "H01": {
+      "A": {
+        "grade": "partial",
+        "failureTypes": [
+          "key-action-omission"
+        ]
+      },
+      "B": {
+        "grade": "partial",
+        "failureTypes": [
+          "key-action-omission",
+          "operation-location-error"
+        ]
+      }
+    },
+    "H02": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": [
+          "citation-omission"
+        ]
+      }
+    },
+    "T01": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "T02": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    },
+    "T03": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "partial",
+        "failureTypes": [
+          "outcome-exaggeration"
+        ]
+      }
+    },
+    "T04": {
+      "A": {
+        "grade": "correct",
+        "failureTypes": []
+      },
+      "B": {
+        "grade": "correct",
+        "failureTypes": []
+      }
+    }
+  }
+}

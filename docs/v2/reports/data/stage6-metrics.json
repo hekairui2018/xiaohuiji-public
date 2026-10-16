@@ -1,0 +1,89 @@
+{
+  "groups": {
+    "original12-A": {
+      "n": 12,
+      "grades": {
+        "partial": 6,
+        "correct": 4,
+        "failed": 2
+      },
+      "averageSeconds": 21.31,
+      "p95Seconds": 31.598,
+      "issueCounts": {
+        "key-action-omission": 3,
+        "version-mix": 1,
+        "wrong-date-binding": 1,
+        "unsupported-conclusion": 3,
+        "outcome-understatement": 2,
+        "conflict-selection": 1,
+        "case-boundary-error": 1,
+        "scope-omission": 2,
+        "target-version-unconfirmed": 1,
+        "outcome-omission": 1
+      }
+    },
+    "original12-B": {
+      "n": 12,
+      "grades": {
+        "partial": 2,
+        "correct": 9,
+        "failed": 1
+      },
+      "averageSeconds": 13.13,
+      "p95Seconds": 25.38,
+      "issueCounts": {
+        "key-action-omission": 1,
+        "operation-location-error": 1,
+        "citation-omission": 1,
+        "unsupported-conclusion": 1,
+        "conflict-selection": 1,
+        "case-boundary-error": 1,
+        "scope-omission": 1,
+        "target-version-unconfirmed": 1
+      }
+    },
+    "blind4-A": {
+      "n": 4,
+      "grades": {
+        "correct": 4
+      },
+      "averageSeconds": 11.824,
+      "p95Seconds": 12.966,
+      "issueCounts": {}
+    },
+    "blind4-B": {
+      "n": 4,
+      "grades": {
+        "correct": 3,
+        "partial": 1
+      },
+      "averageSeconds": 6.808,
+      "p95Seconds": 7.425,
+      "issueCounts": {
+        "outcome-exaggeration": 1
+      }
+    }
+  },
+  "actualModelCalls": 68,
+  "inputTokens": 145541,
+  "outputTokens": 10558,
+  "peakSampledGPUMiB": 11306,
+  "modelFailures": [],
+  "notHardwareSuccessRate": true,
+  "grading": "Agent reads frozen criteria and originals, not model self-grading or independent human approval",
+  "blindResultsNotUsedToTuneThisVersion": true,
+  "publicSummaryOnly": true,
+  "fixedSet": {
+    "n": 12,
+    "purpose": "regression",
+    "originalQuestionsPublished": false
+  },
+  "newBlindSet": {
+    "n": 4,
+    "sampling": "purposive-not-random",
+    "notUsedForTuningThisVersion": true,
+    "futureUse": "regression-if-used-in-development"
+  },
+  "deployment": false,
+  "fieldHardwareVerified": false
+}

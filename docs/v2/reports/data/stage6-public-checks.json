@@ -1,0 +1,29 @@
+{
+  "publicSyntheticTests": {
+    "passed": 9,
+    "failed": 0,
+    "usesPrivateData": false,
+    "usesModel": false,
+    "command": "python -m unittest discover -s v2/tool-trial -p test_public_source.py"
+  },
+  "syntax": {
+    "javascript": 104,
+    "python": 41,
+    "passed": true
+  },
+  "privateEnvironmentRegressions": {
+    "node": 128,
+    "toolsPython": 32,
+    "extractionPython": 26,
+    "notReproducibleWithoutAuthorizedData": true
+  },
+  "companyOriginalsPublished": false,
+  "reviewZipPublished": false,
+  "privateGitHistoryImported": false,
+  "deployment": false,
+  "exportSafety": {
+    "privateHelpersWithheld": 11,
+    "internalAbsolutePathsInNewSource": 0,
+    "syntheticDrivePathTestsWithheld": true
+  }
+}

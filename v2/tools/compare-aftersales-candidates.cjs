@@ -1,0 +1,44 @@
+'use strict';
+// Consume the existing fixed business set; do not alter expectations or activate a knowledge version.
+const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const {loadKnowledge}=require('../adapters/data/load-knowledge.cjs'),{createApp}=require('../app/bootstrap.cjs'),{retrieve}=require('../domain/aftersales/retrieval.cjs'),{createServer}=require('../adapters/http/server.cjs');
+const root=path.resolve(__dirname,'../..'),out=path.join(root,'docs/v2/售后重提炼-20261015');
+const hash=x=>crypto.createHash('sha256').update(x).digest('hex');
+function canonical(x){if(Array.isArray(x))return x.map(canonical);if(x&&typeof x==='object')return Object.fromEntries(Object.keys(x).filter(k=>k!=='knowledgeVersion').sort().map(k=>[k,canonical(x[k])]));return x}
+const equal=(a,b)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
+function flow(result){const d=result.diagnosis;return {status:result.status,state:d?.state,activeCaseId:d?.activeCaseId||null,checks:(d?.checks||[]).filter(c=>!/-scope$|-resolution$|-condition$/.test(c.checkId)).map(c=>({checkId:c.checkId,text:c.text,requiresConditionConfirmation:c.requiresConditionConfirmation})),top3:(d?.candidates||[]).map(c=>c.caseId),sourceCount:d?.sourceReferences?.length||0,conclusion:d?.conclusion||null}}
+async function main(){
+ const old=loadKnowledge(path.join(root,'v2/data/knowledge-next'),{manifestFile:'candidate-manifest.json'}),candidate=loadKnowledge(path.join(root,'v2/data/knowledge-next/aftersales-reextract-20261015'),{manifestFile:'candidate-manifest.json'}),before=createApp({knowledge:old}),after=createApp({knowledge:candidate});
+ const setBytes=fs.readFileSync(path.join(root,'v2/data/evidence/knowledge-fc9-business-set-20261014.json')),set=JSON.parse(setBytes),engineering=JSON.parse(fs.readFileSync(path.join(root,'v2/data/evidence/knowledge-fc9-engineering-fixture-20261014.json')));
+ set.ordering.push(engineering);
+ const oldCases=old.cases(),newCases=candidate.cases(),audit=JSON.parse(fs.readFileSync(path.join(out,'全库审计.json'))),products=[],ordering=[],cases=[],responses=[];
+ const frozenFiles=['v2/data/knowledge-next/candidate-manifest.json','v2/data/knowledge/active-manifest.json','v2/data/evidence/knowledge-fc9-business-set-20261014.json'],startHashes=Object.fromEntries(frozenFiles.map(f=>[f,hash(fs.readFileSync(path.join(root,f)))]));
+ for(const sample of set.products){const a=await before.dialogue(sample.input),b=await after.dialogue(sample.input);products.push({id:sample.id,unchanged:equal(a,b),beforeStatus:a.status,afterStatus:b.status});responses.push({group:'product',id:sample.id,before:a,after:b})}
+ for(const sample of set.ordering){const a=await before.dialogue(sample.input),b=await after.dialogue(sample.input),aSsm=await before.exportSsm(sample.input),bSsm=await after.exportSsm(sample.input);ordering.push({id:sample.id,unchanged:equal(a,b),ssmUnchanged:aSsm.status===bSsm.status&&aSsm.xml===bSsm.xml,beforeStatus:a.status,afterStatus:b.status});responses.push({group:'ordering',id:sample.id,before:a,after:b})}
+ for(const sample of set.cases){
+  const a=await before.dialogue(sample.input),b=await after.dialogue(sample.input),aRank=retrieve(sample.input,oldCases).slice(0,3).map(r=>r.case.stableId),bRank=retrieve(sample.input,newCases).slice(0,3).map(r=>r.case.stableId),r=audit.cases.find(c=>c.legacyId===sample.id),aFlow=flow(a),bFlow=flow(b);
+  const flags=[];
+  if(!equal(aRank,bRank))flags.push('retrieval-order-changed');
+  if(r.oldCheckCount>0&&r.newCheckCount===0)flags.push('previous-checks-withheld');
+  if(aFlow.activeCaseId&&bFlow.activeCaseId!==aFlow.activeCaseId)flags.push('active-flow-changed');
+  if(bFlow.conclusion)flags.push('unobserved-conclusion');
+  cases.push({id:sample.id,retrievalUnchanged:equal(aRank,bRank),originalCoverage:r.originalCoverage,oldCheckCount:r.oldCheckCount,newCheckCount:r.newCheckCount,before:aFlow,after:bFlow,flags});responses.push({group:'aftersales',id:sample.id,before:a,after:b})
+ }
+ const additions=audit.cases.filter(r=>r.oldCheckCount===0&&r.newCheckCount>0),withheld=audit.cases.filter(r=>r.oldCheckCount>0&&r.newCheckCount===0),unparsed=withheld.filter(r=>!r.extraction.restrictedActions.length&&!r.extraction.historicalActions.length);
+ const reasons={restrictedOperations:withheld.filter(r=>r.extraction.restrictedActions.length).length,historicalOnly:withheld.filter(r=>!r.extraction.restrictedActions.length&&r.extraction.historicalActions.length).length,unparsedReviewNeeded:unparsed.length};
+ // Actual HTTP with the new snapshot, on a temporary loopback port only.
+ const server=createServer(after),http=[];await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{const base='http://127.0.0.1:'+server.address().port;
+  for(const route of ['/quick','/huiai','/api/search?q=R712']){const r=await fetch(base+route);http.push({route,status:r.status,ok:r.ok})}
+  for(const message of ['电脑显示器与LED屏幕显示色差问题','屏幕上固定位置有闪屏和闪点现象','R712黑屏']){const response=await fetch(base+'/api/ai/chat',{method:'POST',body:JSON.stringify({message})}),body=await response.json(),r=body.result||body;http.push({route:'/api/ai/chat',input:message,httpStatus:response.status,status:r.status,state:r.diagnosis?.state,checks:r.diagnosis?.checks?.length||0,conclusion:r.diagnosis?.conclusion,protected:r.status!=='ready'&&!r.diagnosis?.conclusion&&!(r.diagnosis?.checks||[]).length})}
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}
+ const allFreezePreserved=frozenFiles.every(f=>hash(fs.readFileSync(path.join(root,f)))===startHashes[f]);
+ const summary={oldKnowledge:old.version,candidateKnowledge:candidate.version,frozenSetSHA256:hash(setBytes),businessScenarios:products.length+ordering.length+cases.length,products:{scenarios:products.length,unchanged:products.filter(r=>r.unchanged).length},ordering:{scenarios:ordering.length,unchanged:ordering.filter(r=>r.unchanged).length,ssmUnchanged:ordering.filter(r=>r.ssmUnchanged).length},aftersales:{scenarios:cases.length,top3Unchanged:cases.filter(r=>r.retrievalUnchanged).length,unobservedConclusions:cases.filter(r=>r.after.conclusion).length,flowChanged:cases.filter(r=>r.before.state!==r.after.state||!equal(r.before.checks,r.after.checks)).length,previousChecksWithheld:cases.filter(r=>r.flags.includes('previous-checks-withheld')).length},wholeLibrary:{newCasesWithChecks:additions.length,previousCasesWithChecksNowHeld:withheld.length,withheldReasons:reasons},http,defaultManifestsAndFrozenSetUnchanged:allFreezePreserved,customerActivationBefore:before.caseActivation().counts,customerActivationAfter:after.caseActivation().counts,conclusion:'Data candidate is loadable and source-traceable; do not switch default or trial. Withheld/unparsed flows require further review; no field success claimed.'};
+ const report={summary,products,ordering,cases,newCheckCases:additions.map(r=>({id:r.legacyId,originalCoverage:r.originalCoverage,checks:r.newCheckCount})),withheldCases:withheld.map(r=>({id:r.legacyId,expectedOriginal:r.expectedOriginalFile,originalCoverage:r.originalCoverage,oldChecks:r.legacyChecks,restricted:r.extraction.restrictedActions,historical:r.extraction.historicalActions})),unparsedCaseIds:unparsed.map(r=>r.legacyId)};
+ fs.writeFileSync(path.join(out,'业务新旧对比.json'),JSON.stringify(report,null,2)+'\n');fs.writeFileSync(path.join(out,'固定56场景原始输出.json'),JSON.stringify(responses,null,2)+'\n');
+ const lines=['# 售后候选新旧业务对比','',`旧版 ${old.version}；新版 ${candidate.version}。固定集SHA256：${hash(setBytes)}。`, '',`固定${summary.businessScenarios}场景：产品${products.length}、售后${cases.length}、配单${ordering.length}。产品结果相同${summary.products.unchanged}；配单相同${summary.ordering.unchanged}，SSM相同${summary.ordering.ssmUnchanged}；售后Top3不变${summary.aftersales.top3Unchanged}，未经观察结论${summary.aftersales.unobservedConclusions}。`, '',`全库新增checks覆盖${additions.length}例；旧有checks现在暂存审查${withheld.length}例，其中受限动作${reasons.restrictedOperations}、仅历史观察${reasons.historicalOnly}、暂未解析${reasons.unparsedReviewNeeded}。这些下降没有隐藏，旧checks全部保留在workflow.legacyChecksForReview。`, '', '## 固定售后场景差异','', '|案例|旧checks|新checks|状态变化|标记|','|---|---:|---:|---|---|', ...cases.map(r=>`|${r.id}|${r.oldCheckCount}|${r.newCheckCount}|${r.before.state} → ${r.after.state}|${r.flags.join('、')||'无'}|`), '', '## 真实HTTP','', ...http.map(r=>'- '+JSON.stringify(r)), '', '## 结论','',summary.conclusion,'', '原件匹配不是现场效果验证；提炼数量不是准确率。当前客户白名单正式启用仍为0，新库本轮不开放正式案例诊断。现网与4499均未切换。'];
+ fs.writeFileSync(path.join(out,'业务新旧对比.md'),lines.join('\n')+'\n');console.log(JSON.stringify(summary,null,2));
+ if(!allFreezePreserved||products.some(r=>!r.unchanged)||ordering.some(r=>!r.unchanged||!r.ssmUnchanged)||cases.some(r=>!r.retrievalUnchanged||r.after.conclusion)||http.some(r=>r.ok===false||r.protected===false))process.exitCode=1;
+}
+if(require.main===module)main().catch(e=>{console.error(e);process.exitCode=1});
+module.exports={main};
