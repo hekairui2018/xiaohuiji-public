@@ -61,6 +61,8 @@ function loadEnv() {
 }
 
 const ENV = loadEnv();
+const siteDisplayEnabled = ENV.FEISHU_SITE_DISPLAY === '1';
+const SITE_DISPLAY_FIELDS = ['产品型号', '版本信息', '自动建议-产品型号', '自动建议-版本信息', '自动建议-缺失或冲突', '结构化日志详情', '自动写入基线'].map(name => ({name, type: 1}));
 const CFG = {
   appId: ENV.FEISHU_APP_ID || '',
   appSecret: ENV.FEISHU_APP_SECRET || '',
@@ -177,7 +179,7 @@ async function ensureSchema(force = false) {
     const existing = new Set(fields.map((f) => f.field_name));
     const base = '/open-apis/bitable/v1/apps/' + CFG.appToken + '/tables/' + CFG.tableId + '/fields';
 
-    for (const f of EXPECTED_FIELDS) {
+    for (const f of [...EXPECTED_FIELDS, ...(siteDisplayEnabled ? SITE_DISPLAY_FIELDS : [])]) {
       if (existing.has(f.name)) continue;
       const payload = { field_name: f.name, type: f.type };
       if (f.property) payload.property = f.property;
@@ -320,7 +322,7 @@ async function buildFields(rec) {
   const model = sendModel(rec);
   const tsMin = clientTsMinute(rec.client_ts);
   const key = model ? ([tsMin || rec.log_date, model].filter(Boolean).join(' ')) : (devKey + '@' + rec.log_date);
-  const content = String(rec.content || '');
+  const content = String(rec.content || '') + (siteDisplayEnabled ? '\n\n[结构化上报原始字段，仅供日志详情核对]\n' + JSON.stringify(require('./log-display.cjs').recordDetails(rec), null, 2) : '');
   const buf = Buffer.from(content, 'utf8');
   const fileName = txtFileName(rec);
 
@@ -358,7 +360,7 @@ async function buildFields(rec) {
 
 // ---------------- 主入口：同步一条落盘记录 ----------------
 // rec: {machine_id, devKey, app_version, reason, log_date, content, sha1, client_ts, server_ts, size, upload_count, ...}
-async function syncHuiduRecord(rec) {
+async function syncHuiduRecordNow(rec) {
   if (!isConfigured()) return { action: 'skipped', reason: 'feishu_not_configured' };
   if (!rec || (!rec.machine_id && !rec.devKey) || !rec.log_date) throw new Error('syncHuiduRecord 缺少 devKey/machine_id/log_date');
   await ensureSchema();
@@ -369,6 +371,14 @@ async function syncHuiduRecord(rec) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const recordId = await findRecordId(sendModel(rec), rec.log_date, rec);
+      if (siteDisplayEnabled) {
+        const { buildDisplay, displayPatch, recordDetails } = require('./log-display.cjs');
+        const display = buildDisplay(rec.site_display_snapshot || rec);
+        const current = recordId ? await api('GET', base + '/' + recordId) : null;
+        Object.assign(built.fields, displayPatch(display, {existing: !!recordId,currentFields: current?.record?.fields || {}}));
+        const detail = JSON.stringify(recordDetails(rec));
+        built.fields['结构化日志详情'] = detail.length <= 16000 ? detail : JSON.stringify({machine_id: rec.machine_id, device_code: rec.device_code, note:'结构化明细较长，完整内容已保存在本条TXT附件和本地留底中，未截断原始证据'});
+      }
       if (recordId) {
         await api('PUT', base + '/' + recordId, { fields: built.fields });
         return { action: 'updated', record_id: recordId, key, localPath: built.localPath, fileName: built.fileName, fileToken: built.fileToken };
@@ -384,6 +394,14 @@ async function syncHuiduRecord(rec) {
       built.fields[field] = key;
     }
   }
+}
+
+let siteSyncQueue = Promise.resolve();
+function syncHuiduRecord(rec) {
+  if (!siteDisplayEnabled) return syncHuiduRecordNow(rec);
+  const task = siteSyncQueue.then(() => syncHuiduRecordNow(rec));
+  siteSyncQueue = task.catch(() => {});
+  return task;
 }
 
 module.exports = { syncHuiduRecord, isConfigured, getTenantToken, ensureSchema, readTableFields, CFG };

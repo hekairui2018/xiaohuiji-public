@@ -177,6 +177,9 @@ async function handleHuiduLog(req, res) {
   if (Buffer.byteLength(content, "utf8") > HUIDU_MAX_BODY) return sendJson(res, 413, { ok: false, message: "日志体积超过 5MB 上限" });
 
   const sha1 = crypto.createHash("sha1").update(content, "utf8").digest("hex");
+  let displaySnapshot;
+  try { displaySnapshot = require('./log-display.cjs').snapshot(obj); }
+  catch (e) { return sendJson(res, 400, { ok: false, message: e.message }); }
   // 现场设备信息（发送端可选上报；老版本/2.1.1 不带时留空，绝不靠正则猜日志）
   const cleanDev = (v, max) => { const s = typeof v === "string" ? v.trim() : ""; return s.length > max ? s.slice(0, max) : s; };
   const nv = {
@@ -210,6 +213,7 @@ async function handleHuiduLog(req, res) {
     idx = recs.findIndex((r) => r.devKey === devKey && r.log_date === log_date);
   }
   const old = idx >= 0 ? recs[idx] : null;
+  displaySnapshot = require('./log-display.cjs').mergeSnapshot(obj, old && old.site_display_snapshot);
   // 晚到的上报若不带某设备字段，保留已落盘的值，避免把设备列清空
   const mergeDev = (k) => (nv[k] || (old && old[k] ? String(old[k]) : "") || "");
   const rec = {
@@ -231,11 +235,13 @@ async function handleHuiduLog(req, res) {
     recv_models: mergeDev("recv_models"),
     recv_versions: mergeDev("recv_versions")
   };
+  rec.site_display_snapshot = displaySnapshot;
+  for (const k of ['sender_model', 'upgrade_run_id', 'receiver_inventory', 'receiver_upgrades']) if (displaySnapshot[k] !== undefined) rec[k] = displaySnapshot[k];
   // 正文 sha1 相同且设备字段也未变，才算重复；设备字段变化也要更新飞书
   const DEV_KEYS = ["product_models", "chips", "version_info", "site_env",
     "device_code", "device_class", "fpga_version", "device_app_version", "hdset_version", "hdplayer_version",
     "recv_models", "recv_versions"];
-  const devChanged = !!old && DEV_KEYS.some((k) => (old[k] || "") !== rec[k]);
+  const devChanged = !!old && (DEV_KEYS.some((k) => (old[k] || "") !== rec[k]) || JSON.stringify(old.site_display_snapshot) !== JSON.stringify(displaySnapshot));
   let dedup = false, updated = true;
   if (idx >= 0) {
     if (old.sha1 === sha1 && !devChanged) {

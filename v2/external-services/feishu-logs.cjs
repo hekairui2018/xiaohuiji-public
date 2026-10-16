@@ -1,13 +1,14 @@
 'use strict';
-// Reuse the unchanged, production-proven bitable writer with isolated V2 config/storage.
+// Reuse the shared bitable writer with isolated V2 config/storage; legacy mode stays compatible.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto');
+const {mergeSnapshot}=require('../../backend/log-display.cjs');
 function readConfig(file){const out={};if(file&&fs.existsSync(file))for(const line of fs.readFileSync(file,'utf8').split(/\r?\n/)){const m=/^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);if(m)out[m[1]]=m[2].replace(/^["']|["']$/g,'');}return out;}
 function loadWriter({directory,configFile,fetchImpl=fetch}){
  const dirname=path.join(directory,'writer'),envFile=path.join(dirname,'.env');
  const fsView={...fs,existsSync:p=>path.resolve(p)===envFile?!!configFile&&fs.existsSync(configFile):fs.existsSync(p),
   readFileSync:(p,...args)=>path.resolve(p)===envFile?fs.readFileSync(configFile,...args):fs.readFileSync(p,...args)};
  const source=path.resolve(__dirname,'../../backend/feishu-bitable.cjs'),context={module:{exports:{}},__dirname:dirname,Buffer,FormData,Blob,console,
-  require:name=>name==='fs'?fsView:require(name),fetch:(url,options={})=>fetchImpl(url,{...options,signal:AbortSignal.timeout(15000)})};
+  require:name=>name==='fs'?fsView:require('node:module').createRequire(source)(name),fetch:(url,options={})=>fetchImpl(url,{...options,signal:AbortSignal.timeout(15000)})};
  // The actual module is reused, not copied or string-rewritten. Its private ENV/TXT_DIR
  // resolve only inside this context; V1 .env, files, globals and token cache stay untouched.
  vm.runInNewContext(fs.readFileSync(source,'utf8'),context,{filename:'feishu-bitable.cjs'});return context.module.exports;
@@ -23,6 +24,8 @@ function createFeishuLogs({directory,configFile,fetchImpl,interval=60000,autoSta
   const id=digest(dev+'@'+input.log_date),file=path.join(directory,'records',id+'.json'),pending=path.join(directory,'outbox',id+'.json');
   const old=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):null;
   const record={...old};for(const [k,v]of Object.entries(input))if(v!==null&&v!==undefined&&v!=='')record[k]=v;
+  // Snapshot this upload, never inherit another run's before/after readings for presentation.
+  record.site_display_snapshot=mergeSnapshot(input,old?.site_display_snapshot);
   record.machine_id=String(input.machine_id||old?.machine_id||dev);record.devKey=dev;
   const comparison={...record};for(const k of ['server_ts','upload_count','contentHash'])delete comparison[k];
   const hash=digest(JSON.stringify(Object.fromEntries(Object.entries(comparison).sort(([a],[b])=>a.localeCompare(b)))));

@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-17",
+  "baseName": "HD升级助手运行日志V2",
+  "tableName": "运行日志V2",
+  "legacyTableNameUnchanged": true,
+  "sourceTemplate": "显示效果&接收卡&HDSet",
+  "regression": {"passed": 34, "failed": 0, "sampleType": "synthetic functional regression; not hardware acceptance"},
+  "realFeishuValidation": {
+    "casesPassed": 7,
+    "cases": ["single model", "multiple models", "same model distinct versions", "confirmed no upgrade", "upgrade failed", "missing fields", "automatic update followed by manual edit and clear"],
+    "syntheticOnly": true,
+    "writesToV1CustomerRecords": false,
+    "columnsAddedAndReadBack": ["V1", "V2"],
+    "actualV2HTTPUpload": 200,
+    "cloudReadbackSameRecord": true,
+    "pendingAfterValidation": 0
+  },
+  "implementation": ["structured model and version projection", "run/device/port/card isolation", "persisted per-field automatic baseline", "read current cloud cells before update", "manual edits and clears retained", "separate automatic suggestions", "full structured evidence in TXT"],
+  "testHarnessFailuresRetained": ["search API returns rich-text arrays; comparison normalized without changing expectations", "first HTTP proof selected a previous synthetic run; fixture identity corrected and original failure retained locally"],
+  "v2RuntimeEnabled": true,
+  "v1ProductionCodeDeployed": false,
+  "activeKnowledgeChanged": false,
+  "remaining": ["A-M physical cloud column order not migrated; existing primary column and field identities preserved", "assistant must implement the documented inventory and per-card confirmed-readback protocol", "legacy rows without an automatic baseline remain protected", "simultaneous human edit between GET and PUT remains a nontransactional API race"],
+  "rollback": "Disable FEISHU_SITE_DISPLAY and restart only the isolated V2. Existing rows, manual content, columns and evidence remain; no destructive schema migration was performed.",
+  "completion": "E/F content logic and V2 real sync verified; full A-M layout and V1 production rollout are not complete"
+}
