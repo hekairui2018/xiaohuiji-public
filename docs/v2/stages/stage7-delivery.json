@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/hekairui2018/xiaohuiji-public",
+  "branch": "main",
+  "gitCommit": "4f2c9ef7e2b48e549ca7d82262e188a11b4f7cb6",
+  "sourceContentCommit": "4f2c9ef7e2b48e549ca7d82262e188a11b4f7cb6",
+  "verifiedRemoteMainAtSourcePush": "4f2c9ef7e2b48e549ca7d82262e188a11b4f7cb6",
+  "reportPath": "docs/v2/reports/stage7-simple-questions.md",
+  "verifiedAt": "2026-10-17T00:38:32.529520+09:00",
+  "pushVerified": true,
+  "stagePassed": false,
+  "blindQuestions": 0,
+  "internalOriginalsIncluded": false,
+  "privateDatabasesIncluded": false,
+  "reviewZipIncluded": false,
+  "deployment": false,
+  "v1Modified": false,
+  "publicSyntheticTestsPassed": 21
+}

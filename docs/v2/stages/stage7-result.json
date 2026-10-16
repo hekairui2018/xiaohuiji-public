@@ -170,9 +170,9 @@
   "delivery": {
     "repository": "https://github.com/hekairui2018/xiaohuiji-public",
     "branch": "main",
-    "status": "pending-public-sync",
-    "gitCommit": null,
-    "pushVerified": false,
+    "status": "source-push-verified",
+    "gitCommit": "4f2c9ef7e2b48e549ca7d82262e188a11b4f7cb6",
+    "pushVerified": true,
     "internalOriginalsIncluded": false,
     "privateDatabasesIncluded": false,
     "reviewZipIncluded": false,

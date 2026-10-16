@@ -49,7 +49,7 @@ active、候选知识快照和原资源数据库哈希均未变；原件未动�
 
 ## 交付与回退
 
-公开仓库：hekairui2018/xiaohuiji-public；Git branch：main。Git commit及成功push核验以同目录stage7-delivery.json为准。公开内容仅源码、合成测试和脱敏指标，无原文、客户信息、内部路径、数据库或审查ZIP。GitHub同步不触发部署。
+公开仓库：hekairui2018/xiaohuiji-public；Git branch：main。Git commit（源码与首次报告）：`4f2c9ef7e2b48e549ca7d82262e188a11b4f7cb6`。源码push已成功，远端main已独立读取同值；详见 `../stages/stage7-delivery.json`。公开内容仅源码、合成测试和脱敏指标，无原文、客户信息、内部路径、数据库或审查ZIP。GitHub同步不触发部署。
 
 两个独立本地实现提交分别对应检索范围修复和交互/文件证据改进；可逐项revert。退出显式simple模式即可回到原交互，不修改知识快照。公开仓库不导入内部开发Git历史。
 
