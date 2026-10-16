@@ -1,0 +1,171 @@
+{
+  "F01": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "partial",
+      "issues": [
+        "clarification-wrong-focus",
+        "retrieval-not-attempted"
+      ]
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": [
+        "unnecessary-clarification",
+        "unsupported-example"
+      ]
+    }
+  },
+  "F02": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "wrong",
+      "issues": [
+        "wrong-object-scope-transfer"
+      ]
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": [
+        "clarification-wrong-focus"
+      ]
+    }
+  },
+  "F03": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "partial",
+      "issues": [
+        "over-clarification",
+        "retrieval-not-attempted"
+      ]
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": [
+        "unnecessary-clarification"
+      ]
+    }
+  },
+  "F04": {
+    "before-B": {
+      "grade": "wrong",
+      "issues": [
+        "unsupported-option-restriction"
+      ]
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "wrong",
+      "issues": [
+        "unsupported-operation"
+      ]
+    }
+  },
+  "F05": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": [
+        "wrong-entity-type"
+      ]
+    }
+  },
+  "F06": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "partial",
+      "issues": [
+        "unsupported-extra-operation"
+      ]
+    }
+  },
+  "F07": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "wrong",
+      "issues": [
+        "unsupported-operation"
+      ]
+    }
+  },
+  "F08": {
+    "before-B": {
+      "grade": "wrong",
+      "issues": [
+        "unrelated-model-association"
+      ]
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": [
+        "wrong-entity-type"
+      ]
+    }
+  },
+  "F09": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": []
+    }
+  },
+  "F10": {
+    "before-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "after-B": {
+      "grade": "correct",
+      "issues": []
+    },
+    "bare-C": {
+      "grade": "unanswered",
+      "issues": []
+    }
+  }
+}

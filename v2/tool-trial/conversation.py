@@ -4,6 +4,7 @@ from common import WORK,load,save
 from tools import Tools,ToolError,DEFINITIONS,clean
 from model import infer
 from evidence_delivery import model_view
+from simple_response import SIMPLE_CONTRACT,literal_answer
 
 SYSTEM='''你是小灰机工程资料助手。只按当前客户会话信息回答；型号后缀、硬件/软件/固件版本不能混同。未知条件不是已确认。
 复杂语言可以理解、追问，但工程参数/适用条件/固件兼容/故障原因必须有本次返回的原始证据；没有依据明确说不足，不凭预训练记忆编造。
@@ -24,40 +25,58 @@ EVIDENCE_CONTRACT='''证据阅读约定：get_case/read_document的caseEnvelope�
 先回答所问的关键内容，不机械重复所有栏目，不重复原文已经明确说明的结果为“未记录”。显示正常/恢复正常属于当时结果，不代表长期稳定。无额外归纳需要时不输出归纳段。'''
 
 LOCK=threading.Lock()
+SIMPLE_SLOTS=threading.BoundedSemaphore(5)
 
 def citation_check(answer,allowed):
  # Validate both documented ID types, even when the model truncates a bracket.
- ids=re.findall(r'blk-[a-f0-9]{16}-\d+|source-case:\d+',answer)
+ ids=re.findall(r'blk-[a-f0-9]{16}-\d+|source-case:\d+|file-[a-f0-9]{16}',answer)
  labels=re.findall(r'evidenceId\s*[:：]\s*([^\]\s,;]+)',answer,re.I)
  unknown=[x for x in ids+labels if x not in allowed]
  return list(dict.fromkeys(ids)),list(dict.fromkeys(unknown))
 
 class Conversation:
  def __init__(self):self.tools=Tools()
- def chat(self,question,session,arm='hybrid',direct_mode=None,filters=None,run_id=None):
+ def chat(self,question,session,arm='hybrid',direct_mode=None,filters=None,run_id=None,profile=None):
   if not isinstance(question,str) or not 1<=len(question)<=1500:raise ValueError('question-length')
   if not isinstance(session,str) or not re.fullmatch(r'[A-Za-z0-9_-]{4,70}',session):raise ValueError('session-id')
   if arm not in ['hybrid','bare']:raise ValueError('arm')
-  if not LOCK.acquire(blocking=False):return {'error':'single-lane-busy-retry-later'}
-  try:return self._chat(question,session,arm,direct_mode,filters or {},run_id or str(time.time_ns()))
-  finally:LOCK.release()
- def _chat(self,question,session,arm,direct_mode,filters,run_id):
+  if profile not in [None,'simple']:raise ValueError('profile')
+  if direct_mode not in [None,'files','text']:raise ValueError('direct-mode')
+  if filters is not None and (not isinstance(filters,dict) or set(filters)-{'model','version','limit'}):raise ValueError('filters')
+  params=(question,session,arm,direct_mode,filters or {},run_id or str(time.time_ns()),profile)
+  # Independent search must stay usable while the single inference lane is busy.
+  if direct_mode is not None and arm=='hybrid':return self._chat(*params)
+  queued=time.perf_counter();slot=False
+  if profile=='simple':
+   slot=SIMPLE_SLOTS.acquire(blocking=False)
+   if not slot:return {'error':'local-five-session-capacity-retry-later'}
+   acquired=LOCK.acquire(timeout=120)
+  else:acquired=LOCK.acquire(blocking=False)
+  if not acquired:
+   if slot:SIMPLE_SLOTS.release()
+   return {'error':'single-lane-busy-retry-later'}
+  try:return self._chat(*params,queue_seconds=round(time.perf_counter()-queued,3))
+  finally:
+   LOCK.release()
+   if slot:SIMPLE_SLOTS.release()
+ def _chat(self,question,session,arm,direct_mode,filters,run_id,profile=None,queue_seconds=0):
   if not isinstance(run_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{4,100}',run_id):raise ValueError('run-id')
   previous=WORK/'traces'/(run_id+'.json')
   if previous.exists():
    old=json.loads(previous.read_text(encoding='utf8'))
-   if old['question']!=question or old['session']!=session or old['arm']!=arm:raise ValueError('run-id-conflict')
+   if old['question']!=question or old['session']!=session or old['arm']!=arm or old.get('profile')!=profile or old.get('directMode')!=direct_mode or old.get('filters',{})!=filters:raise ValueError('run-id-conflict')
    return old
   start=time.perf_counter();folder=WORK/'sessions';folder.mkdir(exist_ok=True,parents=True);path=folder/(arm+'-'+session+'.json');history=json.loads(path.read_text(encoding='utf8')) if path.exists() else []
-  trace={'runId':run_id,'session':session,'arm':arm,'question':question,'historyBefore':history,'tools':[],'modelCalls':[],'protocolErrors':[],'startedUnix':time.time()}
-  if direct_mode=='files' and arm=='hybrid':
-   result=self.tools.execute('search_resources',{'query':question,**filters});trace.update({'mode':'explicit-file-search-no-model','directResults':result,'answer':'\n'.join(r['sourceName']+(' '+r['download'] if r.get('download') else '（仅资源目录）') for r in result['results']),'modelCalls':[],'citations':[],'seconds':round(time.perf_counter()-start,3)})
+  trace={'runId':run_id,'session':session,'arm':arm,'question':question,'profile':profile,'directMode':direct_mode,'filters':filters,'queueSeconds':queue_seconds,'historyBefore':history,'tools':[],'modelCalls':[],'protocolErrors':[],'startedUnix':time.time()}
+  if direct_mode is not None and arm=='hybrid':
+   result=self.tools.execute('search_resources' if direct_mode=='files' else 'search_document_blocks',{'query':question,**filters});trace.update({'mode':'explicit-'+direct_mode+'-search-no-model','directResults':result,'answer':literal_answer(result,direct_mode),'modelCalls':[],'citations':[r['evidenceId'] for r in result['results'] if r.get('evidenceId')],'seconds':round(time.perf_counter()-start,3)})
    save(WORK/'traces'/(run_id+'.json'),trace);return trace
-  messages=[{'role':'system','content':SYSTEM+('\n'+TOOL_INSTRUCTIONS+'\n'+EVIDENCE_CONTRACT if arm=='hybrid' else '')}]+history+[{'role':'user','content':question}];evidence={};first_answer=None;delivered=set()
+  contract=SIMPLE_CONTRACT if profile=='simple' else EVIDENCE_CONTRACT
+  messages=[{'role':'system','content':SYSTEM+('\n'+TOOL_INSTRUCTIONS+'\n'+contract if arm=='hybrid' else '')}]+history+[{'role':'user','content':question}];evidence={};first_answer=None;delivered=set()
   for round_no in range(4):
    force_final=round_no==3 or len(trace['tools'])>=5
    if force_final:messages.append({'role':'user','content':'本轮只读工具预算已结束。不要再发工具调用，直接根据已有证据简短回答；如果没有适用证据，请明确说不足并追问。'})
-   result=infer(run_id+'-r'+str(round_no),messages,DEFINITIONS if arm=='hybrid' and not force_final else None,'required' if round_no==0 and arm=='hybrid' else 'auto')
+   result=infer(run_id+'-r'+str(round_no),messages,DEFINITIONS if arm=='hybrid' and not force_final else None,'required' if round_no==0 and arm=='hybrid' and profile!='simple' else 'auto')
    trace['modelCalls'].append({k:result.get(k) for k in ['callId','seconds','firstTokenSeconds','usage','promptTokenCheck','promptCountMethod','error','finishReason']})
    if result.get('error'):trace['error']=result['error'];break
    message=result['message'];native=message.get('tool_calls',[])

@@ -1,0 +1,182 @@
+{
+  "fixed": {
+    "before-A": {
+      "n": 10,
+      "grades": {
+        "correct": 10
+      },
+      "averageSeconds": 0.057,
+      "p95Seconds": 0.085,
+      "meanAnswerCharacters": 0,
+      "mechanicalHeadingAnswers": 0,
+      "modelCallRatio": 0.0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "issues": {}
+    },
+    "after-A": {
+      "n": 10,
+      "grades": {
+        "correct": 10
+      },
+      "averageSeconds": 0.045,
+      "p95Seconds": 0.076,
+      "meanAnswerCharacters": 0,
+      "mechanicalHeadingAnswers": 0,
+      "modelCallRatio": 0.0,
+      "toolCalls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "issues": {}
+    },
+    "before-B": {
+      "n": 10,
+      "grades": {
+        "correct": 8,
+        "wrong": 2
+      },
+      "averageSeconds": 11.208,
+      "p95Seconds": 16.768,
+      "meanAnswerCharacters": 212.6,
+      "mechanicalHeadingAnswers": 10,
+      "modelCallRatio": 1.0,
+      "toolCalls": 11,
+      "inputTokens": 42279,
+      "outputTokens": 1889,
+      "issues": {
+        "unsupported-option-restriction": 1,
+        "unrelated-model-association": 1
+      }
+    },
+    "after-B": {
+      "n": 10,
+      "grades": {
+        "partial": 2,
+        "wrong": 1,
+        "correct": 7
+      },
+      "averageSeconds": 7.641,
+      "p95Seconds": 12.863,
+      "meanAnswerCharacters": 93.8,
+      "mechanicalHeadingAnswers": 0,
+      "modelCallRatio": 1.0,
+      "toolCalls": 9,
+      "inputTokens": 43614,
+      "outputTokens": 1063,
+      "issues": {
+        "clarification-wrong-focus": 1,
+        "retrieval-not-attempted": 2,
+        "wrong-object-scope-transfer": 1,
+        "over-clarification": 1
+      }
+    },
+    "bare-C": {
+      "n": 10,
+      "grades": {
+        "unanswered": 7,
+        "wrong": 2,
+        "partial": 1
+      },
+      "averageSeconds": 3.626,
+      "p95Seconds": 7.745,
+      "meanAnswerCharacters": 126.6,
+      "mechanicalHeadingAnswers": 0,
+      "modelCallRatio": 1.0,
+      "toolCalls": 0,
+      "inputTokens": 2338,
+      "outputTokens": 783,
+      "issues": {
+        "unnecessary-clarification": 2,
+        "unsupported-example": 1,
+        "clarification-wrong-focus": 1,
+        "unsupported-operation": 2,
+        "wrong-entity-type": 2,
+        "unsupported-extra-operation": 1
+      }
+    }
+  },
+  "improvedToCorrect": [
+    "F04",
+    "F08"
+  ],
+  "regressedFromCorrect": [
+    "F01",
+    "F02",
+    "F03"
+  ],
+  "blind": {
+    "n": 0,
+    "status": "not-run-fixed-set-regressions; no defensible stage pass threshold; no surrogate blind score"
+  },
+  "actualCallsAllRetainedRounds": 151,
+  "allRoundsInputTokens": 310389,
+  "allRoundsOutputTokens": 10108,
+  "sampledPeakGPUMiB": 11320,
+  "evidenceReadbackCount": 35,
+  "stagePassed": false,
+  "allowNextStage": false,
+  "grading": "Agent source review, not independent human engineering acceptance; A measures source retrieval only",
+  "limitations": [
+    "No scientifically supported stage pass threshold",
+    "Not all source questions are verbatim customer utterances",
+    "Only two long recorded expressions; insufficient to claim general complex-language ability",
+    "No blind experiment until fixed acceptance requirements supported"
+  ],
+  "recordContributorCorrection": 2,
+  "sourceScope": {
+    "fixedRecords": 10,
+    "sourceDocuments": 2,
+    "recordedContributors": 2,
+    "longOriginalExpressions": 2,
+    "verbatimEndCustomerOriginEstablished": false,
+    "priorStageScoresNotDirectlyComparable": true
+  },
+  "engineeringValidation": false,
+  "regressionTests": {
+    "node": 128,
+    "toolPython": 39,
+    "resourcePython": 19,
+    "extractionPython": 26,
+    "failures": 0
+  },
+  "scopeProbes": {
+    "n": 3,
+    "beforeExpectedSourceTop1": 0,
+    "afterExpectedSourceTop1": 3,
+    "notBlind": true
+  },
+  "fileSessionRegression": {
+    "n": 5,
+    "beforeNonRejected": 3,
+    "afterNonRejected": 5,
+    "separateSoftwareVersionPreserved": true,
+    "notBlind": true
+  },
+  "client": {
+    "existingPagesOnly": true,
+    "newFrontendImplemented": false,
+    "actualClickTest": true,
+    "twoTurns": true,
+    "sourceRead": true,
+    "newSessionClearsHistory": true,
+    "fiveConcurrentCustomersSingleInferenceLane": true,
+    "modelTransportDisabledSearchWorks": true,
+    "actualToolServiceStoppedSearchWorks": true,
+    "physicalModelShutdownTested": false,
+    "followupExactUIControlNotFullySupported": true
+  },
+  "defaultSimpleProfileEnabled": false,
+  "delivery": {
+    "repository": "https://github.com/hekairui2018/xiaohuiji-public",
+    "branch": "main",
+    "status": "pending-public-sync",
+    "gitCommit": null,
+    "pushVerified": false,
+    "internalOriginalsIncluded": false,
+    "privateDatabasesIncluded": false,
+    "reviewZipIncluded": false,
+    "deployment": false,
+    "v1Modified": false
+  }
+}

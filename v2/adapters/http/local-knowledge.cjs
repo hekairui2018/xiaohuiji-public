@@ -37,7 +37,7 @@ function createLocalKnowledge({resourceBase='http://127.0.0.1:4510',toolBase='ht
     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16000)return send(413,{error:'body-too-large'});chunks.push(chunk);}
     const b=JSON.parse(Buffer.concat(chunks)),session=b.localSession||b.sessionId;
     if(!/^[A-Za-z0-9_-]{4,70}$/.test(session||''))return send(400,{error:'invalid-session'});
-    const trace=await request(toolBase,'/chat',{question:b.message,session,arm:'hybrid',runId:b.localRunId||'ui-'+randomUUID(),evidenceCase:b.localMode==='complete'?b.evidenceCase:undefined,modelDisabled:b.modelDisabled===true});
+    const trace=await request(toolBase,'/chat',{question:b.message,session,arm:'hybrid',runId:b.localRunId||'ui-'+randomUUID(),evidenceCase:b.localMode==='complete'?b.evidenceCase:undefined,modelDisabled:b.modelDisabled===true,profile:b.localProfile});
     const blocks=[...(trace.providedEvidence?.blocks||[]),...(trace.tools||[]).flatMap(t=>[...(t.result?.blocks||[]),...(t.result?.results||[])])].filter(x=>x.blockId);
     const files=[...(trace.tools||[]).flatMap(t=>t.result?.results||[]),...(trace.providedEvidence?.blocks||[])].filter(x=>x.download||/\.pdf$/i.test(x.sourceName||''));
     const localFiles=[...new Map(files.map(x=>[x.resourceId,{name:x.sourceName,url:'/v2/local-knowledge/download?resourceId='+x.resourceId+'&versionId='+x.versionId}])).values()];

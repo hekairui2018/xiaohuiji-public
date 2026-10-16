@@ -44,7 +44,7 @@ class Tools:
   if model is not None and (not isinstance(model,str) or len(model)>40):raise ToolError('model-format')
   if version is not None and (not isinstance(version,str) or len(version)>40):raise ToolError('version-format')
   if type(limit)!=int or not 1<=limit<=3:raise ToolError('limit-range')
-  result=engine.query(INDEX,query,mode,model,50,version);out=[];context=None;db=database()
+  result=engine.query(INDEX,query,mode,model,50,version,authorized_keys=[k for k in self.policy if self.allowed(k)]);out=[];context=None;db=database()
   try:
    for hit in result['results']:
     key=hit.get('sha256') or 'metadata:'+str(hit.get('resourceId'))
@@ -63,7 +63,7 @@ class Tools:
      except ToolError:continue
      if cases:item.update({'caseId':'source-case:'+str(hit['blockId']),'recordType':'source-excerpt-not-verified-independent-case'})
      if context is None and record is not None:context=record
-    else:item={'resourceId':r['resourceId'],'versionId':r['versionId'],'sourceName':r['name'],'type':r['type'],'versions':hit['versions'],'sourceType':r['sourceType'],'download':('/download?resourceId='+r['resourceId']+'&versionId='+r['versionId']) if r['downloadAllowed'] else None,'readMore':{'resourceId':r['resourceId'],'versionId':r['versionId']},'verificationStatus':'file-identity-only-not-engineering-validation'}
+    else:item={'evidenceId':'file-'+hashlib.sha256((r['resourceId']+'\n'+r['versionId']).encode()).hexdigest()[:16],'resourceId':r['resourceId'],'versionId':r['versionId'],'sourceName':r['name'],'type':r['type'],'versions':hit['versions'],'sourceType':r['sourceType'],'download':('/download?resourceId='+r['resourceId']+'&versionId='+r['versionId']) if r['downloadAllowed'] else None,'readMore':{'resourceId':r['resourceId'],'versionId':r['versionId']},'verificationStatus':'file-identity-only-not-engineering-validation'}
     item['score']=hit['score'];out.append(item)
     if len(out)>=limit:break
   finally:db.close()

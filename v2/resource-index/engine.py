@@ -408,7 +408,7 @@ def index_documents(work, limit=0, contains='', timeout=60, retry=False):
     db.close();return dict(results)
 
 
-def query(work, text, mode='all', model=None, limit=10, version=None):
+def query(work, text, mode='all', model=None, limit=10, version=None, authorized_keys=None):
     started=time.perf_counter();db=connect(work,True);limit=max(1,min(int(limit),50));terms=list(dict.fromkeys(fts_tokens(text).split()))
     requested={normalize_model(model)} if model else model_tokens(text)
     # Long firmware identifiers are not treated as known product aliases.
@@ -421,6 +421,18 @@ def query(work, text, mode='all', model=None, limit=10, version=None):
     if not match and not requested:db.close();return {'query':text,'results':[],'elapsedMs':0}
     conditions=["l.state='present'", "l.kind!='sensitive-metadata-only'"]
     args=[]
+    # Apply caller authorization BEFORE either candidate limit. Post-filtering a
+    # global Top N can hide permitted evidence behind unrelated/private hits.
+    # None preserves the ordinary standalone catalogue search unchanged.
+    if authorized_keys is not None:
+        hashes=sorted(k for k in authorized_keys if not k.startswith('metadata:'))
+        resource_ids=sorted(k[len('metadata:'):] for k in authorized_keys if k.startswith('metadata:'))
+        clauses=[]
+        for column,values in [('l.sha256',hashes),('l.resource_id',resource_ids)]:
+            if values:
+                clauses.append(column+' IN ('+','.join('?' for _ in values)+')')
+                args.extend(values)
+        conditions.append('('+(' OR '.join(clauses) if clauses else '0')+')')
     if requested:
         conditions.append('EXISTS(SELECT 1 FROM models m WHERE m.location_id=l.id AND m.model IN ('+','.join('?' for _ in requested)+'))');args.extend(sorted(requested))
         conditions.append('(NOT EXISTS(SELECT 1 FROM model_owners o WHERE o.location_id=l.id) OR EXISTS(SELECT 1 FROM model_owners o WHERE o.location_id=l.id AND o.model IN ('+','.join('?' for _ in requested)+')))');args.extend(sorted(requested))
