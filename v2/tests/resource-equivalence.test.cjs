@@ -32,7 +32,7 @@ test('Software download, original manual versions and actual videos are linked w
 });
 test('Quick chip/software/video/product routes never invoke dialogue handlers, including both current page addresses',async()=>{
  let calls=0;const fail=()=>{calls++;throw Error('Dialogue must stay separate');};const server=createServer(createApp({handlers:{ordering:fail,aftersales:fail,consultation:fail}}));await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
- try{for(const route of ['/quick','/huiai'])assert.equal((await fetch(base+route)).status,200);
+ try{for(const route of ['/wiki','/huiai'])assert.equal((await fetch(base+route)).status,200);
   const chip=await fetch(base+'/api/search?q=2053').then(r=>r.json());assert.ok(chip.chipFirmware.primary.facts.length);assert.ok(chip.chipFirmware.firmwareItems.length);
   const model=await fetch(base+'/api/search?q='+encodeURIComponent('R712固件')).then(r=>r.json());assert.equal(model.results[0].name,'HD-R712');assert.ok(model.relatedChips.length);
   const software=await fetch(base+'/api/software?q=HDSet').then(r=>r.json());assert.ok(software.software.items[0].videos.primary);
@@ -48,8 +48,8 @@ test('Dialogue consults shared firmware/chip/media knowledge without traversing 
 test('Huiai renders inline media and clickable original files rather than losing them in plain text or calling quick',()=>{
  class Element{constructor(tag){this.tag=tag;this.children=[];this.style={};this.scrollTop=0;}appendChild(n){this.children.push(n);}append(...nodes){this.children.push(...nodes);}getBoundingClientRect(){return {top:0};}}
  const calls=[],ctx={document:{createElement:tag=>new Element(tag)},aiMessages:new Element('messages'),lastNumericOptions:null,renderSoftware:s=>{calls.push(['software',s]);return new Element('software');},renderVideoAnswer:v=>{calls.push(['videos',v]);return new Element('video');},renderChipFirmwareCard:v=>{calls.push(['chips',v]);return 'safe-card';},renderNearbyChips:()=>new Element('nearby')};
- vm.createContext(ctx);vm.runInContext(fs.readFileSync('frontend/v2-components.js','utf8'),ctx);
- const source=fs.readFileSync('frontend/app.js','utf8'),start=source.indexOf('function addAssistantMessage(data)'),end=source.indexOf('function renderSoftware(sw)',start);vm.runInContext(source.slice(start,end),ctx);
+ vm.createContext(ctx);vm.runInContext(fs.readFileSync('v2/frontend/v2-components.js','utf8'),ctx);
+ const source=fs.readFileSync('v2/frontend/app.js','utf8'),start=source.indexOf('function addAssistantMessage(data)'),end=source.indexOf('function renderSoftware(sw)',start);vm.runInContext(source.slice(start,end),ctx);
  for(const query of ['HDSet软件','复位视频','ICN2053固件','R712固件','A3L规格书'])ctx.addAssistantMessage({model:'v2-rules',status:'answer',result:{resources:app.resourceLookup(query)},reply:'source reply'});
  assert.ok(calls.find(([kind,sw])=>kind==='software'&&sw.items[0].videos.primary.url));assert.ok(calls.find(([kind,vs])=>kind==='videos'&&vs.every(v=>v.url)));assert.ok(calls.some(([kind])=>kind==='chips'));assert.ok(ctx.lastNumericOptions===null);
  const files=ctx.aiMessages.children.slice(-2).flatMap(m=>m.children[0].children[0].children).flatMap(p=>p.children).filter(e=>e.tag==='a');assert.ok(files.some(a=>a.href.includes('.bin')));assert.ok(files.some(a=>a.href.includes('.pdf')));

@@ -39,8 +39,9 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
     if(req.v2Public&&(!['spec','manual','firmware'].includes(cat)||history!=='current')){send(403,{error:'public-catalog-scope-not-enabled'});return;}
     if(!['spec','manual','firmware','other','pending','history'].includes(cat)||!['current','all','only'].includes(history)){send(400,{error:'invalid_category_or_history'});return;}
     const limit=url.searchParams.has('limit')?Number(url.searchParams.get('limit')):null,offset=Number(url.searchParams.get('offset')||0);
+    const view=url.searchParams.get('view')||'grouped';if(!['grouped','flat'].includes(view)){send(400,{error:'invalid_view'});return;}
     if(!Number.isInteger(offset)||offset<0||(limit!==null&&(!Number.isInteger(limit)||limit<1||limit>200))||(offset&&limit===null)){send(400,{error:'invalid_pagination'});return;}
-    send(200,await media(await quick.docs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit})));return;
+    send(200,await media(await quick.docs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view})));return;
    }
    if(serveStatic(req,res,undefined,{localKnowledge:!req.v2Public&&!!localKnowledge,offlineKnowledge:!req.v2Public&&!!offlineKnowledge}))return;
   }

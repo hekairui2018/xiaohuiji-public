@@ -11,8 +11,9 @@ test('Source LCD folders classify individual documents, not every document belon
  const quick=createQuickService(appFor([p]),{localCatalog:async()=>resources});const docs=(await quick.docs('manual')).docs;
  assert.equal(docs.total,2);assert.equal(docs.groups.find(g=>g.key==='lcd').fileCount,1);assert.equal(docs.groups.filter(g=>g.key!=='lcd').reduce((n,g)=>n+g.fileCount,0),1);
  const meta=identifyDocument({name:'使用指南.pdf',folders:['产品资料','产品规格书（LCD）']});assert.equal(meta.kind,'spec');assert.equal(meta.category,'lcd');
- assert.equal(identifyDocument({name:'X9规格书.pdf',folders:['认证证书']}).kind,'pending');
- assert.equal(identifyDocument({name:'X9规格书.pdf',folders:['认证证书'],documentMetadata:{kind:'spec'}}).kind,'spec');
+ // Directory ownership now wins over a name hint; a real content conflict is held for review.
+ assert.equal(identifyDocument({name:'X9规格书.pdf',folders:['认证证书']}).kind,'other');
+ assert.equal(identifyDocument({name:'X9规格书.pdf',folders:['认证证书'],documentMetadata:{kind:'spec'}}).kind,'pending');
  assert.equal(identifyDocument({name:'电池规格书.pdf',folders:['品质资料（合格证、质量报告、电池型号）','电池型号']}).kind,'spec');
  assert.equal(identifyDocument({name:'接线参考.pdf',folders:['培训资料']}).kind,'other');
  assert.deepEqual(identifyDocument({name:'17LR169 Certificate.pdf',folders:['认证证书']}).modelIds,[]);

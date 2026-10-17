@@ -43,3 +43,21 @@
 `catalogStatus:{state,reason,lastSuccessfulAt,cacheSeconds}`：ready / stale-cache / unavailable / not-loaded，目录缓存最长30秒；服务失败保留上次缓存并明确状态，原件链接仍逐项校验。软件items保留旧结构，新增packages需要前端显式渲染；本轮未修改前端。
 
 公网仍只取原批准快照和云端白名单，不加载本地新增目录，内部文件ID/原文证据移除；不能把本地结果搬到公网页面。13条未定位的当前旧引用继续url:null并说明错误，不自动借用相近型号或其他版本。历史入口还可能包含无法定位的旧历史引用。
+
+## 网页入口
+
+资料页仅使用`/wiki`，旧`/quick`网页已移除。`/huiai`保持独立。开发代理应使用后端工作区最新版`v2/tools/start-frontend.cjs`，`--frontend-root`指向前端独立资源目录；旧前端分支代理需停止，不能继续用旧路由。内部兼容产品查询API与网页路径分别维护，不删除已有业务功能。
+
+## 规格书、说明书、操作视频：来源目录与平铺（2026-10-17）
+
+本轮只整理这三类，软件/固件的原API与按钮保持。来源目录为类别和浏览分组主要依据，不能证明型号适用或兼容。目录与明确正文/格式冲突用`classificationConflict`标记并保留待确认，文件名仅线索；原始路径和版本记录仍在索引，不由前端改写。
+
+- 推荐目录请求：`GET /api/docs?cat=spec&view=flat`，说明书用`cat=manual`；`view=grouped`（默认）保留现有兼容结构。非法view返回400。
+- flat响应：`docs.groups:[{key,label,count,items:[文件]}]`，没有products子层。直接渲染分类标题和文件列表，不能再展开来源目录、系列、型号文件夹。每份文件的`associatedModels[]`可作为行内型号标签。
+- `docs.flatGroups`始终提供同类的一层平铺结果。flat模式分页基于各平铺组去重后的文件条目；同一原件跨分类仍可能有多个入口，顶层uniqueFileCount保持内容身份去重。grouped模式的原关联分页语义不变。
+- 来源分类K/R接收卡、A/H播放盒、云平台/APP合并；B/C/D/T/VP/MS、分布式中控、信号传输、配件等沿用真实来源分类。LCD不同来源入口合并LCD。没有来源分类时只保留一个分类待确认组，不由型号前缀继续发明分类。
+- `GET /api/videos`及`outline=1`本地仅操作视频，`groups[].videos[]`直接是文件；`purpose,purposeBasis`说明来源目录或仅标题线索，未读取视频不能声称内容已核实。`excludedNonOperationCount`为宣传/培训/用途不明确候选数，不是删除数。outline数量在原件验证/去重后可变化。
+- 型号查询仍用`/api/search`，新增`results[].resourceGroups`为规格书/说明书/操作视频三个直接文件数组；`pendingResources`单列。软件、固件原docGroups/firmwareGroup不移除；没有可靠的型号-视频关联时数组为空，不把全局视频混进型号结果。
+- 历史、未知版本、型号范围与目录分类分别处理；不得为了展示简洁丢掉原始身份或把未知版本当旧版。正文搜索、原件URL、预览URL仍复用返回值。
+
+8520是后端和已集成应用，8620是独立前端开发代理；两个工作区各有自己的页面，不以同一个/wiki路径把两套页面合并。正常顶层浏览器链接已不再被误当跨站API，但跨站接口、iframe、写请求和不允许的Host/来源仍禁止。

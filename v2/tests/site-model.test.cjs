@@ -8,7 +8,7 @@ const originalVideos=require('../../data/video-manifest.json').items.filter(v=>v
 test('Same-site quick and huiai pages and real resources work without a model or dialogue interception',async()=>{
  let calls=0;const fail=()=>{calls++;throw Error('Quick must not call dialogue');};const server=createServer(createApp({handlers:{ordering:fail,aftersales:fail,consultation:fail}}));
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port;
- try{for(const route of ['/quick','/huiai','/app.js']){const r=await fetch(base+route);assert.equal(r.status,200);assert.ok((await r.text()).length>100);}
+ try{for(const route of ['/wiki','/huiai','/app.js']){const r=await fetch(base+route);assert.equal(r.status,200);assert.ok((await r.text()).length>100);}
   const search=await fetch(base+'/api/search?q=R712').then(r=>r.json());assert.equal(search.results[0].name,'HD-R712');assert.ok(search.results[0].docGroups.some(g=>g.key==='firmware'));
   assert.ok(search.results[0].specGroups.some(g=>g.key==='spec'&&g.items.length));assert.ok(search.results[0].firmwareGroup.items.every(f=>f.url));
   for(const cat of ['spec','manual','firmware']){const d=await fetch(base+'/api/docs?cat='+cat).then(r=>r.json());assert.ok(d.docs.total>0);}

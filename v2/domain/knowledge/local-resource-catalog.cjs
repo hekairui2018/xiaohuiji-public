@@ -34,14 +34,14 @@ function augmentProducts(products,resources){
   for(const id of ids){let p=byId.get(id);if(!p){p={modelId:id,displayName:id,parameters:{},documents:[],firmware:[],identityStatus:'filename-only-resource-association'};result.push(p);byId.set(id,p);seen.set(p,new Set());}
    if(kind==='firmware'){if(!p.firmware.some(f=>f.file===name))p.firmware.push({file:name,kind:'firmware',status:'local-indexed',publicUrl:'/v2/offline/file?id='+r.locationId,sourceMode:'local',sizeBytes:r.sizeBytes,sha256:r.sha256||null,resourceId:r.resourceId,resourceVersionId:r.versionId,classificationBasis:'registered-firmware-folder-and-model-hint',associationStatus:'filename-candidate',verificationStatus:'resource-only-not-compatibility-verified',resourceOnly:true});}
    else {
-    const details={documentMetadata:r.documentMetadata,resourceId:r.resourceId,resourceVersionId:r.versionId,classificationBasis:document.basis,associationStatus:document.associationStatus,resourceOnly:['filename-candidate','model-conflict'].includes(document.associationStatus),sourceLocationId:r.locationId,parseStatus:r.parseStatus||null,displayCategory:document.displayCategory,sourceDomain:document.sourceDomain,sourceDomainConflict:document.sourceDomainConflict};
+    const details={documentMetadata:r.documentMetadata,resourceId:r.resourceId,resourceVersionId:r.versionId,classificationBasis:document.basis,classificationConflict:document.classificationConflict,sourceGroup:document.sourceGroup,sourceRole:document.sourceRole,detectedKind:document.detectedKind,associationStatus:document.associationStatus,resourceOnly:['filename-candidate','model-conflict'].includes(document.associationStatus),sourceLocationId:r.locationId,parseStatus:r.parseStatus||null,displayCategory:document.displayCategory,sourceDomain:document.sourceDomain,sourceDomainConflict:document.sourceDomainConflict};
     const matches=p.documents.filter(d=>fileIdentity(d.name||d.file||'')===fileIdentity(name));
-    for(const d of matches){if(!d.kind||d.kind==='other'||(kind!=='pending'&&r.documentMetadata?.kind)||document.associationStatus==='model-conflict')d.kind=kind;Object.assign(d,details);}
+    for(const d of matches){if(document.sourceRole||!d.kind||d.kind==='other'||(kind!=='pending'&&r.documentMetadata?.kind)||document.associationStatus==='model-conflict')d.kind=kind;Object.assign(d,details);}
     const hash=d=>d.sha256||(d.sourceReferences||[d.sourceReference]).find(x=>x?.originalName===(d.name||d.file)&&x.originalSha256)?.originalSha256;
     if(matches.some(d=>hash(d)&&hash(d)===r.sha256))continue;
     const unresolved=matches.find(d=>!hash(d));
     if(unresolved){unresolved.sha256=r.sha256;unresolved.sourceLocationId=r.locationId;unresolved.catalogSourceLabel=(r.folders||[]).slice(-2).join(' / ');}
-    else p.documents.push({name,kind,sha256:r.sha256,url:null,verificationStatus:document.basis,...details,catalogSourceLabel:(r.folders||[]).slice(-2).join(' / ')});
+    else p.documents.push({name,kind,sha256:r.sha256,url:document.detectedKind&&r.availabilityState!=='missing'?'/v2/offline/file?id='+r.locationId:null,verificationStatus:document.basis,...details,catalogSourceLabel:(r.folders||[]).slice(-2).join(' / ')});
    }
   }
  }

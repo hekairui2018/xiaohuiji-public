@@ -5,15 +5,19 @@ const {sourceClassification}=require('./source-classification.cjs');
 const formats=/\.(pdf|docx?|pptx?|xlsx?|wps|txt|md)$/i;
 function identifyDocument(resource,products=[]){
  const name=resource.name||'',intro=resource.documentIntro||'',meta=resource.documentMetadata||{},source=sourceClassification(resource);
- if(!formats.test(name))return null;
+ if(!formats.test(name)&&!source.formatConflict)return null;
  let kind=/规格书|产品规格|技术规格|(?<![A-Za-z])specifications?(?![A-Za-z])/i.test(name)?'spec':/说明书|操作说明|使用说明|用户手册|操作手册|产品手册|使用手册|系统操作手册|调试手册|调试指导手册|调试说明|连接说明|(?<![A-Za-z])manual(?![A-Za-z])|\b(?:user|operation|installation|programming|hardware)\s+guide\b/i.test(name)?'manual':null;
- let basis=kind?'explicit-document-title':null;
- if(meta.certificate||/certificate|认证证书|检测报告|合格证|test report/i.test(name)){kind='other';basis='certificate-document-not-specification';}
- else if(meta.kind){kind=meta.kind;basis=meta.classificationStatus||'original-title-confirmed';}
- else if(source.certificate){basis=kind?'source-folder-title-role-conflict':source.basis;kind=kind?'pending':'other';}
+ const filenameKind=kind,bodyKind=meta.certificate?'other':meta.kind||null;
+ let basis=kind?'filename-role-hint':null,classificationConflict=null;
+ if(source.kind){
+  kind=source.kind;basis=source.basis;
+  if(source.formatConflict){kind='pending';classificationConflict='source-folder-file-format-conflict';}
+  else if(bodyKind&&source.exclusive&&bodyKind!==source.kind){kind='pending';classificationConflict='source-folder-original-content-conflict';}
+  if(classificationConflict)basis=classificationConflict;
+ }else if(bodyKind){kind=bodyKind;basis=meta.classificationStatus||'original-title-confirmed';}
+ else if(/certificate|认证证书|检测报告|合格证|test report/i.test(name)){kind='other';basis='certificate-document-not-specification';}
  if(!kind&&/^\s*(?:PRODUCT\s+SPECIFICATIONS?|产品规格书|技术规格书)\s*$/im.test(intro)){kind='spec';basis='cached-original-cover';}
  if(!kind&&/^\s*(?:用户手册|产品说明书|使用说明书|USER\s+MANUAL|PRODUCT\s+MANUALS?)\s*$/im.test(intro)){kind='manual';basis='cached-original-cover';}
- if(!kind&&source.kind){kind=source.kind;basis=source.basis;}
  if(!kind&&meta.coverModels?.length){kind='pending';basis='original-model-role-unconfirmed';}
  if(!kind)return null;
  const ids=new Set(products.filter(p=>p.modelId&&documentBelongs(name,p.modelId)).map(p=>p.modelId));
@@ -29,6 +33,6 @@ function identifyDocument(resource,products=[]){
  }
  const context=[name,...resource.folders||[]].join(' / '),software=/HD\s*(?:Set|Player|Show|Sign|2018|2020)|LCDPlayer|Magic\s*Player|ToolBox|云平台|小灰云|屏掌控|LedArt|APP\b|SDK/i.test(context);
  const lcd=source.domain==='lcd';
- return {kind,modelIds:[...ids],basis,sourceDomain:source.domain,sourceDomainConflict:source.domainConflict,displayCategory:lcd?'lcd':null,associationStatus:modelConflict?'model-conflict':meta.classificationStatus==='manual-review'?'manual-reviewed-association':meta.coverModels?.length?'original-cover-model':'filename-candidate',collection:software?(lcd?'LCD 软件与操作':'软件 · APP · 云平台'):kind==='pending'?(lcd?'LCD 待确认资料':'待确认资料'):kind==='other'?(lcd?'LCD 认证 · 培训 · 技术参考':'认证 · 培训 · 技术参考'):kind==='spec'?(lcd?'LCD 规格书（适用产品待核对）':'其他规格书（适用产品待核对）'):(lcd?'LCD 通用操作手册（适用产品待核对）':'通用操作手册（适用产品待核对）'),category:lcd?'lcd':software?'software-cloud':'unassigned-documents'};
+ return {kind,modelIds:[...ids],basis,classificationConflict,detectedKind:source.detectedKind,filenameKind,originalKind:bodyKind,sourceGroup:source.browseGroup,sourceRole:source.kind,sourceDomain:source.domain,sourceDomainConflict:source.domainConflict,displayCategory:source.browseGroup?.key||(lcd?'lcd':null),associationStatus:modelConflict?'model-conflict':meta.classificationStatus==='manual-review'?'manual-reviewed-association':meta.coverModels?.length?'original-cover-model':'filename-candidate',collection:software?(lcd?'LCD 软件与操作':'软件 · APP · 云平台'):kind==='pending'?(lcd?'LCD 待确认资料':'待确认资料'):kind==='other'?(lcd?'LCD 认证 · 培训 · 技术参考':'认证 · 培训 · 技术参考'):kind==='spec'?(lcd?'LCD 规格书（适用产品待核对）':'其他规格书（适用产品待核对）'):(lcd?'LCD 通用操作手册（适用产品待核对）':'通用操作手册（适用产品待核对）'),category:source.browseGroup?.key||(lcd?'lcd':software?'software-cloud':'unassigned-documents')};
 }
 module.exports={identifyDocument};

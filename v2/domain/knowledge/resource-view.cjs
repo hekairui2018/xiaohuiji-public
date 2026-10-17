@@ -9,10 +9,12 @@ function resourceView(item,{kind=item.kind||null,models=[]}={}){
   documentVersion:item.documentVersion||null,versionStatus,
   classificationBasis:item.classificationBasis||null,scopeEvidence:item.scopeEvidence||meta.scopeEvidence||[],
   associationStatus:item.associationStatus||'unknown',parseStatus:item.parseStatus||null,
-  reviewRequired:item.reviewRequired??(!!item.resourceOnly||['filename-candidate','model-conflict','unknown'].includes(item.associationStatus||'unknown')||versionStatus==='conflict')};
+  reviewRequired:item.reviewRequired??(!!item.classificationConflict||!!item.resourceOnly||['filename-candidate','model-conflict','unknown'].includes(item.associationStatus||'unknown')||versionStatus==='conflict')};
 }
-function paginateDocs(body,{offset=0,limit=null}={}){
- const docs=body.docs,all=docs.groups.flatMap(g=>g.products?g.products.flatMap(p=>p.items):g.items||[]);
+function paginateDocs(body,{offset=0,limit=null,view='grouped'}={}){
+ const docs=body.docs,flat=require('./flat-resource-groups.cjs');
+ if(view==='flat')docs.groups=flat.flatCatalogGroups(docs);
+ const all=docs.groups.flatMap(g=>g.products?g.products.flatMap(p=>p.items):g.items||[]);
  docs.items=all;
  if(limit!==null){
   const allowed=new Set(all.slice(offset,offset+limit));let cursor=0;
@@ -21,6 +23,7 @@ function paginateDocs(body,{offset=0,limit=null}={}){
   docs.items=all.slice(offset,offset+limit);
  }
  docs.pagination={offset:limit===null?0:offset,limit,total:all.length,returned:docs.items.length,nextOffset:limit!==null&&offset+limit<all.length?offset+limit:null};
+ docs.view=view;docs.flatGroups=flat.flatCatalogGroups(docs);
  return body;
 }
 module.exports={resourceView,paginateDocs};

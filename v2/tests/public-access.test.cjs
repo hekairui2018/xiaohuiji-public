@@ -4,7 +4,7 @@ const {createLanGuard}=require('../adapters/http/lan-access.cjs'),{createPublicC
 test('Exact tunnel origin grants only public quick routes; internal files, sessions and write APIs stay denied',()=>{
  const guard=createLanGuard({address:'192.168.1.100',cidr:'192.168.1.100/24',port:8520,publicOrigin:'http://trial.example'});
  const run=(url,method='GET',extra={})=>{const req={url,method,headers:{host:'trial.example',...extra},socket:{remoteAddress:'127.0.0.1'}},res={setHeader(){},writeHead(s){this.status=s;},end(){}};return{ok:guard(req,res),status:res.status,public:req.v2Public};};
- assert.equal(run('/quick').ok,true);assert.equal(run('/wiki').ok,true);assert.equal(run('/api/docs?cat=spec').ok,true);
+ assert.equal(run('/quick').status,403);assert.equal(run('/wiki').ok,true);assert.equal(run('/api/docs?cat=spec').ok,true);
  for(const route of ['/huiai','/v2/offline/file?id=1','/v2/offline/session?id=other','/v2/resources/original/'+'a'.repeat(64),'/api/health','/api/huidu/log'])assert.equal(run(route).status,403);
  assert.equal(run('/api/search','POST').status,403);assert.equal(run('/quick','GET',{host:'attacker.example'}).status,403);assert.equal(run('/quick','GET',{origin:'http://attacker.example'}).status,403);
 });
