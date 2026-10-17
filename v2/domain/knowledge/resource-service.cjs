@@ -2,6 +2,7 @@
 const {modelId}=require('../identity/model-id.cjs');
 const {extractKnownModels}=require('../identity/extract-models.cjs');
 const {createMediaCatalog}=require('./media-catalog.cjs');
+const {identifyDocument}=require('./document-catalog.cjs');
 const key=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 function createResourceService(knowledge,evidence){
  const products=knowledge?.products()||[],assets=knowledge?.assets()||{videos:[],software:[],manuals:[],softwareCatalog:[]},media=createMediaCatalog(assets);
@@ -40,7 +41,7 @@ function createResourceService(knowledge,evidence){
    if(devices.some(d=>d.revisionId))return {kind:'firmware',status:'needs_input',items:[],reason:'hardware-revision-not-established-in-source'};
    const items=allFiles.filter(f=>modelIds.includes(f.modelId));if(modelIds.length)return {kind:'firmware',status:items.length?'found':'needs_input',items,reason:items.length?null:'no-original-file-established-for-this-model'};
   }
-  if(/规格书|说明书|手册/.test(text)&&devices.length){const kind=/规格书/.test(text)?'spec':'manual',items=devices.flatMap(d=>(knowledge?.findProducts(d.modelId)||[]).flatMap(p=>(p.documents||[]).filter(doc=>doc.kind===kind).map(doc=>({...doc,modelId:p.modelId}))));return {kind:'documents',status:items.length?'found':'needs_input',items,reason:items.length?null:'no-source-linked-document-for-this-model'};}
+  if(/规格书|说明书|手册/.test(text)&&devices.length){const kind=/规格书/.test(text)?'spec':'manual',items=devices.flatMap(d=>(knowledge?.findProducts(d.modelId)||[]).flatMap(p=>(p.documents||[]).filter(doc=>(identifyDocument({name:doc.name,documentMetadata:doc.documentMetadata})?.kind||doc.kind)===kind).map(doc=>({...doc,modelId:p.modelId}))));return {kind:'documents',status:items.length?'found':'needs_input',items,reason:items.length?null:'no-source-linked-document-for-this-model'};}
   const software=media.softwareItems(text);if(software.length)return {kind:'software',items:software};
   if(/芯片|固件|规格书|说明书/.test(text))return {kind:/芯片/.test(text)?'chips':/固件/.test(text)?'firmware':'documents',status:'needs_input',items:[],reason:'need-exact-model-and-source-details'};
   return null;

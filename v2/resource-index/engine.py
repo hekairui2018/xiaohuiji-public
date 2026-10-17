@@ -468,16 +468,155 @@ def query(work, text, mode='all', model=None, limit=10, version=None, authorized
         key=(hit['kind'],hit.get('sha256') or hit.get('locationId'),hit.get('ordinal'))
         if key in seen:continue
         seen.add(key)
-        locations=db.execute('SELECT id,path,name,version_id,cloud_id,cloud_url FROM locations WHERE '+('sha256=?' if hit.get('sha256') else 'id=?')+" AND state='present'",(hit.get('sha256') or hit.get('locationId'),)).fetchall()
+        locations=db.execute('SELECT id,path,name,resource_id,version_id,mtime_ns,cloud_id,cloud_url FROM locations WHERE '+('sha256=?' if hit.get('sha256') else 'id=?')+" AND state='present'",(hit.get('sha256') or hit.get('locationId'),)).fetchall()
         if requested:
             locations=[l for l in locations if db.execute('SELECT 1 FROM models WHERE location_id=? AND model IN ('+','.join('?' for _ in requested)+')',[l['id']]+sorted(requested)).fetchone()]
         if not locations:continue
-        hit['locations']=[dict(l) for l in locations];hit['name']=locations[0]['name'];hit['versionId']=locations[0]['version_id']
+        hit['locations']=[dict(l) for l in locations];hit['name']=locations[0]['name'];hit['versionId']=locations[0]['version_id'];hit['resourceId']=locations[0]['resource_id']
         hit['sourceType']='unknown';hit['scopeStatus']='model-mention-or-path-hint-not-compatibility';hit['versions']=re.findall(r'(?i)\bV\d+(?:\.\d+)+',hit['name'])
         hit['readMore']='/read?block='+str(hit['blockId']) if hit['kind']=='passage' else '/resource?id='+str(locations[0]['id'])
         out.append(hit)
         if len(out)>=limit:break
     db.close();return {'query':text,'requestedModels':sorted(requested),'results':out,'elapsedMs':round((time.perf_counter()-started)*1000,3)}
+
+
+def document_filename_identity(name):
+    # Presentation syntax only: keep suffixes, versions, language and extension.
+    # Never remove arbitrary punctuation or perform partial/fuzzy model matching.
+    name=re.sub(r'^HD(?:[-_ ]|(?=[A-Z]+\d))', '', name, flags=re.I)
+    return re.sub(r'\s+', ' ', re.sub(r'\s*&\s*', ' ', name)).strip().casefold()
+
+
+def resolve_documents(work, items):
+    """Resolve registered originals only. Never fuzzy-match a model/version or rescan data."""
+    if not isinstance(items,list) or len(items)>1024:
+        raise ValueError('invalid-document-list')
+    db=connect(work,True)
+    try:
+        roots=[Path(r[0]).resolve() for r in db.execute('SELECT DISTINCT root FROM scans WHERE finished IS NOT NULL')]
+        # The existing catalogue has no name index. Fetch the requested names in
+        # bounded batches, instead of scanning all locations once per document.
+        # No index/schema writes or cached filesystem decisions are introduced.
+        names=sorted({item['name'] for item in items if isinstance(item,dict) and isinstance(item.get('name'),str) and item['name'] and len(item['name'])<=512 and not any(c in item['name'] for c in ('/','\\','\0'))})
+        by_name=collections.defaultdict(list)
+        for offset in range(0,len(names),500):
+            batch=names[offset:offset+500]
+            rows=db.execute("SELECT id,path,name,resource_id,version_id,sha256,bytes,mtime_ns FROM locations WHERE name IN ("+','.join('?' for _ in batch)+") AND state='present' AND kind='document'",batch).fetchall()
+            for row in rows:by_name[row['name']].append(row)
+        missing={document_filename_identity(name) for name in names if name not in by_name}
+        alternatives=collections.defaultdict(list)
+        relocated=collections.defaultdict(list)
+        if missing:
+            current_by_hash=collections.defaultdict(list);historical=[]
+            for row in db.execute("SELECT id,path,name,resource_id,version_id,sha256,bytes,mtime_ns,state FROM locations WHERE state IN ('present','missing') AND kind='document'"):
+                if row['state']=='missing':
+                    if row['name'] in names and row['sha256']:historical.append(row)
+                    continue
+                current_by_hash[row['sha256']].append(row)
+                identity=document_filename_identity(row['name'])
+                if identity in missing:alternatives[identity].append(row)
+            for row in historical:relocated[row['name']].extend(current_by_hash.get(row['sha256'],[]))
+        # A registered missing location is an identity record, not an absent
+        # filename guess. Relocate only the same known hash; never substitute
+        # a newer/different content version just because its name resembles it.
+        results=[]
+        for item in items:
+            name=item.get('name') if isinstance(item,dict) else None
+            expected=item.get('sha256') if isinstance(item,dict) else None
+            if not isinstance(name,str) or not name or len(name)>512 or any(c in name for c in ('/','\\','\0')) or (expected is not None and not re.fullmatch(r'[a-f0-9]{64}',str(expected))):
+                results.append({'available':False,'reason':'invalid-document-identity'});continue
+            rows=by_name.get(name,[]) or alternatives.get(document_filename_identity(name),[]) or relocated.get(name,[])
+            if not rows:
+                results.append({'available':False,'reason':'original-not-registered'});continue
+            # Website policy excludes signed editions, including files whose
+            # edition is recorded only by their containing folder.
+            def edition(row):
+                label=re.sub(r'未签章|未盖章|未签字|unsigned','',row['path'],flags=re.I)
+                if re.search(r'签章|盖章|签字|(?:^|[\\/\s_.(-])signed(?:[\\/\s_.)-]|$)',label,re.I):return 'signed'
+                return 'neutral' if re.search(r'中性|(?:^|[\\/\s_.(-])neutral(?:[\\/\s_.)-]|$)',label,re.I) else 'standard'
+            rows=[r for r in rows if edition(r)!='signed']
+            if not rows:
+                results.append({'available':False,'reason':'signed-edition-hidden'});continue
+            if expected:
+                rows=[r for r in rows if r['sha256']==expected]
+                if not rows:
+                    results.append({'available':False,'reason':'registered-content-does-not-match-source'});continue
+            else:
+                # Branded and neutral manuals are different presentation editions,
+                # not content duplicates. Default catalogue chooses the standard
+                # edition only when explicitly labelled alternatives coexist.
+                standard=[r for r in rows if edition(r)=='standard']
+                if standard:rows=standard
+            hashes={r['sha256'] for r in rows}
+            if None in hashes or len(hashes)!=1:
+                results.append({'available':False,'reason':'same-name-content-conflict' if len(hashes)>1 else 'registered-content-hash-missing'});continue
+            selected=None
+            for row in rows:
+                try:
+                    p=Path(row['path']).resolve()
+                    if not any(p==root or root in p.parents for root in roots):continue
+                    stat=p.stat()
+                    if (stat.st_size,stat.st_mtime_ns)==(row['bytes'],row['mtime_ns']):
+                        selected=row;break
+                except OSError:continue
+            if selected:
+                results.append({'available':True,'name':name,'originalName':selected['name'],'documentEdition':edition(selected),'resolutionBasis':'registered-missing-location-same-hash' if relocated.get(name) else 'registered-exact-name-and-content-identity' if selected['name']==name else 'registered-filename-format-and-content-identity','locationId':selected['id'],'resourceId':selected['resource_id'],'versionId':selected['version_id'],'sha256':selected['sha256']})
+            else:
+                results.append({'available':False,'reason':'registered-original-unavailable-or-changed'})
+        return {'results':results}
+    finally:db.close()
+
+
+@lru_cache(maxsize=4096)
+def asset_digest(path, size, mtime_ns):
+    # Independent runtime cache, not the source index or original drive. Reuse
+    # only the exact path/size/mtime identity already used by the in-memory cache.
+    cache=PROJECT/'tmp/v2-resource-hash-cache';key=hashlib.sha256((path+'\0'+str(size)+'\0'+str(mtime_ns)).encode('utf8')).hexdigest();entry=cache/(key+'.json')
+    try:
+        saved=json.loads(entry.read_text(encoding='utf8'))
+        if saved.get('path')==path and saved.get('bytes')==size and saved.get('mtime_ns')==mtime_ns and re.fullmatch('[a-f0-9]{64}',saved.get('sha256','')):return saved['sha256']
+    except (OSError,ValueError):pass
+    result=digest(Path(path));after=Path(path).stat()
+    if (after.st_size,after.st_mtime_ns)!=(size,mtime_ns):raise OSError('asset changed during verification')
+    try:
+        cache.mkdir(parents=True,exist_ok=True);temporary=entry.with_suffix('.'+uuid.uuid4().hex+'.tmp');temporary.write_text(J({'path':path,'bytes':size,'mtime_ns':mtime_ns,'sha256':result}),encoding='utf8');os.replace(temporary,entry)
+    except OSError:pass
+    return result
+
+
+def resolve_assets(work, items):
+    """Exact registered binary identities only; no inferred firmware compatibility."""
+    if not isinstance(items,list) or len(items)>512:raise ValueError('invalid-asset-list')
+    db=connect(work,True)
+    try:
+        roots=[Path(r[0]).resolve() for r in db.execute('SELECT DISTINCT root FROM scans WHERE finished IS NOT NULL')]
+        names={i.get('name') for i in items if isinstance(i,dict) and isinstance(i.get('name'),str) and len(i['name'])<=512 and not any(c in i['name'] for c in ('/','\\','\0'))}
+        names=sorted(names);by_name=collections.defaultdict(list)
+        if names:
+            for row in db.execute("SELECT * FROM locations WHERE name IN ("+','.join('?' for _ in names)+") AND state='present'",names):by_name[row['name']].append(row)
+        results=[]
+        for item in items:
+            name=item.get('name','') if isinstance(item,dict) else '';expected=item.get('sha256') if isinstance(item,dict) else None
+            if expected and not re.fullmatch('[a-f0-9]{64}',str(expected)):results.append({'available':False,'reason':'invalid-resource-hash'});continue
+            candidates=[]
+            for row in by_name.get(name,[]):
+                if Path(name).suffix.lower() not in ('.bin','.mp4','.webm','.mov'):continue
+                try:
+                    p=Path(row['path']).resolve();s=p.stat()
+                    if not any(root in p.parents for root in roots) or (s.st_size,s.st_mtime_ns)!=(row['bytes'],row['mtime_ns']):continue
+                    sha=row['sha256']
+                    duplicates=by_name[name]
+                    verify_duplicate_video=p.suffix.lower() in ('.mp4','.webm','.mov') and len(duplicates)>1 and len({r['bytes'] for r in duplicates})==1 and sum(r['bytes'] for r in duplicates)<=512*1024*1024
+                    if (p.suffix.lower()=='.bin' and (expected or len(duplicates)>1)) or verify_duplicate_video:sha=asset_digest(str(p),s.st_size,s.st_mtime_ns)
+                    if expected and sha!=expected:continue
+                    candidates.append((row,sha))
+                except OSError:continue
+            if not candidates:results.append({'available':False,'reason':'local-original-not-confirmed'});continue
+            identities={sha for row,sha in candidates}
+            if len(candidates)>1 and (None in identities or len(identities)!=1):results.append({'available':False,'reason':'same-name-content-unverified' if None in identities else 'same-name-content-conflict'});continue
+            row,sha=candidates[0];results.append({'available':True,'locationId':row['id'],'resourceId':row['resource_id'],'versionId':row['version_id'],'sizeBytes':row['bytes'],'sha256':sha,'resolutionBasis':'registered-name-and-source-hash' if expected else 'registered-exact-name-not-compatibility-verification'})
+        return {'results':results}
+    finally:db.close()
 
 
 def read_block(work, block_id, radius=2):
@@ -542,7 +681,7 @@ def report(work):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--work',default=str(DEFAULT_WORK));p.add_argument('--parse-one');sub=p.add_subparsers(dest='command')
-    s=sub.add_parser('scan');s.add_argument('--root',default='./authorized-resources');s.add_argument('--hash-cache')
+    s=sub.add_parser('scan');s.add_argument('--root',required=True);s.add_argument('--hash-cache')
     s=sub.add_parser('index');s.add_argument('--limit',type=int,default=0);s.add_argument('--contains',default='');s.add_argument('--timeout',type=int,default=60);s.add_argument('--retry',action='store_true')
     s=sub.add_parser('search');s.add_argument('text');s.add_argument('--mode',choices=['all','files','text'],default='all');s.add_argument('--model');s.add_argument('--version');s.add_argument('--limit',type=int,default=10)
     s=sub.add_parser('read');s.add_argument('block',type=int)
