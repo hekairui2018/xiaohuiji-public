@@ -19,3 +19,13 @@ test('Old records recover category from exact originals or one confirmed product
 test('User-confirmed AI digital interaction category is browsed under LCD without inventing source domain',()=>{
  const r=sourceClassification({name:'OLED产品规格书.pdf',folders:['售前资料','2-解决方案','6-全域AI数字交互解决方案','3-产品规格书']});assert.equal(r.browseGroup.key,'lcd');assert.equal(r.browseGroup.label,'LCD');assert.equal(r.domain,null);
 });
+
+
+test('User-confirmed GPS antenna and EC25 accessory specifications join communication modules',()=>{
+ const names=['GPS模块天线 XH4P-2.54对插头3芯线1.5米.pdf','Quectel_EC25系列_LTE_Standard_模块产品规格书_V2.0.pdf'];
+ const resources=names.map((name,i)=>({name,folders:['产品规格书（LED）','配件'],locationId:5888+i,sha256:String(i+1).repeat(64)}));
+ const rows=augmentProducts([],resources);assert.equal(rows.length,1);assert.equal(rows[0].displayName,'通讯模块及天线');assert.equal(rows[0].modelId,null);assert.deepEqual(rows[0].documents.map(d=>d.name).sort(),names.sort());
+ for(const d of rows[0].documents){assert.equal(d.displayCategory,'accessory');assert.equal(d.kind,'spec');assert.equal(d.associationStatus,'component-source-directory-not-product-identity');}
+ assert.equal(sourceClassification({name:names[0],folders:['产品规格书（LED）','VP系列-处理器']}).component,null);
+ assert.equal(sourceClassification({name:'HD-Y1规格书 V1.1.pdf',folders:['产品规格书（LED）','配件']}).component,null);
+});

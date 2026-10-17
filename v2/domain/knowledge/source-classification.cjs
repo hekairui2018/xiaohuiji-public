@@ -28,7 +28,8 @@ function sourceClassification(resource){
   if(s==='文档'&&folders.slice(0,i).some(x=>x==='操作说明')&&folders[i+1])group=browseGroup(folders[i+1]);
   if(s==='操作视频'&&folders[i+1])group=browseGroup(folders[i+1]);
  }
- const component=folders.some(s=>/^(?:4G|5G|LTE|通讯|通信)模块规格书$/i.test(s))?'communication-module':folders.some(s=>/^(?:产品型号电池一览表|迈洛克电池报告)$/.test(s))?'battery':null;
+ const confirmedAccessoryModule=group?.key==='accessory'&&/^(?:GPS模块天线\s+XH4P-2\.54|Quectel[_ ]EC25系列[_ ]LTE[_ ]Standard[_ ]模块产品规格书)/i.test(name);
+ const component=confirmedAccessoryModule||folders.some(s=>/^(?:4G|5G|LTE|通讯|通信)模块规格书$/i.test(s))?'communication-module':folders.some(s=>/^(?:产品型号电池一览表|迈洛克电池报告)$/.test(s))?'battery':null;
  const directoryTable=/\.(?:xlsx?|csv)$/i.test(name)&&(resource.documentMetadata?.evidence||[]).some(e=>(e.locator?.cells||[]).filter(c=>/^(?:资料名称|资料分类|资料内容)$/.test(c.value||'')).length>=2)&&resource.documentMetadata?.classificationStatus!=='manual-review';
  if(directoryTable){kind='other';exclusive=false;}
  const conflict=!!(resource.sourceDomainConflict||lcd&&led);
