@@ -14,7 +14,7 @@ function attachMissingSourceGroups(products,resources){
    const group=one(exact);if(group){d.displayCategory=group.key;d.sourceGroup=group;d.displayCategoryBasis='registered-original-directory';}
   }
   const byKind=new Map();for(const d of p.documents){if(isSignedDocument(d)||!d.sourceGroup||!d.displayCategory||d.displayCategory==='unassigned-documents')continue;add(byKind,d.kind,d.sourceGroup);}
-  for(const d of p.documents){if(d.displayCategory&&d.displayCategory!=='unassigned-documents')continue;const group=one(byKind.get(d.kind));if(group){d.displayCategory=group.key;d.sourceGroup=group;d.displayCategoryBasis='same-product-confirmed-source-category';}}
+  for(const d of p.documents){if(d.displayCategory&&d.displayCategory!=='unassigned-documents')continue;const group=one(byKind.get(d.kind));if(group&&!d.sourceDomainConflict&&!(d.sourceDomain==='led'&&group.key==='lcd')&&!(d.sourceDomain==='lcd'&&group.key!=='lcd')){d.displayCategory=group.key;d.sourceGroup=group;d.displayCategoryBasis='same-product-confirmed-source-category';}}
  }
  return products;
 }

@@ -68,3 +68,12 @@
 `GET /api/docs?cat=spec|manual|firmware|other|pending&list=1` retains the existing groups/products/items layout, counts, order, file identities, names, version and download fields. It omits repeated docs.items/docs.flatGroups and deep classification evidence; full default and history responses stay available. No pagination is required for the current compact per-category lists (largest observed compressed payload about174KB). Existing offset/limit and view parameters remain valid.
 
 Local software/video and document metadata responses support gzip and Server-Timing. Cache freshness is30 seconds; a last successful response can be served while revalidating for at most an additional60 seconds. Original downloads retain live checks. The isolated runtime prepares common lists before listening; startup preparation duration is logged. Public requests remain separately scoped.
+
+## 2026-10-18：可用原件与缺失引用分离（本地）
+
+实际原件解析后，本地当前目录及产品查询不再把`original-not-registered`、`registered-original-unavailable-or-changed`的缺失引用混入主要资料/下载列表。此行为不表示不同版本已经确认互相替代。
+
+- `/api/docs?cat=spec`等当前文档列表：`docs.groups/products/items`及总数、分页按主要列表计算；新增`docs.unavailableRecords`（文件原字段、`model`、`categoryLabel`）和`docs.unavailableReferenceCount`保留缺失证据。轻量`list=1`也保留该字段。
+- `/api/search?q=型号`：主要`docGroups`、`specGroups`及`specFiles/specLinks`使用现有原件；新增`unavailableResources`保留缺失引用。
+- `history=all/only`保留原有查询结果。未知版本、不同硬件、内容身份冲突及临时服务失败不按缺失旧引用处理。
+- 前端将缺失记录单独收起；普通列表展示实际可用文件，不改原文件名及预览/下载地址，不删除知识快照记录。

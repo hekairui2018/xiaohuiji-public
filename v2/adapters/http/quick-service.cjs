@@ -47,6 +47,7 @@ function createQuickService(app,{resolveDocuments,localCatalog}={}){
    }
    const relatedChips=series.size?all().filter(p=>p.modelId&&!seen.has(p.modelId)&&series.has(p.parameters?.productSeries)).slice(0,12).map(p=>({label:p.displayName,q:p.displayName,relation:'same-source-product-series-not-compatibility'})):[];
    for(const p of results)for(const g of p.docGroups)g.items=g.items.map(d=>resourceView(d,{models:[p.modelId]}));
+   if(localCatalog&&resolveDocuments)for(const product of results)require('../../domain/knowledge/available-documents.cjs').separateProductReferences(product);
    return {query:q,count:results.length,productCount:results.length,results:results.map(productCategories),relatedChips,chipFirmware:chip?.view||null};},
   async software(q){const source=app.resourceMedia.softwareItems(''),registered=require('../../domain/knowledge/software-access.cjs').softwareAccess(source),term=String(q||'').trim().toLowerCase(),rows=registered.filter(s=>!term||[s.name,s.id,...s.aliases||[]].some(a=>String(a).toLowerCase().includes(term)||term.includes(String(a).toLowerCase()))),body={query:q,software:rows.length?{isList:!q,items:rows}:null};
    if(localCatalog){const resources=await localCatalog(),packages=require('../../domain/knowledge/software-packages.cjs').softwarePackages(resources,q);require('../../domain/knowledge/media-catalog.cjs').attachLocalSoftware(body,resources);if(rows.length||packages.packages.length||packages.historicalPackages.length)body.software={...body.software,isList:!q,items:body.software?.items||[],...packages};body.catalogStatus=localCatalog.status?.()||null;}
@@ -70,11 +71,13 @@ function createQuickService(app,{resolveDocuments,localCatalog}={}){
    for(const item of views)item.unavailableMessage=item.available?null:unavailableMessages[item.unavailableReason]||'暂无法提供已确认的原件';
    let hiddenSignedCount=0;for(const product of grouped){const before=product.items.length;product.items=product.items.filter(d=>d.unavailableReason!=='signed-edition-hidden');hiddenSignedCount+=before-product.items.length;product.count=product.items.length;}total-=hiddenSignedCount;
    let groups=cat==='firmware'?grouped:[...definitions.values()].filter(c=>buckets.has(c.key)).map(c=>{const products=buckets.get(c.key).map(p=>({...p,items:p.items.filter(d=>d.unavailableReason!=='signed-edition-hidden').sort(newestFirst)})).filter(p=>p.items.length).sort((a,b)=>newestIn(b.items).localeCompare(newestIn(a.items))||a.model.localeCompare(b.model,'zh-Hans-CN',{numeric:true}));return {key:c.key,label:c.label,products,count:products.length,fileCount:products.reduce((n,p)=>n+p.items.length,0)};}).filter(g=>g.count);
-   const visible=grouped.flatMap(p=>p.items),identity=d=>d.sha256||d.resourceVersionId||'unresolved:'+d.name;
+   let unavailableRecords=[];
+   if(localCatalog&&resolveDocuments&&!includeHistory&&!historyOnly&&cat!=='firmware'){const separated=require('../../domain/knowledge/available-documents.cjs').separateCatalogReferences(groups);groups=separated.groups;unavailableRecords=separated.unavailableRecords;total=groups.reduce((n,g)=>n+g.fileCount,0);}
+   const visible=groups.flatMap(g=>g.products?g.products.flatMap(p=>p.items):g.items||[]),identity=d=>d.sha256||d.resourceVersionId||'unresolved:'+d.name;
    const uniqueFileCount=new Set(visible.map(identity)).size,uniqueAvailableFileCount=new Set(visible.filter(d=>d.available).map(identity)).size;
    for(const item of views)Object.assign(item,resourceView(item,{models:item.associatedModels}));
    if(cat==='spec'&&localCatalog)groups=require('../../domain/knowledge/specification-groups.cjs').specificationGroups(groups);
-   return paginateDocs({cat,catalogStatus:localCatalog?.status?.()||null,docs:{associationCount:total,uniqueFileCount,uniqueAvailableFileCount,modelCount:grouped.filter(p=>p.items.length).length,total,groups,includeHistory:includeHistory||historyOnly,historyOnly,hiddenSignedCount,hiddenHistoricalCount:historyCount,versionPolicy:'explicit-document-family-only; unversioned originals retained; firmware variants remain separate'}},{offset,limit,view});}
+   return paginateDocs({cat,catalogStatus:localCatalog?.status?.()||null,docs:{associationCount:total,uniqueFileCount,uniqueAvailableFileCount,modelCount:new Set(groups.flatMap(g=>g.products?g.products.map(p=>p.model):[g.model])).size,total,groups,unavailableRecords,unavailableReferenceCount:unavailableRecords.length,includeHistory:includeHistory||historyOnly,historyOnly,hiddenSignedCount,hiddenHistoricalCount:historyCount,versionPolicy:'explicit-document-family-only; unversioned originals retained; firmware variants remain separate'}},{offset,limit,view});}
  };
 }
 module.exports={createQuickService,productView,documentLabel};

@@ -50,6 +50,7 @@
    }
    section.append(body);root.append(section);sections.push(record);
   }
+  if(product.unavailableResources?.length){const records=el('details');records.className='doc-missing-records';records.append(el('summary','原件缺失记录（'+product.unavailableResources.length+'）'));for(const item of product.unavailableResources)records.append(row(item,{label:item.categoryLabel||'资料'}));root.append(records);}
   root.append(empty);input.oninput=filter;return root;
  }
 
