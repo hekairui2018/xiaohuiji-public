@@ -1605,12 +1605,27 @@ async function doSearch() {
 }
 
 // 「软件」分类：软件与型号无关，走确定性 /api/software；单软件给完整卡，全家桶给清单（点“视频/资料”原地展开卡片，不跳小灰机）
-async function fetchSoftware(kw) {
-  const resp = await fetch("/api/software?q=" + encodeURIComponent(kw));
-  const data = await resp.json();
-  if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
-  return data.software || null;
+const mediaMetadataCache = new Map();
+const mediaMetadataPending = new Map();
+async function fetchMediaMetadata(kind, kw = '') {
+  const key = JSON.stringify([kind, kw]);
+  const cached = mediaMetadataCache.get(key);
+  if (cached && Date.now() - cached.time < 30000) return cached.data;
+  if (mediaMetadataPending.has(key)) return mediaMetadataPending.get(key);
+  const request = (async () => {
+    const resp = await fetch('/api/' + (kind === 'software' ? 'software' : 'videos') + '?q=' + encodeURIComponent(kw));
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error || '资料服务暂不可用');
+    const result = data[kind === 'software' ? 'software' : 'video'] || null;
+    mediaMetadataCache.set(key, { data: result, time: Date.now() });
+    if (mediaMetadataCache.size > 32) mediaMetadataCache.delete(mediaMetadataCache.keys().next().value);
+    return result;
+  })();
+  mediaMetadataPending.set(key, request);
+  try { return await request; } finally { mediaMetadataPending.delete(key); }
 }
+async function fetchSoftware(kw) { return fetchMediaMetadata('software', kw); }
+
 async function renderSoftwareCategory(qArg) {
   const requestId = ++quickRequestId;
   const kw = (qArg == null ? quickSearchInput.value.trim() : String(qArg).trim());
@@ -1692,12 +1707,8 @@ async function renderSoftwareCategory(qArg) {
 }
 
 // 「视频」分类：操作/教学视频按操作主题组织，与型号无关，走确定性 /api/videos；默认折叠，展开才拉流，省流量
-async function fetchVideos(kw) {
-  const resp = await fetch("/api/videos?q=" + encodeURIComponent(kw));
-  const data = await resp.json();
-  if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
-  return data.video || null;
-}
+async function fetchVideos(kw) { return fetchMediaMetadata('video', kw); }
+
 function videoFileName(name) {
   return /\.mp4$/i.test(name) ? name : name + ".mp4";
 }
@@ -1818,7 +1829,7 @@ async function fetchDocs(cat) {
   if (cached && Date.now() - cached.time < 30000) return cached.data;
   if (docsPending.has(cat)) return docsPending.get(cat);
   const request = (async () => {
-    const resp = await fetch("/api/docs?cat=" + encodeURIComponent(cat));
+    const resp = await fetch("/api/docs?cat=" + encodeURIComponent(cat) + "&list=1");
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
     const docs = data.docs || null;
@@ -2260,12 +2271,24 @@ if (quickCats) {
 
 // Only JSON catalog metadata is warmed; no document or original-file URLs are fetched.
 function preloadDocumentCatalogs() {
-  const warm = () => Promise.allSettled(['spec', 'manual'].map(cat => fetchDocs(cat)));
-  if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 500 });
+  const tasks = ['spec', 'manual', 'firmware', 'software', 'video', 'other', 'pending'];
+  let next = 0;
+  async function worker() {
+    while (next < tasks.length) {
+      const cat = tasks[next++];
+      try {
+        if (cat === 'software') await fetchSoftware('');
+        else if (cat === 'video') await fetchVideos('');
+        else await fetchDocs(cat);
+      } catch (_) { /* Failed preloads are retried by the normal click path. */ }
+    }
+  }
+  const warm = () => Promise.allSettled([worker(), worker()]);
+  if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 100 });
   else setTimeout(warm, 0);
 }
-if (document.readyState === 'complete') preloadDocumentCatalogs();
-else window.addEventListener('load', preloadDocumentCatalogs, { once: true });
+if (document.readyState !== 'loading') preloadDocumentCatalogs();
+else window.addEventListener('DOMContentLoaded', preloadDocumentCatalogs, { once: true });
 
 function buildSoftwareAccessButton(s) {
   const button=document.createElement('button');button.type='button';button.className='sw-btn-download sw-btn-sm';button.textContent=s.access.type==='qr'?'扫码下载':'访问入口';

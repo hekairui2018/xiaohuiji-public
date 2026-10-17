@@ -11,8 +11,12 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  const publicQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments});
  const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
  const orderingDialogue=createDialogueService(app,{operation:'ordering'});
- const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache();
- return http.createServer(async(req,res)=>{
+ const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache({staleMs:60000});
+ const localMedia=async body=>offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;
+ const list=require('./catalog-list.cjs').catalogList;
+ const loadDocs=async(cat,options,listOnly)=>{const body=await localMedia(await localQuick.docs(cat,options));return listOnly?list(body):body;};
+ const docKey=(cat,history,offset,limit,view,listOnly)=>JSON.stringify([cat,history,offset,limit,view,listOnly]);
+ const server=http.createServer(async(req,res)=>{
   if(accessGuard&&!accessGuard(req,res))return;
   const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
   const route=req.url.split('?')[0];
@@ -28,13 +32,13 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
    const media=async body=>!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;
    if(route==='/v2/software-access/screen-control.png'&&!req.v2Public){const fs=require('node:fs'),path=require('node:path'),file=path.resolve(__dirname,'../../../tmp/v2-offline-runtime/software-assets/pingzhangkong-download.png');if(!fs.existsSync(file)){send(404,{error:'download-image-not-configured'});return;}res.writeHead(200,{'Content-Type':'image/png','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res);return;}
    if(route==='/api/search'){send(200,await media(await quick.search(q)));return;}
-   if(route==='/api/software'){send(200,await media(await quick.software(q)));return;}
+   if(route==='/api/software'){if(req.v2Public)send(200,await media(await quick.software(q)));else await catalogResponse(req,res,'software:'+q,async()=>localMedia(await localQuick.software(q)));return;}
    if(route==='/api/videos'){
     const body=quick.videos(q);
     if(url.searchParams.get('outline')==='1'){
      if(!req.v2Public&&offlineKnowledge?.localizeMedia)send(200,await offlineKnowledge.localizeMedia(body,{metadataOnly:true}));
      else send(200,{cat:'video',metadataOnly:true,groups:body.video.topicGroups.map(g=>({key:g.key,label:g.label,count:g.count})),total:body.video.total});
-    }else send(200,await media(body));return;
+    }else if(req.v2Public)send(200,await media(body));else await catalogResponse(req,res,'video:'+q,()=>localMedia(body));return;
    }
    if(route==='/api/docs'){
     const cat=url.searchParams.get('cat'),history=url.searchParams.get('history')||'current';
@@ -43,9 +47,10 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
     const limit=url.searchParams.has('limit')?Number(url.searchParams.get('limit')):null,offset=Number(url.searchParams.get('offset')||0);
     const view=url.searchParams.get('view')||'grouped';if(!['grouped','flat'].includes(view)){send(400,{error:'invalid_view'});return;}
     if(!Number.isInteger(offset)||offset<0||(limit!==null&&(!Number.isInteger(limit)||limit<1||limit>200))||(offset&&limit===null)){send(400,{error:'invalid_pagination'});return;}
+    const listOnly=url.searchParams.get('list')==='1';
     // Public transformation and authorization remain uncached and separate.
     if(req.v2Public)send(200,await media(await quick.docs(cat,{includeHistory:false,historyOnly:false,websiteOnly:true,offset,limit,view})));
-    else await catalogResponse(req,res,JSON.stringify([cat,history,offset,limit,view]),async()=>media(await quick.docs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view})));
+    else await catalogResponse(req,res,docKey(cat,history,offset,limit,view,listOnly),()=>loadDocs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view},listOnly));
     return;
    }
    if(serveStatic(req,res,undefined,{localKnowledge:!req.v2Public&&!!localKnowledge,offlineKnowledge:!req.v2Public&&!!offlineKnowledge}))return;
@@ -61,6 +66,13 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
    send(output.status==='invalid_request'?400:200,output);
   }catch{send(500,{error:'internal_error'});}
  });
+ server.prepareCatalogs=async()=>{
+  if(!offlineKnowledge)return;
+  for(const cat of ['spec','manual','firmware','other','pending'])await catalogResponse.prepare(docKey(cat,'current',0,null,'grouped',true),()=>loadDocs(cat,{websiteOnly:true},true));
+  await catalogResponse.prepare('software:',async()=>localMedia(await localQuick.software('')));
+  await catalogResponse.prepare('video:',()=>localMedia(localQuick.videos('')));
+ };
+ return server;
 }
 if(require.main===module){const port=Number(process.argv[2]||4389);if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid port');const localKnowledge=process.env.XHJ_LOCAL_KNOWLEDGE==='1'?require('./local-knowledge.cjs').createLocalKnowledge():null;createServer(undefined,{localKnowledge}).listen(port,'127.0.0.1',()=>console.log('v2 local server: '+port));}
 module.exports={createServer};

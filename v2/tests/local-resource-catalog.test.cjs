@@ -26,7 +26,7 @@ test('Plus suffix never joins the base model, and unknown firmware names stay un
 });
 test('New local videos reach both frontend grouping shapes and respect search',async()=>{
  const http=require('node:http'),{createOfflineKnowledge}=require('../adapters/http/offline-knowledge.cjs');
- const upstream=http.createServer(async(req,res)=>{res.setHeader('Content-Type','application/json');if(req.url==='/catalog')return res.end(JSON.stringify({resources:[{name:'新增复位.mp4',locationId:10,sizeBytes:100},{name:'新增联网.mp4',locationId:11,sizeBytes:200}]}));let b='';for await(const c of req)b+=c;res.end(JSON.stringify({results:JSON.parse(b).items.map((x,i)=>({available:true,locationId:i+10,sizeBytes:100}))}));});
+ const upstream=http.createServer(async(req,res)=>{res.setHeader('Content-Type','application/json');if(req.url==='/catalog')return res.end(JSON.stringify({resources:[{name:'新增复位.mp4',locationId:10,sizeBytes:100,sourceDrive:'G:',availabilityState:'present'},{name:'新增联网.mp4',locationId:11,sizeBytes:200,sourceDrive:'G:',availabilityState:'present'}]}));let b='';for await(const c of req)b+=c;res.end(JSON.stringify({results:JSON.parse(b).items.map((x,i)=>({available:true,locationId:i+10,sizeBytes:100}))}));});
  await new Promise(r=>upstream.listen(0,'127.0.0.1',r));try{const k=createOfflineKnowledge({resourceBase:'http://127.0.0.1:'+upstream.address().port});const body=await k.localizeMedia({query:'复位',video:{total:0,groups:[],topicGroups:[]}});assert.equal(body.video.total,1);assert.equal(body.video.groups[0].videos[0].sourceMode,'local');assert.equal(body.video.topicGroups[0].videos[0].name,'新增复位.mp4');}finally{await new Promise(r=>upstream.close(r));}
 });
 test('Public catalog never invokes local additions or binary rewriting',async()=>{

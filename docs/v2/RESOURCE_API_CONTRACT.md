@@ -61,3 +61,10 @@
 - 历史、未知版本、型号范围与目录分类分别处理；不得为了展示简洁丢掉原始身份或把未知版本当旧版。正文搜索、原件URL、预览URL仍复用返回值。
 
 8520是后端和已集成应用，8620是独立前端开发代理；两个工作区各有自己的页面，不以同一个/wiki路径把两套页面合并。正常顶层浏览器链接已不再被误当跨站API，但跨站接口、iframe、写请求和不允许的Host/来源仍禁止。
+
+
+### Lightweight browse metadata
+
+`GET /api/docs?cat=spec|manual|firmware|other|pending&list=1` retains the existing groups/products/items layout, counts, order, file identities, names, version and download fields. It omits repeated docs.items/docs.flatGroups and deep classification evidence; full default and history responses stay available. No pagination is required for the current compact per-category lists (largest observed compressed payload about174KB). Existing offset/limit and view parameters remain valid.
+
+Local software/video and document metadata responses support gzip and Server-Timing. Cache freshness is30 seconds; a last successful response can be served while revalidating for at most an additional60 seconds. Original downloads retain live checks. The isolated runtime prepares common lists before listening; startup preparation duration is logged. Public requests remain separately scoped.

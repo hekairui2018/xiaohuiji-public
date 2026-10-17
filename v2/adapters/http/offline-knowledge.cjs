@@ -31,8 +31,17 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   score:r.score,download:(r.locationId||r.locations?.[0]?.id)?fileUrl(r.locationId||r.locations[0].id,r.name):null,
   readUrl:r.blockId?'/v2/offline/read?block='+r.blockId:null});
  async function request(route){const r=await fetch(resourceBase+route,{signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('resource service unavailable');return r.json();}
- let catalogCache=null,catalogTime=0,catalogError=null;
- async function localCatalog(){try{if(!catalogCache||Date.now()-catalogTime>30000){catalogCache=(await request('/catalog')).resources||[];catalogTime=Date.now();catalogError=null;}return catalogCache;}catch{catalogError='resource-service-unavailable';return catalogCache||[];}}
+ let catalogCache=null,catalogTime=0,catalogError=null,catalogPending=null,catalogSignature=null;
+ async function localCatalog(){
+  if(catalogCache&&Date.now()-catalogTime<=30000)return catalogCache;
+  if(catalogPending)return catalogPending;
+  catalogPending=(async()=>{try{const rows=(await request('/catalog')).resources||[],signature=JSON.stringify(rows);
+   // Preserve identity when the index is unchanged, so product associations are not rebuilt.
+   if(signature!==catalogSignature){catalogCache=rows;catalogSignature=signature;}
+   catalogTime=Date.now();catalogError=null;return catalogCache;
+  }catch{catalogError='resource-service-unavailable';return catalogCache||[];}finally{catalogPending=null;}})();
+  return catalogPending;
+ }
  localCatalog.status=()=>({state:catalogError?(catalogCache?'stale-cache':'unavailable'):catalogCache?'ready':'not-loaded',reason:catalogError,lastSuccessfulAt:catalogTime?new Date(catalogTime).toISOString():null,cacheSeconds:30});
  async function search(q,mode='all',{limit=10}={}){
   const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit);

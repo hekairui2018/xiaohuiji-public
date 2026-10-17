@@ -20,12 +20,12 @@ function createFrontendServer({backend='http://127.0.0.1:8520',frontendRoot=path
   if(!allowed.has(route)&&!/^\/v2\/resources\/original\/[a-f0-9]{64}$/.test(route)&&!originalFile)return send(404,'not-an-existing-frontend-api');
   if(!['GET','POST'].includes(req.method))return send(405,'method-not-allowed');
   let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>(route==='/api/ocr'?15*1024*1024:65536))return send(413,'body-too-large');chunks.push(chunk);}
-  const headers={host:target.host};if(req.headers['content-type'])headers['content-type']=req.headers['content-type'];if(req.headers.range)headers.range=req.headers.range;
+  const headers={host:target.host};if(req.headers['content-type'])headers['content-type']=req.headers['content-type'];if(req.headers.range)headers.range=req.headers.range;if(req.headers['accept-encoding'])headers['accept-encoding']=req.headers['accept-encoding'];
   if(req.headers['x-v2-offline-knowledge'])headers['x-v2-offline-knowledge']=req.headers['x-v2-offline-knowledge'];
   if(req.headers['x-v2-mode'])headers['x-v2-mode']=req.headers['x-v2-mode'];
   // Validate the browser origin above; forward only these required headers, never user cookies or secrets.
   const proxy=http.request(new URL(url.pathname+url.search,target),{method:req.method,headers},upstream=>{
-   const responseHeaders={};for(const k of ['content-type','content-disposition','content-length','content-range','accept-ranges','location','cache-control','content-security-policy','x-content-type-options','x-ssm-scope'])if(upstream.headers[k])responseHeaders[k]=upstream.headers[k];
+   const responseHeaders={};for(const k of ['content-encoding','vary','server-timing','content-type','content-disposition','content-length','content-range','accept-ranges','location','cache-control','content-security-policy','x-content-type-options','x-ssm-scope'])if(upstream.headers[k])responseHeaders[k]=upstream.headers[k];
    res.writeHead(upstream.statusCode,responseHeaders);upstream.pipe(res);
   });
   proxy.setTimeout(120000,()=>proxy.destroy(Error('backend-timeout')));
