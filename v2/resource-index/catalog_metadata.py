@@ -3,7 +3,7 @@ import json,re,os,uuid
 import collections,threading
 from pathlib import Path
 
-REVISION='quick-metadata-5'
+REVISION='quick-metadata-6'
 _responses={}
 _lock=threading.Lock()
 def analyze(name,blocks):
@@ -65,7 +65,7 @@ def catalog(db,work):
                 item['documentMetadata'].update({k:v for k,v in review.items() if k in ('kind','coverModels','version','scopeEvidence','familyId')})
                 item['documentMetadata'].update({'classificationStatus':'manual-review','reviewId':review['reviewId'],'reviewBasis':review['basis']})
             item['documentMetadata']['evidence']=[{'blockId':b['blockId'],'locator':b['locator']} for b in item['documentMetadata']['evidence']]
-            if item['documentMetadata']['kind'] in ('spec','manual'):item['documentIntro']='\n'.join(b['text'] for b in blocks)[:2400]
+            if item['documentMetadata']['kind'] in ('spec','manual') or re.search(r'规格书|specifications?',r['name'],re.I):item['documentIntro']='\n'.join(b['text'] for b in blocks)[:2400]
         rows.append(item)
     try:
         temporary=artifact.with_suffix('.'+uuid.uuid4().hex+'.tmp');temporary.write_text(json.dumps({'revision':REVISION,'signature':signature,'resources':rows},ensure_ascii=False),encoding='utf8');os.replace(temporary,artifact)

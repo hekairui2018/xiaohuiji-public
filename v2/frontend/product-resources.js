@@ -50,7 +50,6 @@
    }
    section.append(body);root.append(section);sections.push(record);
   }
-  if(product.unavailableResources?.length){const records=el('details');records.className='doc-missing-records';records.append(el('summary','原件缺失记录（'+product.unavailableResources.length+'）'));for(const item of product.unavailableResources)records.append(row(item,{label:item.categoryLabel||'资料'}));root.append(records);}
   root.append(empty);input.oninput=filter;return root;
  }
 
@@ -76,7 +75,9 @@
    else if(items.length===2&&!items.some(d=>d.versionStatus==='conflict'||families.some(([,pattern])=>pattern.test(d.name||'')))&&chinese(items[0])!==chinese(items[1]))partner=items.find(d=>d!==item&&!used.has(d));
    if(partner)used.add(partner);rows.push(chinese(item)?{zh:item,other:partner}:{zh:partner,other:item});
   }
-  return rows;
+  const packed=rows.filter(pair=>pair.zh&&pair.other),singles=rows.filter(pair=>!pair.zh||!pair.other).map(pair=>pair.zh||pair.other);
+  for(let i=0;i<singles.length;i+=2)packed.push({zh:singles[i],other:singles[i+1]||null});
+  return packed;
  }
  window.ProductResources={groups,render,unique,row,documentRows};
 })();

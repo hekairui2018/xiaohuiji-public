@@ -11,3 +11,8 @@ test('Unknown, conflicting and other-model descriptions are never guessed',()=>{
  assert.equal(deviceName({name:'HD-X9规格书.pdf',documentMetadata:{coverModels:['X9']},documentIntro:'支持其他控制卡\n配合发送卡'},'HD-X9'),null);
  assert.equal(selectedDeviceName([{kind:'spec',deviceName:'光纤收发器'},{kind:'spec',deviceName:'传感器'}]),null);
 });
+
+test('Exact standalone cover models support numeric LCD box names and digital human equipment',()=>{
+ const resource={name:'HD-3399F-BOX规格书V1.2.pdf',documentIntro:'PRODUCT SPECIFICATION\nLCD 智能安卓播放盒\nHD-3399F-BOX\nV1.2',documentMetadata:{coverModels:[]}};assert.equal(deviceName(resource,'HD-3399F-BOX').name,'LCD 智能安卓播放盒');assert.equal(deviceName(resource,'HD-3399F'),null);
+ assert.equal(deviceName({name:'55寸OLED移动讲解数字人规格书.pdf',documentIntro:'55 寸 OLED 移动讲解数字人\n产品类别：55 寸 OLED 移动讲解数字人\nHD-MGDH55-OLED',documentMetadata:{coverModels:['MGDH55-OLED']}},'HD-MGDH55-OLED').name,'55 寸 OLED 移动讲解数字人');
+});

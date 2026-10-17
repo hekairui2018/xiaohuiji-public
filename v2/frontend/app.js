@@ -1853,7 +1853,7 @@ function docPillEl(it, isFw) {
   a.target = "_blank";
   a.rel = "noreferrer";
   a.textContent = it.clean || it.name || "下载";
-  if (it.deviceName && !a.textContent.includes(it.deviceName)) {
+  if (it.deviceName && !/[\u4e00-\u9fff]/.test(it.name || '') && !a.textContent.includes(it.deviceName)) {
     const description = document.createElement('span');
     description.className = 'doc-device-description'; description.textContent = ' · ' + it.deviceName;
     a.appendChild(description);
@@ -1868,6 +1868,8 @@ function docPillEl(it, isFw) {
   }
   if (!available) a.setAttribute("aria-disabled", "true");
   if (isFw && it.name) a.setAttribute("download", it.name);
+  const label = document.createElement('span'); label.className = 'doc-link-label';
+  label.append(...a.childNodes); a.appendChild(label);
   return a;
 }
 function docCatSummary(text, sizeText) {
@@ -1984,7 +1986,7 @@ async function renderDocsCategory(cat, qArg) {
 function renderDocsView(cat, qArg, docs, states = new Map()) {
   const catLabel = CAT_LABEL[cat] || '资料';
   const groups = (docs && Array.isArray(docs.groups)) ? docs.groups : [];
-  if (!groups.length && !(docs.unavailableRecords || []).length) {
+  if (!groups.length) {
     searchResults.innerHTML = '<div class="search-empty">暂无' + catLabel + '，可在上方输入产品型号（如 R708、C16）查询</div>';
     searchResults.style.display = "block";
     return;
@@ -2061,7 +2063,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       det.append(sum, body);
       wrap.appendChild(det);
     });
-    if (kwUp && !shownModels && !(docs.unavailableRecords || []).some(item => [item.model, item.name].some(value => String(value || '').toUpperCase().includes(kwUp)))) {
+    if (kwUp && !shownModels) {
       searchResults.innerHTML = '<div class="search-empty">没有找到与“' + escHtml(kwFlat) + '”相关的' + catLabel + '，可换个型号（如 R708、VP210）再搜</div>';
       searchResults.style.display = "block";
       return;
@@ -2069,15 +2071,6 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
     head.textContent = catLabel + " · " + docs.modelCount + " 个产品/资料主题 · " + (docs.uniqueFileCount ?? docs.total) + " 份资料"
       + (kwUp ? " · 匹配 " + shownModels + " 款" : " · 可输入型号筛选");
     if (groups.length === 1) wrap.classList.add("doc-catalog-flat");
-  }
-  const missingRecords = (docs.unavailableRecords || []).filter(item => {
-    const term = String(qArg == null ? quickSearchInput.value : qArg).trim().toUpperCase();
-    return !term || [item.model, item.name].some(value => String(value || '').toUpperCase().includes(term));
-  });
-  if (missingRecords.length) {
-    const records = document.createElement('details'); records.className = 'doc-missing-records';
-    const summary = document.createElement('summary'); summary.textContent = '原件缺失记录（' + missingRecords.length + '）'; records.appendChild(summary);
-    for (const item of missingRecords) records.appendChild(docPillEl(item, false)); wrap.appendChild(records);
   }
   searchResults.appendChild(wrap);
   searchResults.style.display = "block";
