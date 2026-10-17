@@ -15,3 +15,10 @@ test('Conflicting versions and duplicate translations remain separate files in c
 test('Two same-language originals share one line and additional originals wrap in pairs',()=>{
  const items=[{name:'CR1220电池规格书V3.0.pdf',fileId:'a'},{name:'CR2032电池规格书V3.0.pdf',fileId:'b'},{name:'第三份规格书.pdf',fileId:'c'}];const result=rows(items);assert.equal(result.length,2);assert.equal(result[0].zh,items[0]);assert.equal(result[0].other,items[1]);assert.equal(result[1].zh,items[2]);assert.equal(result[1].other,null);
 });
+
+test('Preview and download use independent existing routes and unsupported formats never act as previews',()=>{
+ const {previewTarget,downloadTarget}=context.window.ProductResources;
+ const item={name:'X9.pdf',url:'/v2/offline/file?id=7',available:true};assert.equal(previewTarget(item).url,'/v2/offline/preview?id=7');assert.equal(downloadTarget(item),'/v2/offline/file?id=7&download=1');
+ assert.equal(previewTarget({...item,name:'X9.xlsx'}).url,'/v2/offline/preview?id=7');assert.equal(previewTarget({...item,name:'X9.bin'}).url,null);assert.match(previewTarget({...item,name:'X9.bin'}).reason,/不支持/);
+ assert.equal(previewTarget({name:'X9.docx',url:'https://example.com/X9.docx'}).url,null);assert.equal(previewTarget({...item,available:false}).url,null);assert.equal(downloadTarget({...item,url:'/v2/offline/preview?id=7'}),'/v2/offline/file?id=7&download=1');
+});

@@ -9,6 +9,25 @@
  function identityKey(item){const identity=stable(item);return identity&&JSON.stringify([identity,item.documentVersion,item.documentLanguage,item.documentEdition,item.versionBasis,item.versionSelection,item.associationStatus,item.resourceOnly,item.verificationStatus,item.available,item.scopeEvidence]);}
  function unique(items){const seen=new Map(),out=[];for(const item of items){const key=identityKey(item);if(key&&seen.has(key)){const previous=seen.get(key);previous.applicableModels=[...new Set([...(previous.applicableModels||[]),...(item.applicableModels||[])])];continue;}const copy={...item};out.push(copy);if(key)seen.set(key,copy);}return out;}
  function groups(product){const source=Array.isArray(product.docGroups)&&product.docGroups.length?product.docGroups:[...(product.specGroups||[]),...(product.firmwareGroup?[product.firmwareGroup]:[])];const map=new Map();for(const group of source){if(!group||!Array.isArray(group.items))continue;const key=String(group.key||'');if(!map.has(key))map.set(key,{key,label:labels[key]||group.label||'未标注类别',items:[]});map.get(key).items.push(...group.items);}return [...map.values()].map(group=>({...group,items:unique(group.items)})).filter(group=>group.items.length);}
+
+ function previewTarget(item){
+  const name=item.originalName||item.name||'',url=item.url;
+  const supported=/\.(pdf|docx?|pptx?|xlsx?|csv|txt|md)$/i.test(name);
+  if(item.available===false||!valid(url))return {url:null,reason:item.unavailableMessage||'原件暂不可用'};
+  if(!supported)return {url:null,reason:'此格式暂不支持在线预览，请点击右侧下载原文件。'};
+  if(/\/v2\/offline\/file\?/.test(url))return {url:url.replace('/v2/offline/file?','/v2/offline/preview?').replace(/([?&])download=1(&|$)/,'$1').replace(/[?&]$/,''),reason:null};
+  if(!/\.pdf$/i.test(name)&&!/[\/]v2[\/]offline[\/]preview\?/.test(url))return {url:null,reason:'此文件尚未提供可用在线预览，请点击右侧下载原文件。'};
+  return {url,reason:null};
+ }
+ function downloadTarget(item){
+  const url=item.downloadUrl||item.url;
+  if(item.available===false||!valid(url))return null;
+  if(/\/v2\/offline\/(?:preview|file)\?/.test(url)){
+   const file=url.replace('/v2/offline/preview?','/v2/offline/file?');
+   return /[?&]download=1(?:&|$)/.test(file)?file:file+(file.includes('?')?'&':'?')+'download=1';
+  }
+  return url;
+ }
  function badge(parent,text,warning=false){const node=el('span',text);node.className='pr-badge'+(warning?' pr-warning':'');parent.append(node);}
  function row(item,group){
   const root=el('article');root.className='pr-resource';
@@ -24,8 +43,8 @@
   const scope=el('p');scope.className='pr-scope';scope.textContent=Array.isArray(item.applicableModels)&&item.applicableModels.length?'原文标明型号：'+item.applicableModels.join('、')+'':'适用型号未确认';if(item.applicableModels?.length)root.append(scope);
   if(item.scopeEvidence?.length){const details=el('details'),summary=el('summary','适用条件依据');details.className='pr-evidence';details.append(summary);for(const evidence of item.scopeEvidence){const line=el('p');line.textContent=typeof evidence==='string'?evidence:JSON.stringify(evidence);details.append(line);}root.append(details);}
   const actions=el('div');actions.className='pr-actions';
-  function link(url,text,download){if(!valid(url))return;const a=el('a',text);a.href=url;a.rel='noopener noreferrer';if(download)a.download=item.originalName||item.name||'';else a.target='_blank';actions.append(a);}
-  if(item.available!==false){link(item.url,'查看原件');link(item.downloadUrl||item.url,'下载原件',true);}
+  function link(url,text,download){if(!valid(url))return;const a=el('a',text);a.href=url;a.rel='noopener noreferrer';a.title=text+' '+(item.originalName||item.name||'');a.setAttribute('aria-label',a.title);if(download)a.download=item.originalName||item.name||'';else a.target='_blank';actions.append(a);}
+  if(item.available!==false){const preview=previewTarget(item);if(preview.url)link(preview.url,'在线预览');else {const button=el('button','在线预览');button.type='button';button.title=preview.reason;button.setAttribute('aria-label','预览 '+(item.name||'资料')+'：'+preview.reason);button.onclick=()=>window.alert(preview.reason);actions.append(button);}link(downloadTarget(item),'下载原件',true);}
   if(item.available===false||(!valid(item.url)&&!valid(item.downloadUrl)))actions.append(el('span',item.unavailableMessage||'原件暂不可用，请核对来源'));
   root.append(actions);root.dataset.search=[item.name,item.clean,item.documentVersion,...(item.applicableModels||[])].filter(Boolean).join(' ').toLocaleLowerCase();return root;
  }
@@ -79,5 +98,5 @@
   for(let i=0;i<singles.length;i+=2)packed.push({zh:singles[i],other:singles[i+1]||null});
   return packed;
  }
- window.ProductResources={groups,render,unique,row,documentRows};
+ window.ProductResources={groups,render,unique,row,documentRows,previewTarget,downloadTarget};
 })();

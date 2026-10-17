@@ -1847,11 +1847,13 @@ async function fetchDocs(cat) {
 
 function docPillEl(it, isFw) {
   const available = it.available !== false && typeof it.url === "string" && /^(https?:\/\/|\/[^/])/i.test(it.url);
-  const a = document.createElement(available ? "a" : "span");
+  const preview = window.ProductResources.previewTarget(it);
+  const a = document.createElement(available ? (preview.url ? 'a' : 'button') : 'span');
   a.className = "doc-link" + (isFw ? " fw-link" : "") + (available ? "" : " doc-link-nourl");
-  if (available) a.href = it.url;
+  if (available && preview.url) a.href = preview.url;
+  if (available && !preview.url) { a.type = 'button'; a.onclick = () => window.alert(preview.reason); }
   a.target = "_blank";
-  a.rel = "noreferrer";
+  a.rel = "noopener noreferrer";
   a.textContent = it.clean || it.name || "下载";
   if (it.deviceName && !/[\u4e00-\u9fff]/.test(it.name || '') && !a.textContent.includes(it.deviceName)) {
     const description = document.createElement('span');
@@ -1867,10 +1869,27 @@ function docPillEl(it, isFw) {
     a.appendChild(note);
   }
   if (!available) a.setAttribute("aria-disabled", "true");
-  if (isFw && it.name) a.setAttribute("download", it.name);
+  if (available) {
+    a.title = preview.url ? '在线预览：' + (it.name || it.clean || '文件') : preview.reason;
+    a.setAttribute('aria-label', preview.url ? '在线预览 ' + (it.name || it.clean || '文件') : '预览 ' + (it.name || it.clean || '文件') + '：' + preview.reason);
+  }
   const label = document.createElement('span'); label.className = 'doc-link-label';
   label.append(...a.childNodes); a.appendChild(label);
   return a;
+}
+function docFileActions(item, isFw = false) {
+  const actions = document.createElement('span'); actions.className = 'doc-file-actions';
+  const preview = docPillEl(item, isFw); if (item.documentDate) preview.title += ' · 原文日期 ' + item.documentDate;
+  actions.appendChild(preview);
+  const url = window.ProductResources.downloadTarget(item);
+  if (url) {
+    const download = document.createElement('a'); download.className = 'doc-download'; download.href = url;
+    download.download = item.originalName || item.name || ''; download.textContent = '下载';
+    download.title = '下载原文件：' + (item.originalName || item.name || '文件');
+    download.setAttribute('aria-label', '下载原文件 ' + (item.originalName || item.name || '文件'));
+    actions.appendChild(download);
+  }
+  return actions;
 }
 function docCatSummary(text, sizeText) {
   const det = document.createElement("details");
@@ -1900,17 +1919,7 @@ function docFlatRow(model, items, cat, deviceName) {
   const links = document.createElement("span");
   links.className = "doc-flat-links";
   const documents = window.ProductResources ? window.ProductResources.unique(items || []) : (items || []);
-  function fileButton(item) {
-    const actions = document.createElement('span'); actions.className = 'doc-file-actions';
-    const pill = docPillEl({...item, deviceName: item.deviceName || deviceName}, false);
-    if (item.documentDate) pill.title += ' · 原文日期 ' + item.documentDate;
-    actions.appendChild(pill);
-    if (item.available !== false && /^(https?:\/\/|\/[^/])/i.test(item.downloadUrl || '')) {
-      const download = document.createElement('a'); download.className = 'doc-download'; download.href = item.downloadUrl;
-      download.download = item.originalName || item.name || ''; download.textContent = '下载'; actions.appendChild(download);
-    }
-    return actions;
-  }
+  const fileButton = item => docFileActions({...item, deviceName: item.deviceName || deviceName});
   const present = documents.filter(item => item.available !== false);
   const missing = documents.filter(item => item.available === false);
   const lines = window.ProductResources.documentRows(present);
@@ -2007,7 +2016,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
   if (cat === "firmware") {
     groups.forEach((g) => {
       const pack = docCatSummary(g.label, g.count + " 个固件");
-      g.items.forEach((it) => pack.body.appendChild(docPillEl(it, true)));
+      g.items.forEach((it) => pack.body.appendChild(docFileActions(it, true)));
       wrap.appendChild(pack.det);
     });
   } else {
