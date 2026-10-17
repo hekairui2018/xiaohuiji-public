@@ -2022,11 +2022,41 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
   const wrap = document.createElement("div");
   wrap.className = "vid-catalog";
   if (cat === "firmware") {
-    groups.forEach((g) => {
-      const pack = docCatSummary(g.label, g.count + " 个固件");
-      g.items.forEach((it) => pack.body.appendChild(docFileActions(it, true)));
-      wrap.appendChild(pack.det);
+    const categories=docs.firmwareCategories||[{key:'other',label:'其他',models:groups.map(g=>g.model)}];
+    const byModel=new Map(groups.map(g=>[g.model,g]));
+    const panel=document.createElement('div');panel.className='firmware-panel';panel.id='firmware-download-panel';panel.popover='manual';panel.tabIndex=-1;panel.setAttribute('role','dialog');
+    let active=null,pinned=false,leaveTimer;
+    const closePanel=()=>{clearTimeout(leaveTimer);if(panel.matches(':popover-open'))panel.hidePopover();if(active)active.setAttribute('aria-expanded','false');active=null;pinned=false;};
+    const leave=()=>{if(!pinned){clearTimeout(leaveTimer);leaveTimer=setTimeout(closePanel,150);}};
+    function show(button,product,pin){
+      clearTimeout(leaveTimer);if(pinned&&!pin)return;
+      if(active&&active!==button)active.setAttribute('aria-expanded','false');active=button;pinned=pin;
+      panel.replaceChildren();panel.setAttribute('aria-label',product.label+' 固件下载');
+      const header=document.createElement('div');header.className='firmware-panel-header';
+      const title=document.createElement('strong');title.textContent=product.label+' · '+product.count+' 个固件';
+      const close=document.createElement('button');close.type='button';close.className='firmware-panel-close';close.textContent='×';close.title='关闭固件下载';close.setAttribute('aria-label','关闭固件下载');close.hidden=!pin;close.onclick=()=>{const trigger=active;closePanel();trigger?.focus({preventScroll:true});};header.append(title,close);
+      const files=document.createElement('div');files.className='firmware-panel-files';product.items.forEach(item=>files.append(docFileActions(item,true)));panel.append(header,files);
+      if(!panel.matches(':popover-open'))panel.showPopover();button.setAttribute('aria-expanded','true');
+      const r=button.getBoundingClientRect(),bounds=panel.getBoundingClientRect();panel.style.left=Math.max(12,Math.min(r.left,innerWidth-bounds.width-12))+'px';panel.style.top=Math.max(12,Math.min(r.bottom+8,innerHeight-bounds.height-12))+'px';
+      if(pin)panel.focus({preventScroll:true});
+    }
+    panel.addEventListener('pointerenter',()=>clearTimeout(leaveTimer));panel.addEventListener('pointerleave',leave);
+    panel.addEventListener('keydown',event=>{if(event.key==='Escape'){const trigger=active;closePanel();trigger?.focus({preventScroll:true});}});
+    panel.addEventListener('toggle',event=>{if(event.newState==='closed'){if(active)active.setAttribute('aria-expanded','false');active=null;pinned=false;}});
+    categories.forEach(category=>{
+      const products=category.models.map(model=>byModel.get(model)).filter(Boolean);
+      const term=String(qArg||'').trim().toUpperCase(),matches=products.filter(p=>!term||p.model.toUpperCase().includes(term)||p.items.some(i=>i.name.toUpperCase().includes(term)));if(!matches.length)return;
+      const pack=docCatSummary(category.label,matches.length+' 款型号');pack.det.className='doc-cat-group firmware-category';
+      pack.det.dataset.docState='firmware:group:'+category.key;pack.det.open=states.get(pack.det.dataset.docState)??!!term;
+      pack.body.className='doc-cat-group-body firmware-models';
+      matches.forEach(product=>{
+        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.title='悬浮查看；点击固定显示固件下载';button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-expanded','false');
+        button.addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')show(button,product,false);});button.addEventListener('pointerleave',leave);button.onclick=()=>show(button,product,true);
+        button.addEventListener('keydown',event=>{if(event.key==='Escape')closePanel();});pack.body.append(button);
+      });
+      pack.det.addEventListener('toggle',()=>{if(!pack.det.open&&active&&pack.body.contains(active))closePanel();});wrap.append(pack.det);
     });
+    wrap.append(panel);
   } else {
     const kwFlat = (qArg == null ? quickSearchInput.value.trim() : String(qArg).trim());
     const kwUp = kwFlat.toUpperCase();

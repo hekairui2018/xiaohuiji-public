@@ -77,7 +77,9 @@ function createQuickService(app,{resolveDocuments,localCatalog}={}){
    const uniqueFileCount=new Set(visible.map(identity)).size,uniqueAvailableFileCount=new Set(visible.filter(d=>d.available).map(identity)).size;
    for(const item of views)Object.assign(item,resourceView(item,{models:item.associatedModels}));
    if(cat==='spec'&&localCatalog)groups=require('../../domain/knowledge/specification-groups.cjs').specificationGroups(groups);
-   return paginateDocs({cat,catalogStatus:localCatalog?.status?.()||null,docs:{associationCount:total,uniqueFileCount,uniqueAvailableFileCount,modelCount:new Set(groups.flatMap(g=>g.products?g.products.map(p=>p.model):[g.model])).size,total,groups,unavailableRecords,unavailableReferenceCount:unavailableRecords.length,includeHistory:includeHistory||historyOnly,historyOnly,hiddenSignedCount,hiddenHistoricalCount:historyCount,versionPolicy:'explicit-document-family-only; unversioned originals retained; firmware variants remain separate'}},{offset,limit,view});}
+   let firmwareCategories;
+   if(localCatalog&&['manual','firmware'].includes(cat)){const aligned=require('../../domain/knowledge/aligned-resource-groups.cjs').alignedResourceGroups(cat==='firmware'?[{key:'other',label:'Other',products:groups}]:groups,await localProducts());if(cat==='manual')groups=aligned;else firmwareCategories=aligned.map(g=>({key:g.key,label:g.label,models:g.products.map(p=>p.model)}));}
+   return paginateDocs({cat,catalogStatus:localCatalog?.status?.()||null,docs:{associationCount:total,uniqueFileCount,uniqueAvailableFileCount,modelCount:new Set(groups.flatMap(g=>g.products?g.products.map(p=>p.model):[g.model])).size,total,groups,...(firmwareCategories?{firmwareCategories}:{}),unavailableRecords,unavailableReferenceCount:unavailableRecords.length,includeHistory:includeHistory||historyOnly,historyOnly,hiddenSignedCount,hiddenHistoricalCount:historyCount,versionPolicy:'explicit-document-family-only; unversioned originals retained; firmware variants remain separate'}},{offset,limit,view});}
  };
 }
 module.exports={createQuickService,productView,documentLabel};

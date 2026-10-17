@@ -77,3 +77,10 @@ Local software/video and document metadata responses support gzip and Server-Tim
 - `/api/search?q=型号`：主要`docGroups`、`specGroups`及`specFiles/specLinks`使用现有原件；新增`unavailableResources`保留缺失引用。
 - `history=all/only`保留原有查询结果。未知版本、不同硬件、内容身份冲突及临时服务失败不按缺失旧引用处理。
 - 前端将缺失记录单独收起；普通列表展示实际可用文件，不改原文件名及预览/下载地址，不删除知识快照记录。
+
+
+## 2026-10-18 说明书及固件浏览大类
+
+本地说明书 groups 使用规格书已确认的型号归属和同序大类，原 sourceGroup、associatedModels、身份、版本及链接不修改。没有明确归属的放“其他”。
+
+本地固件保持原 groups（型号→items）以兼容已有客户端，新增 firmwareCategories: [{key,label,models:[型号]}]，只索引型号，不重复固件文件载荷。分页仍作用于原 groups/items；浏览客户端按 models 对当前返回的型号行建立二级菜单。此字段也适用于 list=1。固件选择、硬件条件及原件下载不变。

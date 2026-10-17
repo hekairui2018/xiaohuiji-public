@@ -14,11 +14,11 @@ test('Registered source roles beat filename hints; original content and format c
  assert.equal(browseGroup('K系列-接收卡').key,browseGroup('R系列-接收卡').key);assert.equal(browseGroup('A系列-播放盒').key,browseGroup('H系列-多媒体播放盒').key);
  assert.notEqual(browseGroup('C系列-异步发送卡').key,browseGroup('D系列-小屏控制卡').key);
 });
-test('A newly registered catalogue row inherits source category without rebuilding products or parameters',async()=>{
+test('A newly registered unknown model stays in Other while retaining source evidence and unchanged parameters',async()=>{
  let resources=[];const products=[{modelId:'HD-X9',displayName:'X9',parameters:{load:'unchanged'},documents:[],firmware:[]}],app={quickResources:()=>({}),quickSearch:()=>({records:[]}),quickBrowse:()=>products};
  const quick=createQuickService(app,{localCatalog:async()=>resources});assert.equal((await quick.docs('manual',{view:'flat'})).docs.items.length,0);
  resources=[{name:'新增资料.pdf',folders:['产品资料','操作说明','文档','全彩'],sha256:'b'.repeat(64),resourceId:'r',versionId:'v',documentMetadata:{kind:'manual',coverModels:['X9']}}];
- const b=(await quick.docs('manual',{view:'flat'})).docs;assert.equal(b.groups[0].label,'全彩');assert.equal(b.items[0].resourceId,'r');assert.equal(b.items[0].documentVersion,null);assert.deepEqual(b.items[0].associatedModels,['HD-X9']);assert.equal(products[0].parameters.load,'unchanged');assert.equal(products[0].documents.length,0);
+ const b=(await quick.docs('manual',{view:'flat'})).docs;assert.equal(b.groups[0].label,'其他');assert.equal(b.items[0].sourceGroup.label,'全彩');assert.equal(b.items[0].resourceId,'r');assert.equal(b.items[0].documentVersion,null);assert.deepEqual(b.items[0].associatedModels,['HD-X9']);assert.equal(products[0].parameters.load,'unchanged');assert.equal(products[0].documents.length,0);
 });
 test('Flat source groups directly contain unique files and preserve model associations and unknown versions',async()=>{
  const p=['X1','X2'].map(m=>({modelId:'HD-'+m,displayName:m,documents:[],firmware:[]})),resources=['K系列-接收卡','R系列-接收卡'].map((f,i)=>({name:'X1 X2规格书.pdf',folders:['产品资料','产品规格书（LED）',f],sha256:'a'.repeat(64),locationId:i+1,resourceId:'r',versionId:'v',documentMetadata:{kind:'spec',coverModels:['X1','X2']}}));
