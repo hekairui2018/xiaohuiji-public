@@ -1888,7 +1888,13 @@ function docFlatRow(model, items, cat) {
   const links = document.createElement("span");
   links.className = "doc-flat-links";
   const documents = window.ProductResources ? window.ProductResources.unique(items || []) : (items || []);
+  const languageRows = new Map();
   for (const item of documents) {
+    const language = item.documentLanguage === 'zh' || /[\u4e00-\u9fff]/.test(item.name || '') ? 'zh' : 'other';
+    if (!languageRows.has(language)) {
+      const line = document.createElement('span'); line.className = 'doc-language-row';
+      line.dataset.language = language; languageRows.set(language, line);
+    }
     const actions = document.createElement('span');
     actions.className = 'doc-file-actions';
     const pill = docPillEl(item, false);
@@ -1900,8 +1906,9 @@ function docFlatRow(model, items, cat) {
       download.download = item.originalName || item.name || '';
       download.textContent = '下载'; actions.appendChild(download);
     }
-    links.appendChild(actions);
+    languageRows.get(language).appendChild(actions);
   }
+  for (const language of ['zh', 'other']) if (languageRows.has(language)) links.appendChild(languageRows.get(language));
   row.append(nm, links);
   return row;
 }

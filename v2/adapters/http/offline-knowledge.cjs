@@ -6,7 +6,7 @@ const {searchRecords}=require('../../domain/aftersales/case-search.cjs');
 const {createOfflineSessions}=require('./offline-session.cjs');
 const {consumeCase}=require('../../domain/aftersales/consume-case.cjs');
 const {modelId}=require('../../domain/identity/model-id.cjs');
-const {fileUrl,previewPage}=require('./document-preview.cjs');
+const {fileUrl,previewPage,pdfPreviewPage}=require('./document-preview.cjs');
 const {groupVideos}=require('../../domain/knowledge/resource-categories.cjs');
 const {resourceView}=require('../../domain/knowledge/resource-view.cjs');
 const clean=s=>String(s||'').replace(/[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"']+/g,'[内部路径]').replace(/(?<!\d)1[3-9]\d{9}(?!\d)|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[联系方式]');
@@ -144,6 +144,11 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    if(req.method==='GET'&&p==='/v2/offline/preview'){
     const id=u.searchParams.get('id'),offset=u.searchParams.get('offset')||'0';
     if(!/^\d+$/.test(id||'')||!/^\d{1,6}$/.test(offset))return send(400,{error:'invalid-resource'});
+    const record=(await localCatalog()).find(r=>String(r.locationId)===id&&r.availabilityState==='present');
+    if(record&&/\.pdf$/i.test(record.name)){
+     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'",'Cache-Control':'no-store'});
+     res.end(pdfPreviewPage(record.name,id));return true;
+    }
     const raw=await request('/preview-document?id='+id+'&offset='+offset);
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",'Cache-Control':'no-store'});
     res.end(previewPage(raw,id,clean,location));return true;

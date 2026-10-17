@@ -20,7 +20,7 @@ test('Offline pages and body search work without model tools; passage locations 
  try{
   const html=await fetch(base+'/huiai').then(r=>r.text());assert.ok(html.includes('/v2/offline/client.js'));assert.ok(!html.includes('/v2/local-knowledge/client.js'));
   const data=await fetch(base+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','X-V2-Offline-Knowledge':'text'},body:JSON.stringify({message:'Z100'})}).then(r=>r.json());
-  assert.equal(data.model,'v2-offline-search');assert.equal(data.results[0].download,'/v2/offline/file?id=7');assert.ok(!JSON.stringify(data).includes('G:'));assert.ok(!JSON.stringify(data).includes('internal author'));
+  assert.equal(data.model,'v2-offline-search');assert.equal(data.results[0].download,'/v2/offline/preview?id=7');assert.ok(!JSON.stringify(data).includes('G:'));assert.ok(!JSON.stringify(data).includes('internal author'));
   assert.equal((await fetch(base+'/v2/offline/read?block=../private')).status,400);
   assert.equal((await fetch(base+'/v2/offline/search?q=Z100',{headers:{Origin:'https://example.com'}})).status,403);
   assert.equal((await fetch(base+'/v2/offline/search?q=')).status,400);
