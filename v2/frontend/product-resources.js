@@ -20,15 +20,14 @@
   if(conflict)badge(meta,'版本冲突，需核对',true);
   else if(item.versionSelection==='latest-in-explicit-document-family')badge(meta,'后端选定的同家族最新版');
   else if(item.versionSelection)badge(meta,item.versionSelection==='version-unknown'?'版本状态待确认':'版本状态：'+item.versionSelection,true);
-  if(group.key==='pending'||item.resourceOnly||item.associationStatus==='filename-candidate')badge(meta,'适用性待确认',true);
   if(item.documentLanguage)badge(meta,({zh:'中文','unspecified-or-en':'英文 / 未明确'}[item.documentLanguage]||item.documentLanguage));
   if(item.documentEdition)badge(meta,({standard:'普通版',neutral:'中性版'}[item.documentEdition]||item.documentEdition));
   root.append(meta);
-  const scope=el('p');scope.className='pr-scope';scope.textContent=Array.isArray(item.applicableModels)&&item.applicableModels.length?'原文标明型号：'+item.applicableModels.join('、')+'（仍需核对版本与现场条件）':'适用型号未确认';root.append(scope);
+  const scope=el('p');scope.className='pr-scope';scope.textContent=Array.isArray(item.applicableModels)&&item.applicableModels.length?'原文标明型号：'+item.applicableModels.join('、')+'':'适用型号未确认';if(item.applicableModels?.length)root.append(scope);
   if(item.scopeEvidence?.length){const details=el('details'),summary=el('summary','适用条件依据');details.className='pr-evidence';details.append(summary);for(const evidence of item.scopeEvidence){const line=el('p');line.textContent=typeof evidence==='string'?evidence:JSON.stringify(evidence);details.append(line);}root.append(details);}
   const status=el('p');status.className='pr-status';
   const states={'indexed-not-content-verified':'已索引，内容尚未核验','original-title-confirmed':'原文标题已核对','explicit-document-title':'文档标题明确','manifest-model-match-not-hardware-compatibility':'清单型号匹配，硬件兼容性未确认','resource-only-not-compatibility-verified':'仅为资料关联，兼容性未确认','original-model-role-unconfirmed':'型号角色待确认',verified:'来源已核对',unknown:'核验状态未明确'};
-  status.textContent=states[item.verificationStatus]||'核验状态：'+(item.verificationStatus||'未明确');root.append(status);
+  status.textContent=states[item.verificationStatus]||'核验状态：'+(item.verificationStatus||'未明确');if(!item.resourceOnly&&!['filename-candidate','unknown'].includes(item.associationStatus||'unknown')&&!['manifest-model-match-not-hardware-compatibility','resource-only-not-compatibility-verified','original-model-role-unconfirmed'].includes(item.verificationStatus))root.append(status);
   const actions=el('div');actions.className='pr-actions';
   function link(url,text,download){if(!valid(url))return;const a=el('a',text);a.href=url;a.rel='noopener noreferrer';if(download)a.download=item.originalName||item.name||'';else a.target='_blank';actions.append(a);}
   if(item.available!==false){link(item.url,'查看原件');link(item.downloadUrl||item.url,'下载原件',true);}
