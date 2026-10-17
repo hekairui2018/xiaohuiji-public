@@ -29,3 +29,13 @@ test('website hides operation guides without removing their original/history rec
  assert.equal((await quick.docs('manual',{websiteOnly:true,includeHistory:true})).docs.items.length,2);
  assert.equal(productView(product).specGroups[0].items.length,1);assert.equal(product.documents.length,2);
 });
+
+test('current website excludes DOCX even without PDF and excludes English operation guides',async()=>{
+ const {createQuickService,productView}=require('../adapters/http/quick-service.cjs');
+ const names=['X1使用说明V1.0.pdf','X1使用说明V1.0.docx','X1 Operation GuideV1.0.pdf','X1独有手册.docx'];
+ const product={modelId:'HD-X1',displayName:'X1',documents:names.map(name=>({name,kind:'manual'}))};
+ const quick=createQuickService({quickResources:()=>({}),quickSearch:()=>({records:[]}),quickBrowse:()=>[product]});
+ assert.deepEqual((await quick.docs('manual',{websiteOnly:true})).docs.items.map(x=>x.name),[names[0]]);
+ assert.equal((await quick.docs('manual',{websiteOnly:true,includeHistory:true})).docs.items.length,4);
+ assert.deepEqual(productView(product).specGroups[0].items.map(x=>x.name),[names[0]]);assert.equal(product.documents.length,4);
+});

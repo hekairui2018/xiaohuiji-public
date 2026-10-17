@@ -17,7 +17,7 @@ function documentLabel(name){
  return label;
 }
 const link=d=>{const url=d.url||d.publicUrl||null,name=d.name||d.file,clean=(d.kind==='firmware'?name:documentLabel(name))+(d.displayQualifier?' · '+d.displayQualifier:'');return {name,url,documentDate:d.documentDate||null,dateBasis:d.dateBasis||null,dateEvidence:d.dateEvidence||null,clean:clean,btn:clean,verificationStatus:d.verificationStatus||'unknown',resourceOnly:!!d.resourceOnly,kind:d.kind,resourceId:d.resourceId||null,resourceVersionId:d.resourceVersionId||null,classificationBasis:d.classificationBasis||null,classificationConflict:d.classificationConflict||null,sourceGroup:d.sourceGroup||null,sourceRole:d.sourceRole||null,detectedKind:d.detectedKind||null,classificationEvidence:d.documentMetadata?.evidence||[],parseStatus:d.parseStatus||null,applicableModels:d.documentMetadata?.coverModels||[],scopeEvidence:d.documentMetadata?.scopeEvidence||[],associationStatus:d.associationStatus||'snapshot-association',versionBasis:d.versionBasis||null,documentVersion:d.documentVersion||null,documentLanguage:d.documentLanguage||null,versionSelection:d.versionSelection||null,available:Boolean(url),unavailableReason:url?null:'original-not-registered'};};
-const websiteDocument=d=>!/操作指南/.test(d.name||d.file||'');
+const websiteDocument=d=>!/操作指南|\boperation\s+guide/i.test(d.name||d.file||'')&&!/\.docx$/i.test(d.name||d.file||'');
 function productView(p){
  const documents=selectDocumentVersions((p.documents||[]).filter(websiteDocument)).selected;
  const groups=['spec','manual','other','pending'].map(kind=>({key:kind,label:labels[kind],items:documents.filter(d=>d.kind===kind).map(link).sort(newestFirst)})).filter(g=>g.items.length);
