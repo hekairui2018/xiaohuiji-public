@@ -182,17 +182,19 @@ body[data-view="ai"] .ai-messages { height: 640px; }
 .doc-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .doc-link {
  display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:100%;
- font-size:12px;color:var(--text);text-decoration:none;padding:9px 10px;
- background:var(--surface-muted);border:1px solid transparent;border-radius:6px;
+ font-size:13px;color:var(--text);text-decoration:none;padding:8px 8px 8px 11px;
+ background:var(--surface);border:1px solid transparent;border-radius:6px;
  line-height:1.6;white-space:normal;overflow-wrap:anywhere;
  transition:background .15s ease,border-color .15s ease,color .15s ease;
 }
-.doc-link::before{content:'▤';color:var(--text-muted);font-size:12px;flex-shrink:0}
+.doc-link::before{content:'';display:inline-block;width:13px;height:13px;flex:0 0 13px;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23168FA9' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='2.5' width='9' height='11' rx='1.5'/%3E%3Cpath d='M6 6h4M6 8.5h3'/%3E%3C/svg%3E")}
 .doc-link:hover{background:var(--hover);border-color:var(--border);color:var(--accent);text-decoration:none}
-.doc-file-actions{display:inline-flex;align-items:stretch;min-width:0;max-width:100%;background:var(--surface-muted);border-radius:6px;overflow:hidden}
-.doc-file-actions .doc-link{border-radius:6px 0 0 6px}
-.doc-download{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:28px;padding:0 8px;color:var(--text-muted);font-size:0;text-decoration:none;background:var(--surface-muted)}
-.doc-download::after{content:'⇩';font-size:15px;line-height:1}
+.doc-file-actions{display:inline-flex;align-items:stretch;min-width:0;max-width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;transition:border-color .15s,background .15s}
+.doc-file-actions:hover{border-color:#B9DCE4;background:var(--hover)}
+.doc-file-actions .doc-link{border:0;border-radius:6px 0 0 6px}
+.doc-file-actions:hover .doc-link,.doc-file-actions:hover .doc-download{background:var(--hover)}
+.doc-download{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:28px;padding:0 8px;color:var(--accent);font-size:0;text-decoration:none;background:var(--surface)}
+.doc-download::after{content:'';display:block;width:14px;height:14px;background:center/contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23168FA9' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2.5v7m-2.5-2L8 10l2.5-2.5M3.5 10v2.5h9V10'/%3E%3C/svg%3E")}
 .doc-download:hover{color:var(--accent);background:var(--hover)}
 .doc-link-nourl, .doc-link-nourl:hover {
   color: var(--text-muted);
