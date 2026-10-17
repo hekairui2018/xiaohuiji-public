@@ -1855,11 +1855,6 @@ function docPillEl(it, isFw) {
   a.target = "_blank";
   a.rel = "noopener noreferrer";
   a.textContent = it.clean || it.name || "下载";
-  if (it.deviceName && !/[\u4e00-\u9fff]/.test(it.name || '') && !a.textContent.includes(it.deviceName)) {
-    const description = document.createElement('span');
-    description.className = 'doc-device-description'; description.textContent = ' · ' + it.deviceName;
-    a.appendChild(description);
-  }
   const unavailableMessage = it.unavailableMessage || "暂未提供原文件链接";
   a.title = (it.name || it.clean || "") + (available ? "" : "（" + unavailableMessage + "）");
   if (!available) {

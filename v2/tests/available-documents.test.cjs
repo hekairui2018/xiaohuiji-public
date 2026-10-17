@@ -9,3 +9,7 @@ test('Catalogue isolates missing originals without discarding unknown versions, 
  const unknown={...current,fileId:'unknown',documentVersion:null},hardware={...current,fileId:'hw2',name:'X9 E2规格书V1.0.pdf'},outage={...old,unavailableReason:'resource-service-unavailable'},conflict={...old,unavailableReason:'same-name-content-conflict'};
  const source=[{key:'spec',products:[{model:'X9',items:[old,current,unknown,hardware,outage,conflict]}]}];const result=separateCatalogReferences(source);assert.equal(result.groups[0].fileCount,5);assert.equal(result.unavailableRecords.length,1);assert.equal(source[0].products[0].items.length,6);assert.ok(result.groups[0].products[0].items.includes(unknown));assert.ok(result.groups[0].products[0].items.includes(outage));assert.ok(result.groups[0].products[0].items.includes(conflict));
 });
+
+test('Unavailable legacy descriptions cannot blank the name of the current available original',()=>{
+ const missing={...old,kind:'spec',deviceName:'旧描述'},present={...current,kind:'spec',deviceName:'二合一视频处理器'};const p=separateProductReferences({docGroups:[{key:'spec',items:[missing,present]}]});assert.equal(p.deviceName,'二合一视频处理器');const catalogue=separateCatalogReferences([{products:[{model:'X9',deviceName:null,items:[missing,present]}]}]);assert.equal(catalogue.groups[0].products[0].deviceName,'二合一视频处理器');
+});

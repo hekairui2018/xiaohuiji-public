@@ -31,7 +31,7 @@
  function badge(parent,text,warning=false){const node=el('span',text);node.className='pr-badge'+(warning?' pr-warning':'');parent.append(node);}
  function row(item,group){
   const root=el('article');root.className='pr-resource';
-  const title=el('strong',item.name||item.originalName||item.clean||'未命名资料');title.className='pr-file-name';if(item.deviceName&&!title.textContent.includes(item.deviceName)){const description=el('small',' · '+item.deviceName);description.className='doc-device-description';title.append(description);}root.append(title);
+  const title=el('strong',item.name||item.originalName||item.clean||'未命名资料');title.className='pr-file-name';root.append(title);
   const meta=el('div');meta.className='pr-meta';badge(meta,group.label);
   if(item.documentDate)badge(meta,'原文日期 '+item.documentDate);
   if(item.documentVersion)badge(meta,'版本 '+item.documentVersion);

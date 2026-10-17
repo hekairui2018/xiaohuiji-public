@@ -16,3 +16,9 @@ test('Exact standalone cover models support numeric LCD box names and digital hu
  const resource={name:'HD-3399F-BOX规格书V1.2.pdf',documentIntro:'PRODUCT SPECIFICATION\nLCD 智能安卓播放盒\nHD-3399F-BOX\nV1.2',documentMetadata:{coverModels:[]}};assert.equal(deviceName(resource,'HD-3399F-BOX').name,'LCD 智能安卓播放盒');assert.equal(deviceName(resource,'HD-3399F'),null);
  assert.equal(deviceName({name:'55寸OLED移动讲解数字人规格书.pdf',documentIntro:'55 寸 OLED 移动讲解数字人\n产品类别：55 寸 OLED 移动讲解数字人\nHD-MGDH55-OLED',documentMetadata:{coverModels:['MGDH55-OLED']}},'HD-MGDH55-OLED').name,'55 寸 OLED 移动讲解数字人');
 });
+
+test('Cover captions support controller/system types and do not read later table rows as cover names',()=>{
+ for(const [id,name] of [['A7','4K 超级主控'],['A8','4K 超级主控'],['C16H','异步全彩控制系统'],['T08','4K 同步发送'],['E62','单双色网口卡']])assert.equal(deviceName({name:'HD-'+id+'规格书.pdf',documentMetadata:{coverModels:[id]},documentIntro:name+'\nHD-'+id},'HD-'+id).name,name);
+ assert.equal(deviceName({name:'HD-DCS4000 Pro规格书.pdf',documentMetadata:{coverModels:['DCS4000PRO']},documentIntro:'4Kp60 KVM 编解码一体机\nHD-DCS4000 Pro\n名称 4K 多画面 KVM 编解码一体机'},'HD-DCS4000 Pro').name,'4Kp60 KVM 编解码一体机');
+ assert.equal(deviceName({name:'HD-AP0x0x规格书.pdf',documentMetadata:{coverModels:['AP0808','AP1616']},documentIntro:'数字音频处理器\nHD-AP0808\nHD-AP1616'},'HD-AP0x0x').name,'数字音频处理器');
+});
