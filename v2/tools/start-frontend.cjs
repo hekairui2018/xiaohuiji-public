@@ -16,8 +16,9 @@ function createFrontendServer({backend='http://127.0.0.1:8520',frontendRoot=path
   if(req.method==='GET'&&route==='/v2/offline/client.js')req.url='/offline-client.js';
   if(req.method==='GET'&&route==='/v2/local-knowledge/client.js')req.url='/local-knowledge.js';
   if(req.method==='GET'&&serveStatic(req,res,frontendRoot,{offlineKnowledge:true}))return;
+  const softwareAccessImage=req.method==='GET'&&route==='/v2/software-access/screen-control.png';
   const originalFile=req.method==='GET'&&/^\/official-files\/[^\0]+$/.test(route);
-  if(!allowed.has(route)&&!/^\/v2\/resources\/original\/[a-f0-9]{64}$/.test(route)&&!originalFile)return send(404,'not-an-existing-frontend-api');
+  if(!allowed.has(route)&&!softwareAccessImage&&!/^\/v2\/resources\/original\/[a-f0-9]{64}$/.test(route)&&!originalFile)return send(404,'not-an-existing-frontend-api');
   if(!['GET','POST'].includes(req.method))return send(405,'method-not-allowed');
   let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>(route==='/api/ocr'?15*1024*1024:65536))return send(413,'body-too-large');chunks.push(chunk);}
   const headers={host:target.host};if(req.headers['content-type'])headers['content-type']=req.headers['content-type'];if(req.headers.range)headers.range=req.headers.range;if(req.headers['accept-encoding'])headers['accept-encoding']=req.headers['accept-encoding'];

@@ -22,3 +22,8 @@ test('Frontend development serves its own edits, proxies existing APIs and never
   assert.equal((await fetch(url+'/api/search?q=x',{headers:{Origin:'https://example.com'}})).status,403);assert.equal(seen.length,1);
  }finally{await close(front);await close(backend);fs.rmSync(temp,{recursive:true,force:true});}
 });
+
+test('Frontend proxy exposes only the existing read-only software QR image route',async()=>{
+ const backend=http.createServer((req,res)=>{res.setHeader('Content-Type','image/png');res.end('synthetic-image');});const base=await listen(backend),reserve=http.createServer();await listen(reserve);const port=reserve.address().port;await close(reserve);const front=createFrontendServer({backend:base,port});const url=await listen(front,port);
+ try{const image=await fetch(url+'/v2/software-access/screen-control.png');assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/png');assert.equal(await image.text(),'synthetic-image');assert.equal((await fetch(url+'/v2/software-access/screen-control.png',{method:'POST'})).status,404);assert.equal((await fetch(url+'/v2/software-access/unregistered.png')).status,404);}finally{await close(front);await close(backend);}
+});
