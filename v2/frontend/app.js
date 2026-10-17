@@ -2037,7 +2037,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       const close=document.createElement('button');close.type='button';close.className='firmware-panel-close';close.textContent='×';close.title='关闭固件下载';close.setAttribute('aria-label','关闭固件下载');close.hidden=!pin;close.onclick=()=>{const trigger=active;closePanel();trigger?.focus({preventScroll:true});};header.append(title,close);
       const files=document.createElement('div');files.className='firmware-panel-files';product.items.forEach(item=>files.append(docFileActions(item,true)));panel.append(header,files);
       if(!panel.matches(':popover-open'))panel.showPopover();button.setAttribute('aria-expanded','true');
-      const r=button.getBoundingClientRect(),bounds=panel.getBoundingClientRect();panel.style.left=Math.max(12,Math.min(r.left,innerWidth-bounds.width-12))+'px';panel.style.top=Math.max(12,Math.min(r.bottom+8,innerHeight-bounds.height-12))+'px';
+      const r=button.getBoundingClientRect(),bounds=panel.getBoundingClientRect(),above=r.top-bounds.height-8,below=r.bottom+8;const top=above>=12?above:below+bounds.height<=innerHeight-12?below:Math.max(12,Math.min(above,innerHeight-bounds.height-12));panel.style.left=Math.max(12,Math.min(r.left,innerWidth-bounds.width-12))+'px';panel.style.top=top+'px';
       if(pin)panel.focus({preventScroll:true});
     }
     panel.addEventListener('pointerenter',()=>clearTimeout(leaveTimer));panel.addEventListener('pointerleave',leave);
