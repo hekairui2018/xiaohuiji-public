@@ -13,7 +13,7 @@ function describeDocument(document){
  const title=meta.title?.replace(/V\d+(?:\.\d+)+/ig,'').trim();
  const familyStem=meta.familyId&&meta.classificationStatus==='manual-review'?'reviewed-family:'+meta.familyId:title&&meta.coverModels?.length?meta.coverModels.join('|')+'|'+title:version&&version.index!==-1?stem.replace(version[0],'{version}'):stem;
  return {version:version?.[0].toUpperCase()||null,numbers:version?version[1].split('.').map(Number):null,
-  family:familyStem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/\s*&\s*/g,' ').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase()+'|'+(/[\u4e00-\u9fff]/.test(stem)?'zh':'en')+'|'+scope,
+  family:familyStem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/\s*&\s*/g,' ').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase()+'|'+(/[\u4e00-\u9fff]/.test(stem)?'zh':'en')+'|'+scope+(isSignedDocument(document)?'|signed':'')+(document.presentationBasis==='local-operation-guide-in-other'?'|operation-guide':''),
   versionBasis:conflict?'filename-cover-version-conflict':original?'original-cover-version':named?'explicit-filename-version':'not-established',
   formatFamily:stem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase(),
   language:/[\u4e00-\u9fff]/.test(stem)?'zh':'unspecified-or-en',format:/\.([a-z0-9]+)$/i.exec(name)?.[1].toLowerCase()||null};
@@ -21,11 +21,11 @@ function describeDocument(document){
 function compare(a,b){for(let i=0;i<Math.max(a.length,b.length);i++){const d=(a[i]||0)-(b[i]||0);if(d)return Math.sign(d);}return 0;}
 function isSignedDocument(document){
  const name=(document.name||document.file||'').replace(/未签章|未盖章|未签字|unsigned/ig,'');
- return /签章|盖章|签字|(?:^|[\\/\s_.(-])signed(?:[\\/\s_.)-]|$)/i.test(name);
+ return document.documentEdition==='signed'||/签章|盖章|签字|(?:^|[\\/\s_.(-])signed(?:[\\/\s_.)-]|$)/i.test(name);
 }
-function selectDocumentVersions(documents,{includeHistory=false}={}){
- const excludedSigned=includeHistory?[]:documents.filter(isSignedDocument).map(d=>({...d,versionSelection:'signed-copy-hidden'}));
- const rows=documents.filter(d=>includeHistory||!isSignedDocument(d)).map(d=>({document:d,identity:describeDocument(d)})),max=new Map();
+function selectDocumentVersions(documents,{includeHistory=false,includeSigned=false}={}){
+ const excludedSigned=includeHistory||includeSigned?[]:documents.filter(isSignedDocument).map(d=>({...d,versionSelection:'signed-copy-hidden'}));
+ const rows=documents.filter(d=>includeHistory||includeSigned||!isSignedDocument(d)).map(d=>({document:d,identity:describeDocument(d)})),max=new Map();
  for(const r of rows)if(r.identity.numbers){const old=max.get(r.identity.family);if(!old||compare(r.identity.numbers,old)>0)max.set(r.identity.family,r.identity.numbers);}
  const selected=[],withheld=[],formatAlternatives=[];
  for(const {document,identity}of rows){

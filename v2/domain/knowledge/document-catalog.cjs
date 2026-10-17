@@ -6,7 +6,7 @@ const formats=/\.(pdf|docx?|pptx?|xlsx?|wps|txt|md)$/i;
 function identifyDocument(resource,products=[]){
  const name=resource.name||'',intro=resource.documentIntro||'',meta=resource.documentMetadata||{},source=sourceClassification(resource);
  if(!formats.test(name)&&!source.formatConflict)return null;
- let kind=/规格书|产品规格|技术规格|(?<![A-Za-z])specifications?(?![A-Za-z])/i.test(name)?'spec':/说明书|操作说明|使用说明|用户手册|操作手册|产品手册|使用手册|系统操作手册|调试手册|调试指导手册|调试说明|连接说明|(?<![A-Za-z])manual(?![A-Za-z])|\b(?:user|operation|installation|programming|hardware)\s+guide\b/i.test(name)?'manual':null;
+ let kind=/规格书|产品规格|技术规格|(?<![A-Za-z])specifications?(?![A-Za-z])/i.test(name)?'spec':/说明书|操作说明|操作指南|使用说明|用户手册|操作手册|产品手册|使用手册|系统操作手册|调试手册|调试指导手册|调试说明|连接说明|(?<![A-Za-z])manual(?![A-Za-z])|\b(?:user|operation|installation|programming|hardware)\s+guide\b/i.test(name)?'manual':null;
  const filenameKind=kind,bodyKind=meta.certificate?'other':meta.kind||null;
  let basis=kind?'filename-role-hint':null,classificationConflict=null;
  if(source.kind){

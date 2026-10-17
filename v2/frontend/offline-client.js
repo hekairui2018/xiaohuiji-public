@@ -33,7 +33,7 @@
    for(const s of r.sources||[]){original.append(make('small',s.name+' · '+place(s.locator)));link(original,s.original,'查看原件');}box.append(original);
    if(r.missingEvidence)box.append(make('small','仍需核对：'+r.missingEvidence));
   }else{
-   box.append(make('small',place(r.locator)+' · '+((r.versions||[]).join('、')||'版本未明确')));
+   box.append(make('small',[place(r.locator),(r.versions||[]).join('、')].filter(Boolean).join(' · ')));
    if(r.text){const excerpt=make('pre',r.text);if(r.text.length>360){const details=make('details');details.append(make('summary','查看正文摘录'),excerpt);box.append(details);}else box.append(excerpt);}
    if(r.mentionedModels?.length)box.append(make('small','正文提及：'+r.mentionedModels.join('、')+'（不代表兼容性确认）'));
    link(box,r.download,'打开原文件');link(box,r.download,'下载文件',r.name||'');

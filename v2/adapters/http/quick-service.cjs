@@ -3,7 +3,7 @@ const labels={spec:'规格书',manual:'使用说明书',firmware:'固件',other:
 // Reuse the existing pure display classifier, without importing V1 services or routing.
 const {DOC_CATEGORIES,classifyDocModel}=require('../../../backend/doc-category.cjs');
 const DOCUMENT_CATEGORIES=[...DOC_CATEGORIES,{key:'lcd',label:'LCD 产品 · 软件与操作'},{key:'software-cloud',label:'软件 · APP · 云平台'},{key:'unassigned-documents',label:'分类待确认'}];
-const {selectDocumentVersions,isSignedDocument}=require('../../domain/knowledge/document-versions.cjs');
+const {selectQuickDocuments}=require('../../domain/knowledge/quick-document-policy.cjs');
 const {resourceView,paginateDocs}=require('../../domain/knowledge/resource-view.cjs');
 const {newestFirst,newestIn}=require('../../domain/knowledge/document-dates.cjs');
 const {productCategories}=require('../../domain/knowledge/flat-resource-groups.cjs');
@@ -16,10 +16,9 @@ function documentLabel(name){
  if(/^[A-Z]+\d[A-Z0-9+-]*(?=[\u4e00-\u9fff\s]|$)/i.test(label))label='HD-'+label;
  return label;
 }
-const link=d=>{const url=d.url||d.publicUrl||null,name=d.name||d.file,clean=(d.kind==='firmware'?name:documentLabel(name))+(d.displayQualifier?' · '+d.displayQualifier:'');return {name,url,documentDate:d.documentDate||null,dateBasis:d.dateBasis||null,dateEvidence:d.dateEvidence||null,clean:clean,btn:clean,verificationStatus:d.verificationStatus||'unknown',resourceOnly:!!d.resourceOnly,kind:d.kind,resourceId:d.resourceId||null,resourceVersionId:d.resourceVersionId||null,classificationBasis:d.classificationBasis||null,classificationConflict:d.classificationConflict||null,sourceGroup:d.sourceGroup||null,sourceRole:d.sourceRole||null,detectedKind:d.detectedKind||null,classificationEvidence:d.documentMetadata?.evidence||[],parseStatus:d.parseStatus||null,applicableModels:d.documentMetadata?.coverModels||[],scopeEvidence:d.documentMetadata?.scopeEvidence||[],associationStatus:d.associationStatus||'snapshot-association',versionBasis:d.versionBasis||null,documentVersion:d.documentVersion||null,documentLanguage:d.documentLanguage||null,versionSelection:d.versionSelection||null,available:Boolean(url),unavailableReason:url?null:'original-not-registered'};};
-const websiteDocument=d=>!/操作指南|\boperation\s+guide/i.test(d.name||d.file||'')&&!/\.docx$/i.test(d.name||d.file||'');
-function productView(p){
- const documents=selectDocumentVersions((p.documents||[]).filter(websiteDocument)).selected;
+const link=d=>{const url=d.url||d.publicUrl||null,name=d.name||d.file,clean=(d.kind==='firmware'?name:documentLabel(name))+(d.displayQualifier?' · '+d.displayQualifier:'');return {name,url,sha256:d.sha256||null,downloadUrl:d.downloadUrl||null,documentEdition:d.documentEdition||null,documentDate:d.documentDate||null,dateBasis:d.dateBasis||null,dateEvidence:d.dateEvidence||null,clean:clean,btn:clean,verificationStatus:d.verificationStatus||'unknown',resourceOnly:!!d.resourceOnly,kind:d.kind,resourceId:d.resourceId||null,resourceVersionId:d.resourceVersionId||null,classificationBasis:d.classificationBasis||null,classificationConflict:d.classificationConflict||null,sourceGroup:d.sourceGroup||null,sourceRole:d.sourceRole||null,detectedKind:d.detectedKind||null,classificationEvidence:d.documentMetadata?.evidence||[],parseStatus:d.parseStatus||null,applicableModels:d.documentMetadata?.coverModels||[],scopeEvidence:d.documentMetadata?.scopeEvidence||[],associationStatus:d.associationStatus||'snapshot-association',versionBasis:d.versionBasis||null,documentVersion:d.documentVersion||null,documentLanguage:d.documentLanguage||null,versionSelection:d.versionSelection||null,available:Boolean(url),unavailableReason:url?null:'original-not-registered'};};
+function productView(p,{local=false}={}){
+ const documents=selectQuickDocuments(p.documents||[],{local}).selected;
  const groups=['spec','manual','other','pending'].map(kind=>({key:kind,label:labels[kind],items:documents.filter(d=>d.kind===kind).map(link).sort(newestFirst)})).filter(g=>g.items.length);
  const fw=(p.firmware||[]).filter(f=>['uploaded','local-indexed'].includes(f.status)&&f.publicUrl);if(fw.length)groups.push({key:'firmware',label:'固件',items:fw.map(link)});
  return {name:p.displayName||p.model,modelId:p.modelId||null,aliases:p.aliases||[],features:{series:p.parameters?.productSeries||'',load:p.parameters?.load||'',resolution:p.parameters?.resolution||'',outputs:p.parameters?.interfaces||''},specGroups:groups.filter(g=>g.key!=='firmware'),firmwareGroup:groups.find(g=>g.key==='firmware')||null,docGroups:groups,specFiles:documents.map(d=>d.name),specLinks:documents.map(d=>d.url)};
@@ -33,15 +32,15 @@ function createQuickService(app,{resolveDocuments,localCatalog}={}){
  const versions=(product,websiteOnly,historyOnly,includeHistory)=>{
   let cache=versionSelections.get(product);if(!cache){cache=new Map();versionSelections.set(product,cache);}
   const key=JSON.stringify([!!(websiteOnly||historyOnly),!!(includeHistory||historyOnly)]);
-  if(!cache.has(key))cache.set(key,selectDocumentVersions((product.documents||[]).filter(d=>(!(websiteOnly||historyOnly)||!isSignedDocument(d))&&(!websiteOnly||includeHistory||historyOnly||websiteDocument(d))),{includeHistory:includeHistory||historyOnly}));
+  if(!cache.has(key))cache.set(key,selectQuickDocuments(product.documents||[],{local:!!localCatalog,websiteOnly,includeHistory,historyOnly}));
   return cache.get(key);
  };
- const localProducts=async()=>{const resources=await localCatalog();if(augmentedSource!==resources){augmentedProducts=augmentProducts(all(),resources);augmentedSource=resources;}return augmentedProducts;};
+ const localProducts=async()=>{const resources=await localCatalog();if(augmentedSource!==resources){augmentedProducts=augmentProducts(all(),resources,{includeSigned:true});augmentedSource=resources;}return augmentedProducts;};
  return {
-  async search(q){let records=app.quickSearch(q).records;if(localCatalog){const augmented=await localProducts();const ids=new Set(records.map(p=>p.modelId).filter(Boolean)),names=new Set(records.map(p=>p.displayName));records=augmented.filter(p=>(p.modelId&&ids.has(p.modelId))||names.has(p.displayName)||String(p.displayName).toUpperCase()===String(q).toUpperCase()||String(p.modelId).replace(/^HD-/,'')===String(q).toUpperCase());}const results=records.map(productView),chip=app.chipLookup(q,records.map(p=>({modelId:p.modelId}))),series=new Set(records.map(p=>p.parameters?.productSeries).filter(Boolean)),seen=new Set(records.map(p=>p.modelId));
+  async search(q){let records=app.quickSearch(q).records;if(localCatalog){const augmented=await localProducts();const ids=new Set(records.map(p=>p.modelId).filter(Boolean)),names=new Set(records.map(p=>p.displayName));records=augmented.filter(p=>(p.modelId&&ids.has(p.modelId))||names.has(p.displayName)||String(p.displayName).toUpperCase()===String(q).toUpperCase()||String(p.modelId).replace(/^HD-/,'')===String(q).toUpperCase());}const results=records.map(p=>productView(p,{local:!!localCatalog})),chip=app.chipLookup(q,records.map(p=>({modelId:p.modelId}))),series=new Set(records.map(p=>p.parameters?.productSeries).filter(Boolean)),seen=new Set(records.map(p=>p.modelId));
    if(resolveDocuments){
-    const documents=records.flatMap(p=>{const docs=selectDocumentVersions((p.documents||[]).filter(websiteDocument)).selected;return ['spec','manual','other','pending'].flatMap(kind=>docs.filter(d=>d.kind===kind));}),views=results.flatMap(p=>p.specGroups.flatMap(g=>g.items));
-    const positions=documents.map((d,i)=>d.detectedKind?-1:i).filter(i=>i>=0),resolutions=await resolveDocuments(positions.map(i=>documents[i]));
+    const documents=records.flatMap(p=>{const docs=selectQuickDocuments(p.documents||[],{local:!!localCatalog}).selected;return ['spec','manual','other','pending'].flatMap(kind=>docs.filter(d=>d.kind===kind).sort(newestFirst));}),views=results.flatMap(p=>p.specGroups.flatMap(g=>g.items));
+    const positions=documents.map((d,i)=>d.detectedKind||d.documentEdition==='signed'&&d.sourceLocationId?-1:i).filter(i=>i>=0),resolutions=await resolveDocuments(positions.map(i=>documents[i]));
     for(let n=0;n<positions.length;n++){const i=positions[n];Object.assign(views[i],resolutions[n]||{url:null,available:false,unavailableReason:'resource-resolution-unavailable'});views[i].unavailableMessage=views[i].available?null:unavailableMessages[views[i].unavailableReason]||'暂无法提供已确认的原件';}
     for(const p of results){for(const g of p.specGroups)g.items=g.items.filter(d=>d.unavailableReason!=='signed-edition-hidden');p.specGroups=p.specGroups.filter(g=>g.items.length);p.docGroups=p.docGroups.filter(g=>g.items.length);const docs=p.specGroups.flatMap(g=>g.items);p.specFiles=docs.map(d=>d.name);p.specLinks=docs.map(d=>d.url);}
    }
@@ -64,7 +63,7 @@ function createQuickService(app,{resolveDocuments,localCatalog}={}){
     for(const [key,categoryItems] of categories){if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push({...product,items:categoryItems,count:categoryItems.length});}
    }
    if(cat!=='firmware'&&resolveDocuments){
-    const positions=sourceDocuments.map((d,i)=>d.kind==='firmware'||d.detectedKind?-1:i).filter(i=>i>=0),resolutions=await resolveDocuments(positions.map(i=>sourceDocuments[i]));for(let n=0;n<positions.length;n++)Object.assign(views[positions[n]],resolutions[n]||{url:null,available:false,unavailableReason:'resource-resolution-unavailable'});
+    const positions=sourceDocuments.map((d,i)=>d.kind==='firmware'||d.detectedKind||d.documentEdition==='signed'&&d.sourceLocationId?-1:i).filter(i=>i>=0),resolutions=await resolveDocuments(positions.map(i=>sourceDocuments[i]));for(let n=0;n<positions.length;n++)Object.assign(views[positions[n]],resolutions[n]||{url:null,available:false,unavailableReason:'resource-resolution-unavailable'});
    }
    for(const p of grouped)p.items.sort(newestFirst);
    for(const item of views)item.unavailableMessage=item.available?null:unavailableMessages[item.unavailableReason]||'暂无法提供已确认的原件';
