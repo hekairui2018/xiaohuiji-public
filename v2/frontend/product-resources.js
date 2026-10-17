@@ -14,6 +14,7 @@
   const root=el('article');root.className='pr-resource';
   const title=el('strong',item.name||item.originalName||item.clean||'未命名资料');title.className='pr-file-name';root.append(title);
   const meta=el('div');meta.className='pr-meta';badge(meta,group.label);
+  if(item.documentDate)badge(meta,'原文日期 '+item.documentDate);
   badge(meta,item.documentVersion?'版本 '+item.documentVersion:'版本未明确',!item.documentVersion);
   const conflict=item.versionBasis==='filename-cover-version-conflict';
   if(conflict)badge(meta,'版本冲突，需核对',true);

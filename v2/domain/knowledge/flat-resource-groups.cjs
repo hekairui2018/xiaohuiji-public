@@ -5,7 +5,7 @@ function uniqueFiles(items){
  for(const item of items){const key=item.fileId||item.sha256&&'sha256:'+item.sha256||item.resourceVersionId||null;
   if(key&&seen.has(key)){const old=seen.get(key);old.associatedModels=[...new Set([...old.associatedModels||[],...item.associatedModels||[]])];continue;}
   const record={...item,associatedModels:[...item.associatedModels||[]]};rows.push(record);if(key)seen.set(key,record);
- }return rows;
+ }return rows.sort(require('./document-dates.cjs').newestFirst);
 }
 function productCategories(product){
  const items=(product.docGroups||[]).flatMap(g=>g.items||[]);

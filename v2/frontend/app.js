@@ -2276,7 +2276,7 @@ function buildSoftwareAccessButton(s) {
     const dialog=document.createElement('dialog');dialog.style.cssText='max-width:600px;width:calc(100% - 48px);border:0;border-radius:14px;padding:24px;box-sizing:border-box';
     const heading=document.createElement('h3');heading.textContent=s.name;dialog.append(heading);
     if(s.access.imageUrl){const image=document.createElement('img');image.src=s.access.imageUrl;image.alt='屏掌控下载二维码与安装说明';image.style.cssText='max-width:100%;height:auto';dialog.append(image);}
-    for(const item of s.access.links||[]){const line=document.createElement('p'),a=document.createElement('a');a.href=item.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=item.label;line.append(a);if(item.note)line.append('：'+item.note);dialog.append(line);}
+    for(const item of s.access.links||[]){const line=document.createElement('p'),a=document.createElement('a');a.href=item.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=item.label;a.className='sw-btn-download sw-btn-sm';line.append(a);if(item.note)line.append('：'+item.note);dialog.append(line);}
     if(s.access.note){const note=document.createElement('p');note.textContent=s.access.note;dialog.append(note);}
     const close=document.createElement('button');close.type='button';close.textContent='关闭';close.onclick=()=>dialog.close();dialog.append(close);dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();
   };
