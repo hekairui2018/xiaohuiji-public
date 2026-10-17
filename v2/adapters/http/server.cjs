@@ -11,6 +11,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  const publicQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments});
  const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
  const orderingDialogue=createDialogueService(app,{operation:'ordering'});
+ const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache();
  return http.createServer(async(req,res)=>{
   if(accessGuard&&!accessGuard(req,res))return;
   const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
@@ -41,7 +42,10 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
     const limit=url.searchParams.has('limit')?Number(url.searchParams.get('limit')):null,offset=Number(url.searchParams.get('offset')||0);
     const view=url.searchParams.get('view')||'grouped';if(!['grouped','flat'].includes(view)){send(400,{error:'invalid_view'});return;}
     if(!Number.isInteger(offset)||offset<0||(limit!==null&&(!Number.isInteger(limit)||limit<1||limit>200))||(offset&&limit===null)){send(400,{error:'invalid_pagination'});return;}
-    send(200,await media(await quick.docs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view})));return;
+    // Public transformation and authorization remain uncached and separate.
+    if(req.v2Public)send(200,await media(await quick.docs(cat,{includeHistory:false,historyOnly:false,websiteOnly:true,offset,limit,view})));
+    else await catalogResponse(req,res,JSON.stringify([cat,history,offset,limit,view]),async()=>media(await quick.docs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view})));
+    return;
    }
    if(serveStatic(req,res,undefined,{localKnowledge:!req.v2Public&&!!localKnowledge,offlineKnowledge:!req.v2Public&&!!offlineKnowledge}))return;
   }
