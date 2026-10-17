@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- OSS 防盗链允许空 Referer：本机/局域网IP/花生壳等任何来源播放、下载 OSS 上的视频、规格书、固件、软件时都不带 Referer，避免 403 -->
+  <meta name="referrer" content="no-referrer">
+  <title>小灰机 · 灰度LED显示屏智能客服与选型助手</title>
+  <meta name="description" content="灰度科技HD官方在线客服：速查LED显示屏接收卡、发送卡、播放盒、处理器的参数规格书、固件与软件，附操作视频、故障排查案例，并支持按屏体尺寸智能配单选型。">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="小灰机">
+  <meta property="og:title" content="小灰机 · 灰度LED显示屏智能客服与选型助手">
+  <meta property="og:description" content="速查LED显示屏控制设备的参数规格书、固件与软件，附操作视频、故障排查案例，支持按屏体尺寸智能配单选型。">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23174f9e'/><path d='M37 6L17 36H29L25 58L47 26H34Z' fill='%23ffffff'/></svg>">
+  <link rel="stylesheet" href="styles.css?v=preload-v2-20261017">
+</head>
+<body data-view="quick">
+  <header class="site-header">
+    <div class="brand">
+      <div class="logo">小灰机</div>
+      <div class="subtitle" aria-label="LED显示屏、智能客服与选型助手"><span class="st-item">LED显示屏</span><span class="st-item">智能客服与选型助手</span></div>
+    </div>
+    <div class="view-switch" role="tablist" aria-label="切换资料搜索 / 客服问答">
+      <button type="button" class="vs-btn active" data-view="quick">资料搜索</button>
+      <button type="button" class="vs-btn" data-view="ai">客服问答</button>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <!-- 快查站搜索区 -->
+    <section class="search-section">
+      <div class="quick-action-bar" role="group" aria-label="搜索模式">
+        <button id="quickProductTitle" class="quick-mode-button" type="button" aria-pressed="true" aria-controls="quickCats searchResults">产品速查</button>
+        <button id="quickMoreDocsBtn" class="quick-mode-button" type="button" aria-pressed="false" aria-controls="searchResults" title="搜索已索引资料的文件名、目录和正文">全文搜索</button>
+      </div>
+      <h1 id="resourceSearchTitle">产品速查</h1>
+      <p class="search-hint" id="resourceSearchHint">输入产品型号，查参数、规格书、说明书、软件、固件和操作视频。</p>
+      <div class="search-box">
+        <input type="text" id="quickSearchInput" aria-label="产品型号或资料关键词" placeholder="如 R708规格书、6363固件、A5说明书、HDPlayer软件、复位视频">
+        <button id="quickSearchBtn" type="button">搜索</button>
+      </div>
+      <div class="quick-cats" id="quickCats" role="tablist" aria-label="产品资料分类">
+        <button type="button" class="qc-btn active" data-cat="all" role="tab" aria-selected="true">全部</button>
+        <button type="button" class="qc-btn" data-cat="spec" role="tab" aria-selected="false">规格书</button>
+        <button type="button" class="qc-btn" data-cat="manual" role="tab" aria-selected="false">说明书</button>
+        <button type="button" class="qc-btn" data-cat="software" role="tab" aria-selected="false">软件</button>
+        <button type="button" class="qc-btn" data-cat="video" role="tab" aria-selected="false">视频</button>
+        <button type="button" class="qc-btn" data-cat="firmware" role="tab" aria-selected="false">固件</button>
+        <button type="button" class="qc-btn" data-cat="other" role="tab" aria-selected="false">其他资料</button>
+        <button type="button" class="qc-btn" data-cat="pending" role="tab" aria-selected="false">待确认</button>
+      </div>
+      <div class="quick-examples" id="quickExamples">
+        <span class="qe-label">试试这样搜：</span>
+        <button type="button" class="qe-btn" data-q="R708">R708 参数</button>
+        <button type="button" class="qe-btn" data-q="6363">6363 芯片固件</button>
+        <button type="button" class="qe-btn" data-q="HDPlayer" data-cat="software">HDPlayer 软件</button>
+        <button type="button" class="qe-btn" data-q="复位" data-cat="video">复位 操作视频</button>
+      </div>
+      <div id="searchResults" aria-live="polite" class="search-results" style="display:none;"></div>
+    </section>
+
+    <!-- AI 问答区 -->
+    <section class="ai-section">
+      <h2>小灰机 <span class="ai-title-divider">·</span> LED 技术助手</h2>
+      <p class="ai-hint">围绕设备资料、软件操作与现场问题查找依据，结合原文和已知条件核对。</p>
+      <div id="aiMessages" role="log" aria-label="查询记录" class="ai-messages">
+        <div class="ai-msg ai-msg-assistant">
+          <div class="ai-msg-bubble">你好，我是小灰机。告诉我设备型号、想了解的软件操作，或描述现场遇到的情况，我会根据输入查找相关资料与原文线索。也可以发送截图识别文字；涉及适用型号、版本和现场条件，请结合原始资料核对。普通对话会保留在本浏览器；临时对话不加入前端历史。</div>
+        </div>
+      </div>
+      <div id="aiImgPreview" class="ai-img-preview" hidden>
+        <img id="aiImgThumb" class="ai-img-thumb" alt="待识别截图">
+        <div class="ai-img-meta"><div id="aiImgStatus" class="ai-img-status">识别中…</div></div>
+        <button type="button" id="aiImgRemove" class="ai-img-remove" title="移除图片" aria-label="移除图片">×</button>
+      </div>
+      <div class="ai-input-row">
+        <input type="text" id="aiInput" aria-label="检索词或工程需求" placeholder="如：C16L花屏一直闪 / R708参数 / P3宽6米高3米同步" autocomplete="off">
+        <button type="button" id="aiImgBtn" class="ai-img-btn" title="发截图，自动识别图里的文字（也可直接粘贴/拖入）" aria-label="发截图识别文字"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+        <button id="aiSendBtn">发送</button>
+        <input type="file" id="aiImgFile" accept="image/*" hidden>
+      </div>
+    </section>
+  </main>
+
+  <script src="v2-components.js?v=20261013"></script>
+  <script src="product-resources.js?v=20261017"></script>
+  <script src="app.js?v=20261017-preload"></script>
+  <script src="conversation-client.js?v=20261017"></script>
+</body>
+</html>

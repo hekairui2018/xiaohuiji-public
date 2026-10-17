@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配单拓扑生成器 · 内部试用</title>
+<style>
+  :root{ --blue:#1f73d0; --ink:#1f2733; --sub:#6b7480; --line:#e3e7ed; --bg:#f4f6f9; --card:#fff; --orange:#ef9566; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei",Arial,sans-serif;-webkit-text-size-adjust:100%;}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 40px;}
+  h1{font-size:20px;margin:6px 0 4px;}
+  .desc{color:var(--sub);font-size:13px;margin:0 0 14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;box-shadow:0 1px 3px rgba(20,40,70,.04);}
+  textarea{width:100%;min-height:64px;resize:vertical;border:1px solid #cfd6df;border-radius:8px;padding:10px 12px;font-size:15px;font-family:inherit;color:var(--ink);outline:none;}
+  textarea:focus{border-color:var(--blue);}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;}
+  button{cursor:pointer;border:none;border-radius:8px;font-size:14px;font-family:inherit;}
+  .primary{background:var(--blue);color:#fff;padding:10px 22px;font-size:15px;}
+  .primary:disabled{opacity:.6;cursor:wait;}
+  .chip{background:#eef3fa;color:#2a5b96;border:1px solid #d6e3f3;padding:7px 12px;font-size:13px;border-radius:999px;}
+  .ghost{background:#fff;color:#333;border:1px solid #c6ccd4;padding:8px 14px;}
+  .status{margin-top:12px;font-size:14px;color:var(--sub);min-height:20px;}
+  .status .warn{color:#c0392b;}
+  .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0;}
+  .stat{background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:9px 11px;}
+  .stat .k{font-size:12px;color:var(--sub);}
+  .stat .v{font-size:15px;font-weight:700;margin-top:3px;word-break:break-word;}
+  .svgbox{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;overflow:auto;}
+  .svgbox svg{width:100%;height:auto;display:block;}
+  .notes{margin-top:10px;font-size:12.5px;color:var(--sub);}
+  .notes div{margin:2px 0;}
+  .hide{display:none;}
+  @media (max-width:600px){ h1{font-size:18px;} .primary{width:100%;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>配单拓扑生成器 <span style="font-size:12px;color:var(--sub);font-weight:400">内部试用</span></h1>
+  <p class="desc">直接输入客户的口语配单需求（点间距 P几、宽×高、室内/户外、同步/异步），自动出接收卡连屏拓扑图。宽高不带“米/m”按模组张数算。</p>
+  <div class="card">
+    <textarea id="msg" placeholder="例如：p2，10宽8高&#10;或：1920x1080 P3 室内 全彩 同步&#10;或：P10 宽16米高0.96米 户外 异步"></textarea>
+    <div class="row">
+      <button class="primary" id="go" onclick="onGo()">生成拓扑图</button>
+      <button class="chip" onclick="useCase('p2，10宽8高')">P2 10×8</button>
+      <button class="chip" onclick="useCase('1920x1080 P3 室内 全彩 同步')">1920×1080 P3 同步</button>
+      <button class="chip" onclick="useCase('P10 宽16米高0.96米 户外 异步')">P10 16米×0.96米 异步</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div id="result"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+function escH(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function wan(n){n=Number(n)||0;return n>=10000?(n/10000).toFixed(n>=100000?0:1)+"万":String(n);}
+function useCase(q){$('msg').value=q;onGo();}
+async function onGo(){
+  const q=$('msg').value.trim();
+  if(!q){$('status').innerHTML='<span class="warn">请先输入配单需求</span>';return;}
+  const btn=$('go');btn.disabled=true;
+  $('status').textContent='正在配单并生成拓扑…';
+  $('result').innerHTML='';
+  try{
+    const res=await fetch('/api/ordering/topo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:q})});
+    const d=await res.json();
+    if(!d.ok){$('status').innerHTML='<span class="warn">'+escH(d.message||'无法生成拓扑')+'</span>';return;}
+    $('status').textContent='';
+    renderResult(d,q);
+  }catch(e){$('status').innerHTML='<span class="warn">请求失败：'+escH(e)+'</span>';}
+  finally{btn.disabled=false;}
+}
+function stat(k,v){if(v==null||v==='')return '';return '<div class="stat"><div class="k">'+k+'</div><div class="v">'+escH(v)+'</div></div>';}
+function renderResult(d,q){
+  const s=d.summary||{};
+  // 客户明确要异步/播放盒时显示异步盒，否则显示同步处理器
+  const wantAsync=/异步|播放盒|异步盒|脱机/.test(q||'');
+  const ctrl=(wantAsync?(s.asyncProcessor||s.processor||s.syncProcessor):(s.syncProcessor||s.asyncProcessor||s.processor))||'';
+  let html='<div class="card"><div class="summary">';
+  html+=stat('成屏分辨率',(s.screenW&&s.screenH)?(s.screenW+'×'+s.screenH):'');
+  html+=stat('总点数',s.totalPx?wan(s.totalPx)+' 点':'');
+  html+=stat('模组规格',s.preset);
+  html+=stat('接收卡',s.card?(s.card+' × '+(s.receiverQuantity||'?')+' 张'):'');
+  html+=stat('物理网口',s.physicalPortCount?(''+s.physicalPortCount):'');
+  html+=stat('控制器',ctrl);
+  html+='</div>';
+  const notes=[];
+  (s.assumptions||[]).forEach(a=>notes.push('· '+a));
+  (s.riskFlags||[]).forEach(a=>notes.push('· '+a));
+  if(notes.length)html+='<div class="notes">'+notes.map(n=>'<div>'+escH(n)+'</div>').join('')+'</div>';
+  html+='<div class="row"><button class="ghost" id="dl">下载 SVG</button></div>';
+  html+='<div class="svgbox" style="margin-top:10px">'+d.svg+'</div>';
+  html+='</div>';
+  $('result').innerHTML=html;
+  $('dl').onclick=()=>{
+    const blob=new Blob([d.svg],{type:'image/svg+xml;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download='topo-'+Date.now()+'.svg';a.click();URL.revokeObjectURL(a.href);
+  };
+}
+</script>
+</body>
+</html>
