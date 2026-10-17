@@ -1867,7 +1867,7 @@ function docCatSummary(text, sizeText) {
   det.append(sum, body);
   return { det, body };
 }
-// 资料目录：按型号展开元数据及原件操作，避免一次铺满全部文件。
+// 型号后直接显示文件链接，只有产品大类保留折叠。
 function docFlatRow(model, items, cat) {
   const row = document.createElement("div");
   row.className = "doc-flat";
@@ -1876,23 +1876,20 @@ function docFlatRow(model, items, cat) {
   nm.textContent = model;
   const links = document.createElement("span");
   links.className = "doc-flat-links";
-  if (cat && window.ProductResources) {
-    const listing = document.createElement('details');
-    listing.className = 'pr-directory-files';
-    const documents = window.ProductResources.unique(items || []);
-    const summary = document.createElement('summary');
-    summary.textContent = documents.length + ' 份资料 · 查看版本与原件';
-    listing.appendChild(summary);
-    let loaded = false;
-    listing.dataset.docState = cat + ':model:' + model;
-    listing.addEventListener('toggle', () => {
-      if (!listing.open || loaded) return;
-      loaded = true;
-      documents.forEach(item => listing.appendChild(window.ProductResources.row(item, { key: cat, label: CAT_LABEL[cat] || '资料' })));
-    });
-    links.appendChild(listing);
-  } else {
-    (items || []).forEach(it => links.appendChild(docPillEl(it, false)));
+  const documents = window.ProductResources ? window.ProductResources.unique(items || []) : (items || []);
+  for (const item of documents) {
+    const actions = document.createElement('span');
+    actions.className = 'doc-file-actions';
+    const pill = docPillEl(item, false);
+    if (item.documentDate) pill.title += ' · 原文日期 ' + item.documentDate;
+    actions.appendChild(pill);
+    if (item.available !== false && /^(https?:\/\/|\/[^/])/i.test(item.downloadUrl || '')) {
+      const download = document.createElement('a');
+      download.className = 'doc-download'; download.href = item.downloadUrl;
+      download.download = item.originalName || item.name || '';
+      download.textContent = '下载'; actions.appendChild(download);
+    }
+    links.appendChild(actions);
   }
   row.append(nm, links);
   return row;
