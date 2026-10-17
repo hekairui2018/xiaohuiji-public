@@ -398,6 +398,7 @@ function renderSoftware(sw) {
 
 // 手机 APP / 云平台入口（无 PC 下载器时）：网页版、App Store、安卓落地页 + 商店搜索提示
 function buildMobileActions(s) {
+  if (s.access) return buildSoftwareAccessButton(s);
   const frag = document.createDocumentFragment();
   const m = s.mobile;
   if (!m) {
@@ -555,6 +556,8 @@ function buildSoftwareRow(s) {
     dl.className = "sw-btn-download sw-btn-sm"; dl.href = s.downloadUrl; dl.target = "_blank"; dl.rel = "noopener";
     dl.textContent = "下载";
     acts.appendChild(dl);
+  } else if (s.access) {
+    acts.appendChild(buildSoftwareAccessButton(s));
   } else if (s.mobile) {
     const mb = document.createElement("button");
     mb.type = "button"; mb.className = "sw-btn-detail";
@@ -1667,7 +1670,9 @@ async function renderSoftwareCategory(qArg) {
         dl.className = "sw-btn-download sw-btn-sm"; dl.href = s.downloadUrl; dl.target = "_blank"; dl.rel = "noopener";
         dl.textContent = "下载";
         acts.appendChild(dl);
-      } else if (s.mobile) {
+      } else if (s.access) {
+    acts.appendChild(buildSoftwareAccessButton(s));
+  } else if (s.mobile) {
         const mb = document.createElement("button");
         mb.type = "button"; mb.className = "sw-btn-detail";
         mb.textContent = s.mobile.webUrl ? "网页/手机版" : "手机下载";
@@ -2264,3 +2269,16 @@ function preloadDocumentCatalogs() {
 }
 if (document.readyState === 'complete') preloadDocumentCatalogs();
 else window.addEventListener('load', preloadDocumentCatalogs, { once: true });
+
+function buildSoftwareAccessButton(s) {
+  const button=document.createElement('button');button.type='button';button.className='sw-btn-download sw-btn-sm';button.textContent=s.access.type==='qr'?'扫码下载':'访问入口';
+  button.onclick=()=>{
+    const dialog=document.createElement('dialog');dialog.style.cssText='max-width:600px;width:calc(100% - 48px);border:0;border-radius:14px;padding:24px;box-sizing:border-box';
+    const heading=document.createElement('h3');heading.textContent=s.name;dialog.append(heading);
+    if(s.access.imageUrl){const image=document.createElement('img');image.src=s.access.imageUrl;image.alt='屏掌控下载二维码与安装说明';image.style.cssText='max-width:100%;height:auto';dialog.append(image);}
+    for(const item of s.access.links||[]){const line=document.createElement('p'),a=document.createElement('a');a.href=item.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=item.label;line.append(a);if(item.note)line.append('：'+item.note);dialog.append(line);}
+    if(s.access.note){const note=document.createElement('p');note.textContent=s.access.note;dialog.append(note);}
+    const close=document.createElement('button');close.type='button';close.textContent='关闭';close.onclick=()=>dialog.close();dialog.append(close);dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();
+  };
+  return button;
+}

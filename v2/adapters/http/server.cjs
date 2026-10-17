@@ -26,6 +26,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
    const url=new URL(req.url,'http://localhost'),q=url.searchParams.get('q')||'';
    if(route.startsWith('/v2/resources/original/')){await original(route.slice('/v2/resources/original/'.length),res);return;}
    const media=async body=>!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;
+   if(route==='/v2/software-access/screen-control.png'&&!req.v2Public){const fs=require('node:fs'),path=require('node:path'),file=path.resolve(__dirname,'../../../tmp/v2-offline-runtime/software-assets/pingzhangkong-download.png');if(!fs.existsSync(file)){send(404,{error:'download-image-not-configured'});return;}res.writeHead(200,{'Content-Type':'image/png','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res);return;}
    if(route==='/api/search'){send(200,await media(await quick.search(q)));return;}
    if(route==='/api/software'){send(200,await media(await quick.software(q)));return;}
    if(route==='/api/videos'){
