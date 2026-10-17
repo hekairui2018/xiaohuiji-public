@@ -1673,11 +1673,24 @@ async function renderSoftwareCategory(qArg) {
       main.append(title, purpose);
       const acts = document.createElement("div");
       acts.className = "sw-row-actions";
+      let expandedCard=null;
+      const toggleDetails=(button)=>{
+        if(expandedCard){
+          expandedCard.querySelectorAll('video').forEach(video=>video.pause());
+          acts.prepend(button);expandedCard.replaceWith(row);expandedCard=null;
+          button.textContent=button.dataset.collapsedLabel;button.setAttribute('aria-expanded','false');
+        }else{
+          button.dataset.collapsedLabel=button.textContent;expandedCard=buildSoftwareCard(s);
+          expandedCard.querySelector('.sw-actions').prepend(button);row.replaceWith(expandedCard);
+          button.textContent='收起资料';button.setAttribute('aria-expanded','true');
+        }
+        button.focus({preventScroll:true});
+      };
       const hasMedia = (s.videos && s.videos.primary) || (s.manuals && s.manuals.length);
       if (hasMedia) {
         const detail = document.createElement("button");
         detail.type = "button"; detail.className = "sw-btn-detail"; detail.textContent = "视频/资料";
-        detail.addEventListener("click", () => row.replaceWith(buildSoftwareCard(s))); // 原地展开，不跳问答区
+        detail.setAttribute("aria-expanded","false");detail.addEventListener("click", () => toggleDetails(detail)); // 原地展开，不跳问答区
         acts.appendChild(detail);
       }
       if (s.hasDownloader && s.downloadUrl) {
@@ -1691,7 +1704,7 @@ async function renderSoftwareCategory(qArg) {
         const mb = document.createElement("button");
         mb.type = "button"; mb.className = "sw-btn-detail";
         mb.textContent = s.mobile.webUrl ? "网页/手机版" : "手机下载";
-        mb.addEventListener("click", () => row.replaceWith(buildSoftwareCard(s))); // 原地展开完整入口
+        mb.setAttribute("aria-expanded","false");mb.addEventListener("click", () => toggleDetails(mb)); // 原地展开完整入口
         acts.appendChild(mb);
       } else {
         const nd = document.createElement("span");
