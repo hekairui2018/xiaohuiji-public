@@ -12,7 +12,7 @@
  function badge(parent,text,warning=false){const node=el('span',text);node.className='pr-badge'+(warning?' pr-warning':'');parent.append(node);}
  function row(item,group){
   const root=el('article');root.className='pr-resource';
-  const title=el('strong',item.name||item.originalName||item.clean||'未命名资料');title.className='pr-file-name';root.append(title);
+  const title=el('strong',item.name||item.originalName||item.clean||'未命名资料');title.className='pr-file-name';if(item.deviceName&&!title.textContent.includes(item.deviceName)){const description=el('small',' · '+item.deviceName);description.className='doc-device-description';title.append(description);}root.append(title);
   const meta=el('div');meta.className='pr-meta';badge(meta,group.label);
   if(item.documentDate)badge(meta,'原文日期 '+item.documentDate);
   if(item.documentVersion)badge(meta,'版本 '+item.documentVersion);
@@ -52,5 +52,30 @@
   }
   root.append(empty);input.oninput=filter;return root;
  }
- window.ProductResources={groups,render,unique,row};
+
+ // Language pairing affects layout only; it never merges files or version families.
+ function documentRows(items){
+  const chinese=d=>/[\u4e00-\u9fff]/.test(d.name||'');
+  const families=[
+   ['cube',/立方屏APP|LED cube APP/i],
+   ['screen-lcd',/屏掌控.*LCD|Screen Control.*LCD Version/i],
+   ['screen-full',/屏掌控标准版.*全彩|Screen Control Standard Edition.*Full Color/i],
+   ['screen-mono',/屏掌控单色版|Screen control monochrome version/i],
+   ['cloud-lcd',/小灰云.*LCD|LCD display information management platform/i],
+   ['cloud-led',/小灰云.*LED|LED display information management platform/i]
+  ];
+  const keys=new Map();
+  for(const item of items){const family=families.find(([,pattern])=>pattern.test(item.name||''));const version=(item.name||'').match(/V(\d+(?:\.\d+)+)/i)?.[1];if(family&&version&&item.versionStatus!=='conflict')keys.set(item,family[0]+'|'+version);
+   const named=(item.name||'').match(/^(?:HD[-_ ]?)?([A-Za-z]+\d+[A-Za-z0-9-]*(?:\s+(?:Pro|Plus))?)\s*(规格书|Specifications?|使用说明书|使用说明|User Manual)/i);
+   if(named&&version&&item.versionStatus!=='conflict')keys.set(item,'model:'+named[1].toUpperCase()+'|'+(/规格|spec/i.test(named[2])?'spec':'manual')+'|'+version);}
+  const used=new Set(),rows=[];
+  for(const item of [...items.filter(chinese),...items.filter(d=>!chinese(d))]){
+   if(used.has(item))continue;used.add(item);let partner=null;
+   if(keys.has(item)){const matches=items.filter(d=>!used.has(d)&&keys.get(d)===keys.get(item)&&chinese(d)!==chinese(item));if(matches.length===1)partner=matches[0];}
+   else if(items.length===2&&!items.some(d=>d.versionStatus==='conflict'||families.some(([,pattern])=>pattern.test(d.name||'')))&&chinese(items[0])!==chinese(items[1]))partner=items.find(d=>d!==item&&!used.has(d));
+   if(partner)used.add(partner);rows.push(chinese(item)?{zh:item,other:partner}:{zh:partner,other:item});
+  }
+  return rows;
+ }
+ window.ProductResources={groups,render,unique,row,documentRows};
 })();

@@ -28,13 +28,19 @@ function sourceClassification(resource){
   if(s==='文档'&&folders.slice(0,i).some(x=>x==='操作说明')&&folders[i+1])group=browseGroup(folders[i+1]);
   if(s==='操作视频'&&folders[i+1])group=browseGroup(folders[i+1]);
  }
+ const component=folders.some(s=>/^(?:4G|5G|LTE|通讯|通信)模块规格书$/i.test(s))?'communication-module':folders.some(s=>/^(?:产品型号电池一览表|迈洛克电池报告)$/.test(s))?'battery':null;
+ const directoryTable=/\.(?:xlsx?|csv)$/i.test(name)&&(resource.documentMetadata?.evidence||[]).some(e=>(e.locator?.cells||[]).filter(c=>/^(?:资料名称|资料分类|资料内容)$/.test(c.value||'')).length>=2)&&resource.documentMetadata?.classificationStatus!=='manual-review';
+ if(directoryTable){kind='other';exclusive=false;}
  const conflict=!!(resource.sourceDomainConflict||lcd&&led);
  if(lcd&&!conflict)group={key:'lcd',label:'LCD'};
+ if(component||folders.includes('EShare投屏'))group=browseGroup('配件');
+ const solution=folders.find(s=>/^\d*[-、. ]*全域AI数字交互解决方案$/.test(s));
+ if(!group&&solution)group=browseGroup(solution.replace(/^\d+[-、. ]*/,''));
  const binary=/\.(?:exe|msi|apk)$/i.test(name)?'software':/\.bin$/i.test(name)&&resource.resourceType==='firmware'?'firmware':/\.(?:mp4|webm|mov)$/i.test(name)?'video':null;
  const formatConflict=!!binary&&exclusive&&['spec','manual'].includes(kind);
  if(binary&&!formatConflict){kind=binary;certificate=false;exclusive=false;}
  if(!document&&!binary)kind=null;
  if(!group&&folders.some(s=>/^(?:软件|软件下载器|小灰云、APP)$/.test(s)))group={key:'software-cloud',label:'软件、云平台、APP'};
- return {domain:conflict?null:lcd?'lcd':led?'led':null,domainConflict:conflict,certificate,kind:formatConflict?'pending':kind,detectedKind:binary,exclusive,formatConflict,roleFolder,browseGroup:group,basis:'registered-source-folder'};
+ return {component,directoryTable,domain:conflict?null:lcd?'lcd':led?'led':null,domainConflict:conflict,certificate,kind:formatConflict?'pending':kind,detectedKind:binary,exclusive,formatConflict,roleFolder,browseGroup:group,basis:directoryTable?'cached-document-directory-table':'registered-source-folder'};
 }
 module.exports={sourceClassification,browseGroup};

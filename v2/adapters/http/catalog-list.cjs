@@ -1,6 +1,6 @@
 'use strict';
 // Small browse representation. Full evidence/history APIs remain unchanged.
-const fields=['name','url','downloadUrl','clean','btn','available','unavailableReason','unavailableMessage','originalName','fileId','sha256','resourceId','resourceVersionId','versionId','kind','documentVersion','documentLanguage','documentEdition','versionBasis','versionStatus','versionSelection','documentDate','resourceOnly','verificationStatus','associationStatus','applicableModels','associatedModels','scopeEvidence'];
+const fields=['name','deviceName','deviceNameBasis','url','downloadUrl','clean','btn','available','unavailableReason','unavailableMessage','originalName','fileId','sha256','resourceId','resourceVersionId','versionId','kind','documentVersion','documentLanguage','documentEdition','versionBasis','versionStatus','versionSelection','documentDate','resourceOnly','verificationStatus','associationStatus','applicableModels','associatedModels','scopeEvidence'];
 const item=value=>Object.fromEntries(fields.filter(k=>Object.hasOwn(value,k)).map(k=>[k,value[k]]));
 function catalogList(body){
  if(!body.docs)return body;

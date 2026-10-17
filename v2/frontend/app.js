@@ -1853,6 +1853,11 @@ function docPillEl(it, isFw) {
   a.target = "_blank";
   a.rel = "noreferrer";
   a.textContent = it.clean || it.name || "下载";
+  if (it.deviceName && !a.textContent.includes(it.deviceName)) {
+    const description = document.createElement('span');
+    description.className = 'doc-device-description'; description.textContent = ' · ' + it.deviceName;
+    a.appendChild(description);
+  }
   const unavailableMessage = it.unavailableMessage || "暂未提供原文件链接";
   a.title = (it.name || it.clean || "") + (available ? "" : "（" + unavailableMessage + "）");
   if (!available) {
@@ -1879,36 +1884,48 @@ function docCatSummary(text, sizeText) {
   return { det, body };
 }
 // 型号后直接显示文件链接，只有产品大类保留折叠。
-function docFlatRow(model, items, cat) {
+function docFlatRow(model, items, cat, deviceName) {
   const row = document.createElement("div");
   row.className = "doc-flat";
   const nm = document.createElement("span");
   nm.className = "doc-flat-name";
   nm.textContent = model;
+  if (deviceName) {
+    const description = document.createElement('small');
+    description.className = 'doc-device-name'; description.textContent = deviceName;
+    nm.appendChild(description); nm.title = model + ' · ' + deviceName;
+  }
   const links = document.createElement("span");
   links.className = "doc-flat-links";
   const documents = window.ProductResources ? window.ProductResources.unique(items || []) : (items || []);
-  const languageRows = new Map();
-  for (const item of documents) {
-    const language = item.documentLanguage === 'zh' || /[\u4e00-\u9fff]/.test(item.name || '') ? 'zh' : 'other';
-    if (!languageRows.has(language)) {
-      const line = document.createElement('span'); line.className = 'doc-language-row';
-      line.dataset.language = language; languageRows.set(language, line);
-    }
-    const actions = document.createElement('span');
-    actions.className = 'doc-file-actions';
-    const pill = docPillEl(item, false);
+  function fileButton(item) {
+    const actions = document.createElement('span'); actions.className = 'doc-file-actions';
+    const pill = docPillEl({...item, deviceName: item.deviceName || deviceName}, false);
     if (item.documentDate) pill.title += ' · 原文日期 ' + item.documentDate;
     actions.appendChild(pill);
     if (item.available !== false && /^(https?:\/\/|\/[^/])/i.test(item.downloadUrl || '')) {
-      const download = document.createElement('a');
-      download.className = 'doc-download'; download.href = item.downloadUrl;
-      download.download = item.originalName || item.name || '';
-      download.textContent = '下载'; actions.appendChild(download);
+      const download = document.createElement('a'); download.className = 'doc-download'; download.href = item.downloadUrl;
+      download.download = item.originalName || item.name || ''; download.textContent = '下载'; actions.appendChild(download);
     }
-    languageRows.get(language).appendChild(actions);
+    return actions;
   }
-  for (const language of ['zh', 'other']) if (languageRows.has(language)) links.appendChild(languageRows.get(language));
+  const present = documents.filter(item => item.available !== false);
+  const missing = documents.filter(item => item.available === false);
+  const lines = window.ProductResources.documentRows(present);
+  for (const pair of lines) {
+    const line = document.createElement('span'); line.className = 'doc-document-pair';
+    for (const language of ['zh', 'other']) {
+      const cell = document.createElement('span'); cell.className = 'doc-pair-cell'; cell.dataset.language = language;
+      if (pair[language]) cell.appendChild(fileButton(pair[language])); line.appendChild(cell);
+    }
+    links.appendChild(line);
+  }
+  if (missing.length) {
+    const records = document.createElement('details'); records.className = 'doc-missing-records';
+    const summary = document.createElement('summary'); summary.textContent = '原件缺失记录（' + missing.length + '）'; records.appendChild(summary);
+    const message = document.createElement('p'); message.textContent = '以下是已有旧引用，当前未找到对应原件，不能下载；不代表上方可用版本缺失。'; records.appendChild(message);
+    for (const item of missing) records.appendChild(fileButton(item)); links.appendChild(records);
+  }
   row.append(nm, links);
   return row;
 }
@@ -2028,7 +2045,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
           const end = Math.min(position + 8, prods.length);
           while (position < end) {
             const product = prods[position++];
-            const row = docFlatRow(product.model, product.items, cat);
+            const row = docFlatRow(product.model, product.items, cat, product.deviceName);
             const listing = row.querySelector('details[data-doc-state]');
             if (listing && states.has(listing.dataset.docState)) listing.open = states.get(listing.dataset.docState);
             fragment.appendChild(row);
