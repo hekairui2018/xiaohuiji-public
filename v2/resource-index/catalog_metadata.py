@@ -3,7 +3,7 @@ import json,re,os,uuid
 import collections,threading
 from pathlib import Path
 
-REVISION='quick-metadata-4'
+REVISION='quick-metadata-5'
 _responses={}
 _lock=threading.Lock()
 def analyze(name,blocks):
@@ -52,6 +52,7 @@ def catalog(db,work):
     for r in db.execute("SELECT * FROM locations WHERE state IN ('present','missing') AND kind!='sensitive-metadata-only' AND lower(extension) IN ('.pdf','.docx','.doc','.pptx','.ppt','.xlsx','.xls','.wps','.txt','.md','.bin','.mp4','.webm','.exe','.msi','.apk')"):
         path=Path(r['path']);suffix=path.suffix.lower()
         item={'name':r['name'],'locationId':r['id'],'resourceId':r['resource_id'],'versionId':r['version_id'],'sha256':r['sha256'],'sizeBytes':r['bytes'],'availabilityState':r['state'],'folders':list(path.parts[1:-1]),'resourceType':'firmware' if suffix=='.bin' and re.search('固件|firmware',str(path),re.I) else 'software' if suffix in ('.exe','.msi','.apk') else 'file'}
+        item['sourceDrive']=path.drive.upper() or None
         if r['kind']=='document':
             parsed=parses.get(r['sha256'],{});details=json.loads(parsed.get('details') or '{}')
             item['parseStatus']={'state':parsed.get('state','not-parsed'),'blockCount':parsed.get('blocks',0),'ocrPendingPages':details.get('ocrPendingPages',[]),'complete':parsed.get('state')=='parsed'}
