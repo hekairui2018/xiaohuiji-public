@@ -880,8 +880,8 @@ body[data-view="ai"] .ai-messages { height: 640px; }
 /* 型号名列取黄金分割短段 38.2%，下载胶囊统一从分割线开始左对齐；手机端上下排 */
 .doc-flat{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:12px;display:grid;grid-template-columns:minmax(108px,24%) minmax(0,1fr);align-items:center;column-gap:14px;row-gap:6px;}
 .doc-flat-name{font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.doc-flat-links{min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:8px;}
-.doc-language-row{display:flex;flex-wrap:wrap;align-items:stretch;justify-content:flex-start;gap:8px;min-width:0;}
+.doc-flat-links{min-width:0;display:flex;flex-direction:row;flex-wrap:wrap;align-items:stretch;justify-content:flex-start;gap:8px;}
+.doc-language-row{display:contents;}
 .doc-flat-links .doc-link{margin:0;white-space:normal;overflow-wrap:anywhere;}
 @media (max-width:640px){.doc-flat{padding:8px 10px;grid-template-columns:1fr;row-gap:8px;}.doc-flat-links{justify-content:flex-start}.doc-flat-name{font-size:12.5px;}}
 /* 资料/视频分类：大类折叠（全量收起，搜索命中的大类自动展开） */
