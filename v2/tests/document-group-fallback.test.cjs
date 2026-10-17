@@ -16,6 +16,6 @@ test('Old records recover category from exact originals or one confirmed product
  attachMissingSourceGroups(rows,[{name:'X9规格书 V2.pdf',sha256:'a'.repeat(64),folders:['产品规格书（LED）','VP系列-处理器']}]);assert.ok(rows[0].documents.every(d=>d.displayCategory==='processor'));assert.equal(rows[0].documents[0].applicability,'unchanged');assert.equal(rows[0].documents[0].url,undefined);
  const uncertain=[{documents:[{kind:'spec'},{kind:'spec',displayCategory:'receiver',sourceGroup:{key:'receiver',label:'接收卡'}},{kind:'spec',displayCategory:'player',sourceGroup:{key:'player',label:'播放盒'}}]}];attachMissingSourceGroups(uncertain,[]);assert.equal(uncertain[0].documents[0].displayCategory,undefined);
 });
-test('AI digital interaction equipment retains the real source category rather than being forced into LCD',()=>{
- const r=sourceClassification({name:'OLED产品规格书.pdf',folders:['售前资料','2-解决方案','6-全域AI数字交互解决方案','3-产品规格书']});assert.equal(r.browseGroup.label,'全域AI数字交互解决方案');assert.equal(r.domain,null);
+test('User-confirmed AI digital interaction category is browsed under LCD without inventing source domain',()=>{
+ const r=sourceClassification({name:'OLED产品规格书.pdf',folders:['售前资料','2-解决方案','6-全域AI数字交互解决方案','3-产品规格书']});assert.equal(r.browseGroup.key,'lcd');assert.equal(r.browseGroup.label,'LCD');assert.equal(r.domain,null);
 });

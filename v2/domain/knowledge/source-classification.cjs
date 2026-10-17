@@ -35,7 +35,8 @@ function sourceClassification(resource){
  if(lcd&&!conflict)group={key:'lcd',label:'LCD'};
  if(component||folders.includes('EShare投屏'))group=browseGroup('配件');
  const solution=folders.find(s=>/^\d*[-、. ]*全域AI数字交互解决方案$/.test(s));
- if(!group&&solution)group=browseGroup(solution.replace(/^\d+[-、. ]*/,''));
+ // User-confirmed browse taxonomy; retain source domain and model evidence.
+ if(solution)group={key:'lcd',label:'LCD'};
  const binary=/\.(?:exe|msi|apk)$/i.test(name)?'software':/\.bin$/i.test(name)&&resource.resourceType==='firmware'?'firmware':/\.(?:mp4|webm|mov)$/i.test(name)?'video':null;
  const formatConflict=!!binary&&exclusive&&['spec','manual'].includes(kind);
  if(binary&&!formatConflict){kind=binary;certificate=false;exclusive=false;}
