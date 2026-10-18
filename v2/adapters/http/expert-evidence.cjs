@@ -43,13 +43,14 @@ function createExpertEvidence({request,searchCases,caseMap,clean,location,defaul
     if(chips.length&&sourceChips.length&&!chips.some(c=>sourceChips.includes(c)))continue;
     if(args.version&&versions.length&&!versions.includes(args.version.replace(/^[Vv]/,'')))continue;
     const blockId=1_000_000_000+(++sequence),ref=raw.sourceReferences?.[0]||raw.sourceReference||{},name=ref.file?String(ref.file).split(/[\\/]/).at(-1):candidate.title||'历史案例';
+    if(args.documents&&!args.documents.includes(name))continue;
     const start=Math.max(0,near.hits[0].start-180),end=Math.min(text.length,near.hits.at(-1).end+300);
     const e={evidenceId:stableId(['case',id]),blockId,name:clean(name),text:clean(text.slice(start,end)),locator:{section:ref.locator||ref.record||id},modelIds:known,scope:raw.scope||{},verificationStatus:raw.verificationStatus||'unknown',referenceOnly:true,download:'/v2/offline/case?id='+encodeURIComponent(id),
      readAvailable:true,sourceKind:'indexed-case-record',proximity:{...near,contextBoundary:'single-indexed-case',totalContextChars:text.length,excerptStart:start,excerptEnd:end},originalFileLocated:false};
     authorized.set(blockId,{kind:'case',text:clean(text),e});candidates.push(e);
    }
   }
-  const params=new URLSearchParams({q:args.query,scope,concepts:JSON.stringify(concepts),models:JSON.stringify(models),chips:JSON.stringify(chips),limit:'4'});if(args.version)params.set('version',args.version);
+  const params=new URLSearchParams({q:args.query,scope,concepts:JSON.stringify(concepts),models:JSON.stringify(models),chips:JSON.stringify(chips),limit:'4'});if(args.version)params.set('version',args.version);if(args.documents)params.set('documents',JSON.stringify(args.documents));
   const raw=await request('/proximity/search?'+params);
   for(const r of raw.results||[]){const id=stableId(['passage',r.sha256,r.blockId,r.readAnchor]),loc=r.locations?.[0];
    const e={evidenceId:id,blockId:r.blockId,name:clean(r.name),text:clean(r.text),locator:location(r.locator),modelIds:r.constraints?.mentionedModels||[],scope:r.constraints,verificationStatus:'original-passage-not-compatibility',download:loc?fileUrl(loc.id,r.name):null,readAvailable:true,sourceKind:'parsed-original',proximity:r.proximity,readAnchor:r.readAnchor,originalFileLocated:!!loc};

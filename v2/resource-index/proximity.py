@@ -111,7 +111,7 @@ def context_unit(db, block_id, anchor=0):
             'targetOffset': target - start, 'bounded': len(rows) >= 49}
 
 
-def search(work, query, scope='text', concepts=None, models=None, version=None, chips=None, limit=4):
+def search(work, query, scope='text', concepts=None, models=None, version=None, chips=None, limit=4, documents=None):
     started = time.perf_counter()
     if scope not in ('text', 'cases', 'faq', 'products', 'firmware') or not isinstance(query, str) or not 1 <= len(query) <= 240:
         raise ValueError('invalid-query')
@@ -119,6 +119,14 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
     models, chips = models or [], chips or []
     if not isinstance(models, list) or len(models) > 4 or not isinstance(chips, list) or len(chips) > 4 or any(not isinstance(x, str) or len(x)>64 for x in models+chips):
         raise ValueError('invalid-constraints')
+    authorized=None
+    if documents is not None:
+        if not isinstance(documents,list) or not 1<=len(documents)<=4 or any(not isinstance(n,str) or not n or len(n)>240 for n in documents):
+            raise ValueError('invalid-documents')
+        db=engine.connect(work,True)
+        try:
+            authorized={r['sha256'] for r in db.execute("SELECT sha256 FROM locations WHERE state='present' AND name IN ("+','.join('?' for _ in documents)+") AND sha256 IS NOT NULL",documents)}
+        finally:db.close()
     # Reuse FTS5/BM25 and its pre-limit model/owner/version filters. No full scan.
     requested = models or [None]
     candidates = {}
@@ -127,7 +135,7 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
     queries += [' '.join(g[:2]) for g in groups[:4]]
     for model in requested:
         for q in queries:
-            for row in engine.query(work, q, 'text', model, 24)['results']:
+            for row in engine.query(work, q, 'text', model, 24, authorized_keys=authorized)['results']:
                 candidates.setdefault(row['blockId'], row)
             if len(candidates) >= 120:
                 break

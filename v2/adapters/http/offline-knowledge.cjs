@@ -201,7 +201,9 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
      const route=answers.expertClassify(input.message,state),readableBlocks=new Map();
      const expertEvidence=require('./expert-evidence.cjs').createExpertEvidence({request,searchCases,caseMap,clean,location,defaultModels:route.models||[]});
+     const calculateOrdering=require('./expert-ordering.cjs').createExpertOrdering({app,userMessages:state.messages.filter(m=>m.role==='user').map(m=>m.content)});
      const execute=async(name,args)=>{
+      if(name==='calculate_ordering')return calculateOrdering(args);
       if(name==='read_document'){
        const context=await expertEvidence.read(args);if(context)return context;
        if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');

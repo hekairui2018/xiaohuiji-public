@@ -56,7 +56,7 @@ def create_server(work, port=0):
                 if u.path=='/search':return self.send(200,engine.query(work,first('q'),first('mode','all'),first('model') or None,int(first('limit','10')),first('version') or None))
                 if u.path=='/proximity/search':
                     import proximity
-                    return self.send(200,proximity.search(work,first('q'),first('scope','text'),json.loads(first('concepts','null')),json.loads(first('models','[]')),first('version') or None,json.loads(first('chips','[]')),int(first('limit','4'))))
+                    return self.send(200,proximity.search(work,first('q'),first('scope','text'),json.loads(first('concepts','null')),json.loads(first('models','[]')),first('version') or None,json.loads(first('chips','[]')),int(first('limit','4')),json.loads(first('documents','null'))))
                 if u.path=='/proximity/read':
                     import proximity
                     return self.send(200,proximity.read(work,int(first('block')),int(first('anchor','0')),int(first('offset','0'))))

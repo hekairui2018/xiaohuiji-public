@@ -63,5 +63,13 @@ class ProximityTests(unittest.TestCase):
         self.seed({'产品技术参数.txt':'HD-R512产品参数\n工作正常\nHD-R512S产品参数\n支持模组闪烁检查'})
         self.assertEqual(proximity.search(self.work,'模组 闪烁','products',['模组','闪烁'],['R512'])['results'],[])
 
+    def test_returned_document_scope_is_applied_before_fts_candidate_limits(self):
+        files={f'C16L其他参数{i}.txt':'C16L 带载 像素 '*8 for i in range(35)}
+        files['C16L目标规格书.txt']='C16L 带载 123 像素'
+        self.seed(files)
+        r=proximity.search(self.work,'C16L 带载 像素','products',['带载','像素'],['C16L'],documents=['C16L目标规格书.txt'])
+        self.assertTrue(r['results']);self.assertTrue(all(x['name']=='C16L目标规格书.txt' for x in r['results']))
+        self.assertEqual(proximity.search(self.work,'带载','text',['带载'],documents=['不存在.txt'])['results'],[])
+
 
 if __name__=='__main__':unittest.main()
