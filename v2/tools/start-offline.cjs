@@ -29,7 +29,7 @@ async function startOffline(options={}){
  }
  if(!ready){child.kill();throw Error('Local index did not become ready');}
  const expert=require('../model-adapter/evidence-expert.cjs').createEvidenceExpert({baseUrl:options['expert-model-url']||'http://127.0.0.1:8080'});
- const offlineKnowledge=createOfflineKnowledge({knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert});
+ const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert});
  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
  const accessGuard=lan?require('../adapters/http/lan-access.cjs').createLanGuard({...lan,port,publicOrigin:options['public-origin']||null}):null;

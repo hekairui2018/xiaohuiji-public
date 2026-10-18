@@ -11,7 +11,7 @@ const {groupVideos}=require('../../domain/knowledge/resource-categories.cjs');
 const {resourceView}=require('../../domain/knowledge/resource-view.cjs');
 const clean=s=>String(s||'').replace(/[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"']+/g,'[内部路径]').replace(/(?<!\d)1[3-9]\d{9}(?!\d)|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[联系方式]');
 const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
-function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null}={}){
+function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null}={}){
  const sessions=createOfflineSessions(sessionDirectory);
  const modelRequests=new Map();
  const base=new URL(resourceBase);if(base.protocol!=='http:'||base.hostname!=='127.0.0.1')throw Error('offline resources require loopback');
@@ -119,6 +119,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   });
   }finally{res.off('close',closed);}
  }
+ const answers=require('./quick-answer.cjs').createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia});
  async function handle(req,res){
   const u=new URL(req.url,'http://localhost'),p=u.pathname;
   const chat=p==='/api/ai/chat';
@@ -195,26 +196,45 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
     if(requestedMode==='expert'){
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
-     const readableBlocks=new Set();
+     const route=answers.classify(input.message),readableBlocks=new Map();
      const execute=async(name,args)=>{
       if(name==='read_document'){
        if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');
-       const raw=await request('/read?block='+args.blockId);for(const b of raw.blocks||[])readableBlocks.add(b.id);return {evidence:(raw.blocks||[]).map(b=>({evidenceId:'block-'+b.id,blockId:b.id,text:clean(b.text),locator:location(b.locator)}))};
+       const parent=readableBlocks.get(args.blockId),raw=await request('/read?block='+args.blockId);for(const b of raw.blocks||[])readableBlocks.set(b.id,parent);return {evidence:(raw.blocks||[]).map(b=>({evidenceId:'block-'+b.id,blockId:b.id,name:parent.name,download:parent.download,readUrl:'/v2/offline/read?block='+b.id,text:clean(b.text),locator:location(b.locator)}))};
       }
-      if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases'].includes(args.kind))throw Error('expert-invalid-tool');
-      const data=args.kind==='cases'?await caseSearchWithDocuments(args.query,null,state.facts):await search(args.query,args.kind);
-      for(const r of [...(data.results||[]),...(data.rawEvidence||[])])if(r.blockId)readableBlocks.add(r.blockId);
-      return {evidence:[...(data.results||[]),...(data.rawEvidence||[])].map(r=>({evidenceId:r.id||r.evidenceId||r.resourceId,blockId:r.blockId||null,name:r.name||r.title,text:r.sourceExcerpt||r.text||'',scope:r.scope||null,modelIds:r.modelIds||r.mentionedModels||[],verificationStatus:r.verificationStatus||'unknown',locator:r.locator||null,readUrl:r.readUrl||null,download:r.download||null,referenceOnly:true}))};
+      if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases','products','resources'].includes(args.kind))throw Error('expert-invalid-tool');
+      let planned=answers.classify(args.query);
+      planned.hardwareRequested=route.hardwareRequested||planned.hardwareRequested;
+      if(route.models.length&&planned.models.some(m=>!route.models.includes(m)))throw Error('expert-model-scope-conflict');
+      if(['social','clarify'].includes(planned.intent))return {intent:planned.intent,notice:'该请求没有明确的资料检索条件',evidence:[]};
+      if(route.models.length&&!planned.models.length)planned={...planned,query:route.models.join(' ')+' '+planned.query,models:route.models};
+      if(args.kind==='cases')planned={...planned,intent:'aftersales'};
+      if(args.kind==='resources'&&route.category)planned={...planned,intent:'resources',category:planned.category||route.category};
+      const data=['products','resources','cases'].includes(args.kind)||['resources','product','aftersales','compatibility'].includes(planned.intent)?await answers.answer(planned,{facts:state.facts,sessionId:state.id+'-tool'}):await search(planned.query,args.kind,{limit:8});
+      if(!data.retrievalTrace)data.results=answers.filter(planned.query,data.results,route.models).slice(0,4);
+      for(const r of data.results||[])if(r.blockId)readableBlocks.set(r.blockId,r);
+      let evidence=(data.results||[]).slice(0,4).map((r,i)=>({evidenceId:r.id||r.evidenceId||r.resourceId||'evidence-'+require('node:crypto').createHash('sha256').update(JSON.stringify([r.name,r.text,r.download])).digest('hex').slice(0,16),blockId:r.blockId||null,name:clean(r.name||r.sources?.[0]?.name||('历史案例：'+(r.title||'未命名'))).split(/\r?\n/)[0].slice(0,110),text:clean(r.sourceExcerpt||r.text||r.phenomenon||r.name||'').slice(0,1000),scope:r.scope||null,modelIds:r.modelIds||r.mentionedModels||planned.models,verificationStatus:r.verificationStatus||'unknown',locator:r.locator||(r.sources?.[0]?.locator?{section:r.sources[0].locator}:null),readUrl:r.readUrl||null,download:r.download||r.sources?.find(s=>s.original)?.original||null,referenceOnly:true}));
+      if(planned.intent==='product'){
+       const anchor=/HUB75E?|HDMI|DVI|USB/i.exec(planned.query)?.[0],query=anchor?planned.models.join(' ')+' '+anchor:planned.query;
+       const body=await search(query,'text',{limit:8}),relevant=answers.filter(query,body.results,planned.models).slice(0,4);
+       const passages=relevant.map(r=>{if(r.blockId)readableBlocks.set(r.blockId,r);return {evidenceId:r.evidenceId,blockId:r.blockId,name:r.name,text:r.text.slice(0,1000),download:r.download,readUrl:r.readUrl,locator:r.locator,modelIds:planned.models,verificationStatus:'original-passage-not-compatibility'};});
+       evidence=[...passages,...evidence];
+      }
+      const wanted=/接口|HUB|网口/i.test(planned.query)?'ports':/带载|像素|分辨率/i.test(planned.query)?'load':null;
+      const claims=[];for(const product of data.result?.knowledge?.records||[])for(const c of (product.claims||[]).filter(c=>!wanted||c.field===wanted).slice(0,3)){const ref=c.sourceReference;if(ref)claims.push({evidenceId:c.claimId,name:ref.originalName||product.displayName+' 产品索引',text:c.text,download:ref.url||null,locator:ref.page?{page:ref.page}:ref.record?{row:ref.record}:null,modelIds:[product.modelId],verificationStatus:c.verificationStatus||'indexed-not-content-verified'});}
+      if(planned.intent==='product')evidence=[...evidence.filter(e=>e.blockId),...claims,...evidence.filter(e=>!e.blockId)];
+      return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],resultCount:data.results?.length||0,compatibilityConfirmed:false},evidence:evidence.slice(0,6)};
      };
     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller)modelRequests.delete(state.id);}
-    state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,status:output.status});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
+    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller)modelRequests.delete(state.id);}
+    state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
     }
-    const query=input.continueQuery===true&&state.messages.length>1?state.messages.slice(-2).map(m=>m.query||m.content).join(' '):input.message;
-    const data=kind==='cases'?await caseSearchWithDocuments(query,null,state.facts):await search(query,kind);
-    state=sessions.recordResult(state.id,{kind,query,evidenceIds:[...data.results,...data.rawEvidence||[]].map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
-    try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,kind,resultCount:data.results.length});}catch{/* Log storage failure must not discard a completed search. */}
-    const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',reply:data.results.length?(kind==='cases'?'以下是相关历史记录，请先核对适用条件。':'以下是找到的原始资料及正文。'):data.rawEvidence?.length?'未找到对应结构化案例，以下是相关原文参考。':'未找到匹配记录。请补充完整型号、软件版本或更具体的关键词。',kind,...data,sessionState:state};
+    const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
+    const started=Date.now(),route=answers.classify(query);
+    const data=route.intent==='social'?await answers.answer(route):['files','text'].includes(kind)?{...await search(query,kind,{limit:4}),intent:'explicit-search',reply:'以下是原文检索参考，关键词命中不等于问题答案。'}:await answers.answer(kind==='cases'?{...route,intent:'aftersales'}:route,{facts:state.facts,sessionId:state.id});
+    state=sessions.recordResult(state.id,{kind,query,intent:data.intent,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
+    const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',kind,...data,elapsedMs:Date.now()-started,sessionState:state};
+    try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,intent:data.intent,retrievalTrace:data.retrievalTrace||[],resultCount:data.results.length,elapsedMs:output.elapsedMs});}catch{}
     state=sessions.recordAnswer(state.id,output);return send(200,{...output,sessionState:state});
    }
    return send(404,{error:'offline-route-not-found'});
