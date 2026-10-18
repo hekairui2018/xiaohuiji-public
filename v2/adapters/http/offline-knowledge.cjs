@@ -23,7 +23,8 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
  for(const p of knowledge?.products()||[])for(const d of [...p.documents||[],...p.firmware||[]]){
   const url=d.url||d.publicUrl;if(url?.startsWith('/')&&!url.startsWith('//'))documentLinks.set(new URL(url,'http://localhost').pathname,{name:d.name||d.file,sha256:d.sha256||d.sourceReference?.originalSha256});
  }
- const originals=new Set((knowledge?.evidenceDocuments()||[]).map(x=>x.document.sha256));
+ const evidenceDocuments=knowledge?.evidenceDocuments()||[];
+ const originals=new Set(evidenceDocuments.map(x=>x.document.sha256));
  const normalize=r=>({name:clean(r.name),matchKind:r.kind||null,resourceId:r.resourceId||null,versionId:r.versionId||null,resourceVersionId:r.versionId||null,fileId:r.sha256?'sha256:'+r.sha256:r.versionId||null,sha256:r.sha256||null,blockId:r.blockId||null,
   extension:path.extname(r.name||'').toLowerCase(),sourceDirectory:clean(String(r.locations?.[0]?.path||'').replace(/\\/g,'/').split('/').slice(1,-1).slice(-3).join(' / ')),localModifiedAt:r.locations?.[0]?.mtime_ns?new Date(r.locations[0].mtime_ns/1e6).toISOString():null,
   evidenceId:r.sha256&&r.blockId?'blk-'+r.sha256.slice(0,16)+'-'+r.ordinal:null,
@@ -44,8 +45,8 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   return catalogPending;
  }
  localCatalog.status=()=>({state:catalogError?(catalogCache?'stale-cache':'unavailable'):catalogCache?'ready':'not-loaded',reason:catalogError,lastSuccessfulAt:catalogTime?new Date(catalogTime).toISOString():null,cacheSeconds:30});
- async function search(q,mode='all',{limit=10}={}){
-  const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit);
+ async function search(q,mode='all',{limit=10,model=null,version=null}={}){
+  const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit+(model?'&model='+encodeURIComponent(model):'')+(version?'&version='+encodeURIComponent(version):''));
   return {query:q,elapsedMs:raw.elapsedMs,requestedModels:raw.requestedModels||[],results:(raw.results||[]).map(normalize)};
  }
  async function resolveDocuments(documents){
@@ -120,6 +121,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   }finally{res.off('close',closed);}
  }
  const answers=require('./quick-answer.cjs').createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia});
+ const quickRetrieval=require('./quick-retrieval.cjs').createQuickRetrieval({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia,originalDocuments:evidenceDocuments});
  async function handle(req,res){
   const u=new URL(req.url,'http://localhost'),p=u.pathname;
   const chat=p==='/api/ai/chat';
@@ -229,8 +231,8 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
-    const started=Date.now(),route=answers.classify(query);
-    const data=route.intent==='social'?await answers.answer(route):['files','text'].includes(kind)?{...await search(query,kind,{limit:4}),intent:'explicit-search',reply:'以下是原文检索参考，关键词命中不等于问题答案。'}:await answers.answer(kind==='cases'?{...route,intent:'aftersales'}:route,{facts:state.facts,sessionId:state.id});
+    const started=Date.now();
+    const data=await quickRetrieval.answer(query,{state,facts:state.facts});
     state=sessions.recordResult(state.id,{kind,query,intent:data.intent,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
     const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',kind,...data,elapsedMs:Date.now()-started,sessionState:state};
     try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,intent:data.intent,retrievalTrace:data.retrievalTrace||[],resultCount:data.results.length,elapsedMs:output.elapsedMs});}catch{}
