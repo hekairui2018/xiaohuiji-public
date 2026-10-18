@@ -3,6 +3,9 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {snapshot,mergeSnapshot,buildDisplay,displayPatch}=require('../backend/log-display.cjs');
 const base={sender_model:'C16L',device_code:'C16L-DEVICE-001',upgrade_run_id:'run-1',device_app_version:'7.11.50.0',fpga_version:'16.18.0.0',receiver_inventory:[{model:'R712',count:2}]};
 const card=(extra={})=>({run_id:'run-1',device_id:'C16L-DEVICE-001',port:0,card_id:'1',model:'R712',before_version:'25.13.01.30',after_version:'25.26.65.30',after_confirmed:true,status:'succeeded',...extra});
+test('HDSet和HDPlayer独立版本进入现场环境，不能进入发送端版本或代填缺失值',()=>{
+ const d=buildDisplay({chips:'LS9931',hdset_version:'V4.0.38.11',hdplayer_version:'V7.11.51.0'});assert.equal(d.siteEnvironment,'驱动芯片：LS9931\nHDSet：V4.0.38.11\nHDPlayer：V7.11.51.0');assert.equal(d.versionInfo,'发送端应用：未采集\n发送端FPGA：未采集');assert.equal(buildDisplay({app_version:'assistant'}).siteEnvironment,'');
+});
 test('旧独立接收型号字段明确带数量时展示数量，汇总版本不能代替逐卡回读',()=>{
  const d=buildDisplay({product_models:'C16L',recv_models:'R712×1;R716×2',recv_versions:'25.13.99.30→25.13.99.30',receiver_inventory:[],receiver_upgrades:[],chips:'LS9931;LS9931/LS9931CS',site_env:'网口1'});
  assert.equal(d.productModel,'C16L＋R712×1＋R716×2');assert.match(d.siteEnvironment,/网口1\n驱动芯片：LS9931/);assert.match(d.versionInfo,/接收卡R712：原版本未采集 → 升级后待确认/);assert.ok(!d.versionInfo.includes('已匹配'));

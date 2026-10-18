@@ -5,7 +5,7 @@ function model(v){const s=text(v).toUpperCase().replace(/^HD[-_ ]/,'');return /^
 const split=v=>text(v).split(/[;；,，\n]/).map(model).filter(Boolean);
 function snapshot(input){
  const out={};
- for(const k of ['sender_model','upgrade_run_id','device_app_version','fpga_version','device_code','devKey','product_models','recv_models','chips','site_env'])out[k]=text(input[k]).slice(0,k==='site_env'?8000:['recv_models','product_models','chips'].includes(k)?500:160);
+ for(const k of ['sender_model','upgrade_run_id','device_app_version','fpga_version','hdset_version','hdplayer_version','device_code','devKey','product_models','recv_models','chips','site_env'])out[k]=text(input[k]).slice(0,k==='site_env'?8000:['recv_models','product_models','chips'].includes(k)?500:160);
  if(input.receiver_inventory!==undefined){
   if(!Array.isArray(input.receiver_inventory)||input.receiver_inventory.length>256)throw Error('invalid-receiver-inventory');
   out.receiver_inventory=input.receiver_inventory.map(x=>{if(!x||typeof x!=='object'||Array.isArray(x))throw Error('invalid-receiver-inventory-entry');return {model:text(x.model),count:x.count};});
@@ -66,7 +66,7 @@ function buildDisplay(input){
  }
  for(const m of inventory.keys())if(!rec.receiver_upgrades.some(r=>model(r.model)===m))lines.push('接收卡'+m+'：原版本未采集 → 升级后待确认');
  if(!rec.receiver_upgrades?.length&&inventory.size)warnings.push('未提供逐卡版本记录，未使用汇总版本或目标固件推测前后关系');
- const siteEnvironment=[rec.site_env,rec.chips?'驱动芯片：'+rec.chips:''].filter(Boolean).join('\n');
+ const siteEnvironment=[rec.site_env,rec.chips?'驱动芯片：'+rec.chips:'',rec.hdset_version?'HDSet：'+rec.hdset_version:'',rec.hdplayer_version?'HDPlayer：'+rec.hdplayer_version:''].filter(Boolean).join('\n');
  return {productModel:[sender,...[...inventory].map(([m,c])=>m+(c===null?'':'×'+c))].filter(Boolean).join('＋'),versionInfo:lines.join('\n'),siteEnvironment,warnings:[...new Set(warnings)],snapshot:rec};
 }
 const cell=v=>Array.isArray(v)?v.map(x=>typeof x==='string'?x:x?.text||'').join(''):typeof v==='string'?v:'';
