@@ -24,6 +24,24 @@ test('Social and ambiguous quick inputs perform zero index calls; faults never f
  const hardware=await qa.answer(qa.classify('R512硬件V1.2固件'));assert.equal(hardware.status,'clarify');assert.equal(hardware.results.length,0);assert.equal(scans,0);
 });
 function fake(outputs){const calls=[];return {calls,transport:async(url,init)=>{if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'synthetic-bonsai'}]})};calls.push(JSON.parse(init.body));const item=outputs.shift();return {ok:true,status:200,json:async()=>({choices:[{message:{content:typeof item==='string'?item:JSON.stringify(item)},finish_reason:'stop'}],usage:{completion_tokens:10}})};}};}
+test('Strata receives its supported schema envelope with the same tools, budgets and citation constraints',async()=>{
+ const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'answer',claims:[{text:'历史记录',evidenceIds:['source']}],generalAdvice:[],question:''}]);
+ const transport=f.transport;f.transport=(url,init)=>url.pathname==='/v1/models'?Promise.resolve({ok:true,json:async()=>({data:[{id:'qwen3.8-flash-next-coder-iq1_m'}]})}):transport(url,init);
+ const r=await createEvidenceExpert(f).answer({message:'C16L闪烁',route:{intent:'technical'},execute:async()=>({evidence:[{evidenceId:'source',name:'案例',text:'历史记录'}]})});
+ assert.equal(r.status,'answer');assert.equal(f.calls.length,2);
+ for(const call of f.calls){assert.equal(call.response_format.type,'json_schema');assert.equal(call.response_format.json_schema.strict,true);assert.equal(call.max_tokens,1000);assert.equal(call.chat_template_kwargs.enable_thinking,false);}
+ const branches=f.calls[1].response_format.json_schema.schema.oneOf;assert.ok(branches.some(s=>s.properties.action.const==='search'));assert.deepEqual(branches.find(s=>s.properties.action.const==='answer').properties.claims.items.properties.evidenceIds.items.enum,['source']);
+});
+test('Read choices enumerate only evidence-backed blocks; no original is offered when no block exists',async()=>{
+ const f=fake([{action:'search',query:'原文',kind:'text'},{action:'read',blockId:7},{action:'answer',claims:[],generalAdvice:['核对现场条件。'],question:''}]);
+ await createEvidenceExpert(f).answer({message:'技术问题',execute:async()=>({evidence:[{evidenceId:'block-7',blockId:7,name:'原文',text:'现场条件'}]})});
+ assert.ok(!f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='read'));
+ assert.deepEqual(f.calls[1].response_format.schema.oneOf.find(s=>s.properties.action.const==='read').properties.blockId.enum,[7]);
+});
+test('Upstream structured length errors count as model calls and use only the existing one off recovery',async()=>{
+ const calls=[];const expert=createEvidenceExpert({transport:async(url,init)=>{if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'qwen3.8-flash-next-coder-iq1_m'}]})};calls.push(JSON.parse(init.body));if(calls.length===2)return {ok:false,status:502,json:async()=>({error:{code:'structured_output_failed',message:'structured output was incomplete (finish_reason=length)'}})};return {ok:true,status:200,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls.length===1?{action:'analyze',reason:'需要对照现场条件'}:{action:'answer',claims:[],generalAdvice:['先核对现场条件，不认定故障原因。'],question:''})}}]})};}});
+ const r=await expert.answer({message:'技术问题',route:{intent:'technical'}});assert.equal(r.status,'answer');assert.equal(r.modelCallCount,3);assert.equal(r.modelCalls[1].httpStatus,502);assert.equal(r.modelCalls[1].finishReason,'length');assert.equal(r.modelCalls[1].recovery,'retry-once-without-thinking');assert.equal(calls[2].chat_template_kwargs.enable_thinking,false);assert.equal(calls[2].max_tokens,800);
+});
 test('Expert social replies genuinely call the model, use plain text and never invoke retrieval',async()=>{
  const f=fake(['你好，需要我协助查什么资料？']);const r=await createEvidenceExpert(f).answer({message:'你好',route:{intent:'social'},execute:()=>{throw Error('must not search');}});assert.equal(r.status,'answer');assert.equal(f.calls.length,1);assert.equal(f.calls[0].response_format,undefined);assert.equal(r.toolTrace.length,0);
 });
@@ -46,6 +64,12 @@ test('A real citation cannot justify a fabricated numeric specification or compa
 test('A supplied model identifier in a caution is not mistaken for an invented numeric specification',async()=>{
  const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'answer',claims:[{text:'该经验不能直接认定HD-C16L的当前原因。',evidenceIds:['source']}],generalAdvice:[],question:''}]);
  const r=await createEvidenceExpert(f).answer({message:'C16L闪烁',route:{intent:'aftersales',models:['HD-C16L']},execute:async()=>({evidence:[{evidenceId:'source',name:'历史经验',text:'排线检查的历史记录'}]})});assert.equal(r.status,'answer');
+});
+test('A copied known citation hash is rendered as a source name and does not count as an invented parameter',async()=>{
+ for(const invented of [false,true]){const id='case-0123456789abcdef01234567',f=fake([{action:'answer',claims:[{text:'案例0123456789abcdef01234567：历史检查记录'+(invented?'，最大999万点':''),evidenceIds:[id]}],generalAdvice:[],question:''}]);
+ const r=await createEvidenceExpert(f).answer({message:'资料',route:{simpleResource:true},execute:async()=>({evidence:[{evidenceId:id,name:'历史案例',text:'历史检查记录'}]})});
+ if(invented)assert.equal(r.error,'expert-unsupported-number');else{assert.equal(r.status,'answer');assert.ok(!r.reply.includes('0123456789abcdef'));assert.match(r.reply,/历史案例/);}
+ }
 });
 test('Compatibility denials pass while affirmative claims in later clauses still require confirmation',async()=>{
  for(const [text,allowed] of [['当前资料不能确认R512与R512S固件可以通用。',true],['不支持直接互刷。',true],['历史案例未找到明确说明R512与R512S固件通用性的记录。',true],['当前不能确认，但固件可以通用。',false],['固件可以通用，但没有资料确认。',false]]){
