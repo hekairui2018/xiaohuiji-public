@@ -63,7 +63,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  expert.onclick=()=>{if(modelAvailable&&!queryBusy&&mode.value!=='ordering'){modeChosen=true;responseMode='expert';updateResponseMode();}};
  async function refreshModel(){
   try{const capability=await json('/v2/offline/capabilities');modelAvailable=capability.expert?.available===true;
-   pending.textContent=modelAvailable?'本地模型已连接':'本地模型未连接';pending.title=capability.expert?.model||'请启动本地模型服务';
+   pending.textContent=modelAvailable?'Qwen3.8 已连接':'Qwen3.8 未连接';pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
    if(modelAvailable&&!modeChosen)responseMode='expert';
   }catch{modelAvailable=false;pending.textContent='本地模型连接失败';}
   updateResponseMode();
@@ -161,7 +161,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  }
  document.getElementById('quickSearchBtn').addEventListener('click',e=>{if(products)return;e.preventDefault();e.stopImmediatePropagation();search();},true);
  searchInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&!products){e.preventDefault();e.stopImmediatePropagation();search();}},true);
- return {request,render,legacy:false,mode,reset,setMode:modeChange,setConversationType(value){conversationType=value;},
+ return {request,render,legacy:false,mode,reset,setMode:modeChange,setConversationType(value){conversationType=value;},releaseGuest(sessionId){fetchOriginal('/v2/offline/session/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId}),keepalive:true}).catch(()=>{});},
   validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return false;}return true;},
   beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;queryBusy=busy;updateResponseMode();},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':responseMode==='expert'?'正在阅读资料并思考…':'检索资料…',
   acceptOcr(result){if(result.text.length<=240)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}

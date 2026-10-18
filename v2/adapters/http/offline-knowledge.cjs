@@ -13,6 +13,7 @@ const clean=s=>String(s||'').replace(/[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"
 const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
 function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null}={}){
  const sessions=createOfflineSessions(sessionDirectory);
+ const modelRequests=new Map();
  const base=new URL(resourceBase);if(base.protocol!=='http:'||base.hostname!=='127.0.0.1')throw Error('offline resources require loopback');
  const cases=(knowledge?.cases()||[]).map(c=>consumeCase(c,knowledge.evidenceCaseReviews?.()||[]));
  const caseMap=new Map(cases.map(c=>[c.stableId,c]));
@@ -137,6 +138,11 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
      if(e.message==='invalid-log-identity')return send(400,{error:'invalid-log-identity',message:'必须提供machine_id或devKey（最多160个字符），以及YYYY-MM-DD格式的log_date。'});
      return send(503,{error:'log-store-unavailable',message:'日志暂时无法保存，请保留本地日志并稍后重试。'});
     }return send(200,result);}
+   if(p==='/v2/offline/session/close'&&req.method==='POST'){
+    let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>1024)return send(413,{error:'body-too-large'});raw+=chunk;}
+    let input;try{input=JSON.parse(raw);}catch{return send(400,{error:'invalid-json'});}
+    try{const result=sessions.closeGuest(input.sessionId);modelRequests.get(input.sessionId)?.abort();return send(200,result);}catch(e){return send(400,{error:e.message});}
+   }
    if(req.method==='GET'&&p==='/v2/offline/session'){return send(200,sessions.get(u.searchParams.get('id')));}
    if(req.method==='GET'&&p==='/v2/offline/log-status')return send(200,logs?.status()||{configured:false});
    if(legacy){const d=documentLinks.get(p),raw=await request('/search?q='+encodeURIComponent(d.name)+'&mode=files&limit=10');const file=(raw.results||[]).find(r=>r.kind==='file'&&Number.isInteger(r.locationId)&&r.name===d.name&&(!d.sha256||r.sha256===d.sha256));if(!file)return send(404,{error:'original-not-located',message:'索引中尚未定位此版本原件，请使用资料搜索核对版本。'});const target=fileUrl(file.locationId,d.name);if(target.includes('/preview?')){res.writeHead(302,{Location:target});res.end();return true;}await stream('/resource?id='+file.locationId,res);return true;}
@@ -200,7 +206,9 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       for(const r of [...(data.results||[]),...(data.rawEvidence||[])])if(r.blockId)readableBlocks.add(r.blockId);
       return {evidence:[...(data.results||[]),...(data.rawEvidence||[])].map(r=>({evidenceId:r.id||r.evidenceId||r.resourceId,blockId:r.blockId||null,name:r.name||r.title,text:r.sourceExcerpt||r.text||'',scope:r.scope||null,modelIds:r.modelIds||r.mentionedModels||[],verificationStatus:r.verificationStatus||'unknown',locator:r.locator||null,readUrl:r.readUrl||null,download:r.download||null,referenceOnly:true}))};
      };
-     const output=await expert.answer({message:input.message,sessionState:state,execute});state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,status:output.status});}catch{}return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
+    const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
+    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller)modelRequests.delete(state.id);}
+    state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,status:output.status});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const data=kind==='cases'?await caseSearchWithDocuments(query,null,state.facts):await search(query,kind);

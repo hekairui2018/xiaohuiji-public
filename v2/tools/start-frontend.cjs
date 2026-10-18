@@ -5,7 +5,7 @@ const {serveStatic}=require('../adapters/http/static-service.cjs');
 function createFrontendServer({backend='http://127.0.0.1:8520',frontendRoot=path.resolve(__dirname,'../frontend'),port=8620}={}){
  const target=new URL(backend);if(target.protocol!=='http:'||target.hostname!=='127.0.0.1'||target.username||target.password||target.pathname!=='/'||target.search||target.hash)throw Error('Backend must be an explicit loopback HTTP origin');
  if(!Number.isInteger(port)||port<1024||port>65535||[3789,3790,3791,8080,8520,8521].includes(port))throw Error('Use a separate frontend development port');
- const allowed=new Set(['/health','/api/health','/api/search','/api/software','/api/videos','/api/docs','/api/ai/chat','/api/ocr','/v2/ordering/chat','/v2/ordering/ssm',...['status','capabilities','session','search','cases','case','read','file','preview'].map(n=>'/v2/offline/'+n)]);
+ const allowed=new Set(['/health','/api/health','/api/search','/api/software','/api/videos','/api/docs','/api/ai/chat','/api/ocr','/v2/ordering/chat','/v2/ordering/ssm','/v2/offline/session/close',...['status','capabilities','session','search','cases','case','read','file','preview'].map(n=>'/v2/offline/'+n)]);
  return http.createServer(async(req,res)=>{
   const send=(code,error)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error}));};
   if(!['127.0.0.1:'+port,'localhost:'+port].includes(req.headers.host))return send(403,'invalid-development-host');
