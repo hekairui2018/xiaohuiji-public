@@ -45,6 +45,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   return catalogPending;
  }
  localCatalog.status=()=>({state:catalogError?(catalogCache?'stale-cache':'unavailable'):catalogCache?'ready':'not-loaded',reason:catalogError,lastSuccessfulAt:catalogTime?new Date(catalogTime).toISOString():null,cacheSeconds:30});
+ const productFacts=require('../../domain/knowledge/product-table-facts.cjs').createProductTableFacts({localCatalog,request});
  async function search(q,mode='all',{limit=10,model=null,version=null}={}){
   const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit+(model?'&model='+encodeURIComponent(model):'')+(version?'&version='+encodeURIComponent(version):''));
   return {query:q,elapsedMs:raw.elapsedMs,requestedModels:raw.requestedModels||[],results:(raw.results||[]).map(normalize)};
@@ -250,6 +251,6 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}
  }
- return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog};
+ return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts};
 }
 module.exports={createOfflineKnowledge};

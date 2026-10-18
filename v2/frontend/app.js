@@ -1397,6 +1397,9 @@ function renderSearchResults(results, query, data) {
     }
   }
   for (const [productIndex, r] of shown.entries()) {
+    const previewCard = showParams && r.modelId === 'HD-A5' && window.ProductCard;
+    if (previewCard) html += `<div class="search-item product-quick-card">${window.ProductCard.render(r)}`;
+    else {
     const tag = '<span class="search-tag search-tag-product">产品</span>';
     html += `<div class="search-item">`;
     html += `<div class="search-item-name">${tag} ${escHtml(r.name)}</div>`;
@@ -1431,6 +1434,7 @@ function renderSearchResults(results, query, data) {
         html += `<div class="product-highlight"><span class="highlight-tag">产品特点</span><span class="highlight-text">${escHtml(f.highlights)}</span></div>`;
       }
     }
+    }
     // 按后端真实类别呈现资料元数据、预览和下载操作。
     const { groups: allGroups } = productDocGroups(r);
     const groups = (cat === "all") ? allGroups : allGroups.filter((g) => (CAT_GROUP_KEYS[cat] || []).includes(g.key));
@@ -1458,7 +1462,7 @@ function renderSearchResults(results, query, data) {
   searchResults.querySelectorAll('.product-resource-slot').forEach(slot => {
     const product = shown[Number(slot.dataset.productIndex)];
     const groups = productDocGroups(product).groups.filter(g => cat === 'all' || (CAT_GROUP_KEYS[cat] || []).includes(g.key));
-    slot.replaceWith(window.ProductResources.render(product, groups));
+    slot.replaceWith(product.modelId === 'HD-A5' && showParams ? window.ProductResources.renderCompact(product, groups) : window.ProductResources.render(product, groups));
   });
   // 同系列词条点击：填入搜索框、回到“全部”并立即搜索（硬件型号默认看完整资料）
   searchResults.querySelectorAll(".related-chip").forEach((btn) => {

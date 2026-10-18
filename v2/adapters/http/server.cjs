@@ -9,7 +9,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
  app={...app,dialogue:app.customerDialogue||app.dialogue};
  const publicQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments});
- const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
+ const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog,productFacts:offlineKnowledge?.productFacts}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
  const orderingDialogue=createDialogueService(app,{operation:'ordering'});
  const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache({staleMs:60000});
  const localMedia=async body=>offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;

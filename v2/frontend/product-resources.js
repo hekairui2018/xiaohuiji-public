@@ -103,5 +103,23 @@
   for(let i=0;i<singles.length;i+=2)packed.push({zh:singles[i],other:singles[i+1]||null});
   return packed;
  }
- window.ProductResources={groups,render,unique,row,documentRows,previewTarget,downloadTarget};
+ function renderCompact(product,sourceGroups){
+  const root=el('section');root.className='pq-resources';root.setAttribute('aria-label',product.name+'产品资料');
+  const total=sourceGroups.reduce((n,g)=>n+g.items.length,0),head=el('div');head.className='pq-resource-heading';const title=el('h4','相关资料 ');title.append(el('small',total+' 份'));head.append(title,el('span',sourceGroups.map(g=>(labels[g.key]||g.label)+' '+g.items.length).join(' · ')));root.append(head);
+  const first=sourceGroups.find(g=>g.key==='spec')||sourceGroups.find(g=>g.key==='manual')||sourceGroups[0];
+  const files=el('div');files.className='pq-files';
+  const icon={preview:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>',download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5"/></svg>'};
+  for(const item of (first?.items||[]).slice(0,2)){
+   const entry=el('article');entry.className='pq-file';const fileIcon=el('span');fileIcon.className='pq-file-icon';fileIcon.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 3h9l3 3v15H6Z M15 3v4h3 M9 11h6 M9 15h6"/></svg>';entry.append(fileIcon);const info=el('div');info.className='pq-file-info';info.append(el('div',item.name||item.originalName||'未命名资料'));
+   const language=({zh:'中文',en:'英文','unspecified-or-en':'英文 / 未明确'})[item.documentLanguage]||item.documentLanguage;
+   info.append(el('small',[language,item.documentVersion,item.versionBasis==='filename-cover-version-conflict'?'版本冲突，需核对':null].filter(Boolean).join(' · ')));entry.append(info);
+   const actions=el('div');actions.className='pq-file-actions';
+   for(const [key,url,label]of [['preview',previewTarget(item).url,'预览'],['download',downloadTarget(item),'下载']])if(valid(url)){const a=el('a');a.href=url;a.innerHTML=icon[key];a.title=label+' '+item.name;a.setAttribute('aria-label',a.title);a.rel='noopener noreferrer';if(key==='download')a.download=item.originalName||item.name||'';else a.target='_blank';actions.append(a);}
+   if(!actions.children.length)actions.append(el('small',item.unavailableMessage||'原件暂不可用'));entry.append(actions);files.append(entry);
+  }
+  root.append(files);
+  const rest=el('details');rest.className='pq-all-resources';rest.append(el('summary','查看全部资料、适用条件与历史版本（'+total+'份）'));
+  let built=false;rest.addEventListener('toggle',()=>{if(rest.open&&!built){built=true;rest.append(render(product,sourceGroups));}});root.append(rest);return root;
+ }
+ window.ProductResources={groups,render,renderCompact,unique,row,documentRows,previewTarget,downloadTarget};
 })();
