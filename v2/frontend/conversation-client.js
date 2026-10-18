@@ -17,11 +17,11 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
   const messages=document.getElementById('aiMessages'),input=document.getElementById('aiInput'),send=document.getElementById('aiSendBtn'),tempButton=document.getElementById('v2NewQuery'),toolbar=tempButton.parentElement,mode=document.getElementById('v2WorkMode');
   const normalButton=make('button','普通对话'),guestButton=make('button','访客对话');normalButton.type=guestButton.type='button';normalButton.id='v2NormalConversation';guestButton.id='v2GuestConversation';tempButton.hidden=true;
   const controls=make('div');controls.className='v2-conversation-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','对话保存方式');controls.append(normalButton,guestButton);
-  const status=make('p');status.className='v2-conversation-status';status.setAttribute('role','status');toolbar.before(status);toolbar.append(controls);
+  toolbar.append(controls);
   const liveNodes=new Map();let storageError=false,normalRecord=current;
   const fields=()=>[...document.querySelectorAll('#v2Conditions input,#v2Conditions textarea')];
   const fieldKey=(e,i)=>e.dataset.fact||e.id||'field-'+i;
-  function notice(){normalButton.setAttribute('aria-pressed',String(!temporary));guestButton.setAttribute('aria-pressed',String(temporary));channel.setConversationType?.(temporary?'guest':'normal');status.textContent=temporary?'访客对话 · 不加入普通记录；离开或刷新后清空，后台保留。':storageError?'普通对话 · 浏览器保存失败，请勿依赖历史恢复。':'普通对话 · '+(current.title||'尚未开始')+' · 本机保存，后台保留';}
+  function notice(){normalButton.setAttribute('aria-pressed',String(!temporary));guestButton.setAttribute('aria-pressed',String(temporary));channel.setConversationType?.(temporary?'guest':'normal');}
   function write(){try{localStorage.setItem(STORE,JSON.stringify(items));storageError=false;}catch{storageError=true;}notice();}
   function remember(){clearTimeout(timer);if(temporary||restoring)return;
    current.draft=input.value;current.mode=mode.value;current.fields=Object.fromEntries(fields().map((e,i)=>[fieldKey(e,i),e.type==='checkbox'?e.checked:e.value]));current.updated=Date.now();
