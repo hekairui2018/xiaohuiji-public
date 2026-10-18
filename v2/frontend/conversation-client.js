@@ -15,14 +15,13 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
 
   const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
   const messages=document.getElementById('aiMessages'),input=document.getElementById('aiInput'),send=document.getElementById('aiSendBtn'),tempButton=document.getElementById('v2NewQuery'),toolbar=tempButton.parentElement,mode=document.getElementById('v2WorkMode');
-  const normalButton=make('button','普通对话'),historyButton=make('button','历史对话');normalButton.type=historyButton.type='button';normalButton.id='v2NormalConversation';historyButton.id='v2ConversationHistory';
-  const controls=make('div');controls.className='v2-conversation-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','对话保存方式');controls.append(normalButton,tempButton,historyButton);
-  const status=make('p');status.className='v2-conversation-status';status.setAttribute('role','status');toolbar.before(controls,status);
-  const dialog=make('dialog');dialog.className='v2-history-dialog';dialog.setAttribute('aria-labelledby','v2HistoryTitle');const title=make('h3','历史对话');title.id='v2HistoryTitle';const close=make('button','关闭');close.type='button';close.onclick=()=>dialog.close();const head=make('header');head.append(title,close);const list=make('div');list.className='v2-history-list';const create=make('button','新建普通对话');create.type='button';dialog.append(head,make('p','仅此浏览器可见，最多20段，每段最近80条文字。图片和资料卡片需重新查询。'),list,create);document.body.append(dialog);
+  const normalButton=make('button','普通对话'),guestButton=make('button','访客对话');normalButton.type=guestButton.type='button';normalButton.id='v2NormalConversation';guestButton.id='v2GuestConversation';tempButton.hidden=true;
+  const controls=make('div');controls.className='v2-conversation-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','对话保存方式');controls.append(normalButton,guestButton);
+  const status=make('p');status.className='v2-conversation-status';status.setAttribute('role','status');toolbar.before(status);document.querySelector('.ai-input-row').before(controls);
   const liveNodes=new Map();let storageError=false,normalRecord=current;
   const fields=()=>[...document.querySelectorAll('#v2Conditions input,#v2Conditions textarea')];
   const fieldKey=(e,i)=>e.dataset.fact||e.id||'field-'+i;
-  function notice(){normalButton.setAttribute('aria-pressed',String(!temporary));tempButton.setAttribute('aria-pressed',String(temporary));status.textContent=temporary?'临时对话 · 不加入前端历史；离开或刷新后清空。后端仍可能保存会话和日志。':storageError?'普通对话 · 浏览器保存失败，请勿依赖历史恢复。':'普通对话 · '+(current.title||'尚未开始')+' · 仅保存在此浏览器';}
+  function notice(){normalButton.setAttribute('aria-pressed',String(!temporary));guestButton.setAttribute('aria-pressed',String(temporary));channel.setConversationType?.(temporary?'guest':'normal');status.textContent=temporary?'访客对话 · 不加入普通记录；离开或刷新后清空，后台保留。':storageError?'普通对话 · 浏览器保存失败，请勿依赖历史恢复。':'普通对话 · '+(current.title||'尚未开始')+' · 本机保存，后台保留';}
   function write(){try{localStorage.setItem(STORE,JSON.stringify(items));storageError=false;}catch{storageError=true;}notice();}
   function remember(){clearTimeout(timer);if(temporary||restoring)return;
    current.draft=input.value;current.mode=mode.value;current.fields=Object.fromEntries(fields().map((e,i)=>[fieldKey(e,i),e.type==='checkbox'?e.checked:e.value]));current.updated=Date.now();
@@ -43,10 +42,9 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
   events.addEventListener('assistant-message',event=>{if(!restoring){const data=event.detail;current.turns.push({role:'assistant',text:String(data.reply||data.clarifyQuestion||'结果已返回，详细资料或工程方案请重新查询。').slice(0,8000)});current.turns=current.turns.slice(-80);later();}});
   events.addEventListener('session-change',()=>{if(restoring)return;remember();current=items.find(x=>x.id===ui.getSessionId())||{id:ui.getSessionId(),turns:[],fields:{},draft:'',mode:mode.value};normalId=current.id;normalRecord=current;temporary=false;notice();});
   window.v2Conversations={startTemporary(){if(send.disabled)return;remember();if(temporary)liveNodes.delete(current.id);else{normalId=current.id;normalRecord=current;}show({id:id(),turns:[],fields:{},draft:'',mode:mode.value},true);}};
+  guestButton.onclick=()=>{if(!temporary)window.v2Conversations.startTemporary();};
   normalButton.onclick=()=>{if(send.disabled||!temporary)return;liveNodes.delete(current.id);const record=items.find(x=>x.id===normalId)||normalRecord;show(record,false);};
-  historyButton.onclick=()=>{if(send.disabled)return;remember();list.replaceChildren();if(!items.length)list.append(make('p','还没有普通对话记录。'));for(const item of items){const button=make('button');button.type='button';button.append(make('strong',item.title||'普通对话'),make('small',new Date(item.updated).toLocaleString()));button.onclick=()=>{if(temporary)liveNodes.delete(current.id);normalId=item.id;normalRecord=item;show(item,false);dialog.close();remember();};list.append(button);}dialog.showModal();};
-  create.onclick=()=>{if(temporary)liveNodes.delete(current.id);normalId=id();normalRecord={id:normalId,turns:[],fields:{},draft:'',mode:mode.value};show(normalRecord,false);dialog.close();remember();};
-  const busy=()=>{normalButton.disabled=historyButton.disabled=send.disabled;};new MutationObserver(busy).observe(send,{attributes:true,attributeFilter:['disabled']});busy();
+  const busy=()=>{normalButton.disabled=guestButton.disabled=send.disabled;};new MutationObserver(busy).observe(send,{attributes:true,attributeFilter:['disabled']});busy();
   input.addEventListener('input',later);document.getElementById('v2Conditions').addEventListener('input',later);
   window.addEventListener('pagehide',()=>{if(temporary)leaveTemporary();else remember();});
   window.addEventListener('storage',e=>{if(e.key!==STORE)return;try{const records=JSON.parse(e.newValue||'[]');if(Array.isArray(records))items=records.filter(x=>x&&typeof x.id==='string'&&Array.isArray(x.turns)).slice(0,20);}catch{}});

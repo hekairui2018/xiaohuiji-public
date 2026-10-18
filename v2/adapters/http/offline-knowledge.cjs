@@ -200,13 +200,14 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       for(const r of [...(data.results||[]),...(data.rawEvidence||[])])if(r.blockId)readableBlocks.add(r.blockId);
       return {evidence:[...(data.results||[]),...(data.rawEvidence||[])].map(r=>({evidenceId:r.id||r.evidenceId||r.resourceId,blockId:r.blockId||null,name:r.name||r.title,text:r.sourceExcerpt||r.text||'',scope:r.scope||null,modelIds:r.modelIds||r.mentionedModels||[],verificationStatus:r.verificationStatus||'unknown',locator:r.locator||null,readUrl:r.readUrl||null,download:r.download||null,referenceOnly:true}))};
      };
-     const output=await expert.answer({message:input.message,sessionState:state,execute});try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,status:output.status});}catch{}return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
+     const output=await expert.answer({message:input.message,sessionState:state,execute});state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,status:output.status});}catch{}return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const data=kind==='cases'?await caseSearchWithDocuments(query,null,state.facts):await search(query,kind);
     state=sessions.recordResult(state.id,{kind,query,evidenceIds:[...data.results,...data.rawEvidence||[]].map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
     try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,kind,resultCount:data.results.length});}catch{/* Log storage failure must not discard a completed search. */}
-    return send(200,{status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',reply:data.results.length?(kind==='cases'?'以下是相关历史记录，请先核对适用条件。':'以下是找到的原始资料及正文。'):data.rawEvidence?.length?'未找到对应结构化案例，以下是相关原文参考。':'未找到匹配记录。请补充完整型号、软件版本或更具体的关键词。',kind,...data,sessionState:state});
+    const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',reply:data.results.length?(kind==='cases'?'以下是相关历史记录，请先核对适用条件。':'以下是找到的原始资料及正文。'):data.rawEvidence?.length?'未找到对应结构化案例，以下是相关原文参考。':'未找到匹配记录。请补充完整型号、软件版本或更具体的关键词。',kind,...data,sessionState:state};
+    state=sessions.recordAnswer(state.id,output);return send(200,{...output,sessionState:state});
    }
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}

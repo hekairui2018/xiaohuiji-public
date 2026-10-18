@@ -52,6 +52,23 @@ window.OfflineClient = Object.freeze({create(ui) {
  const fast=make('button','快速模式');fast.type='button';fast.id='v2FastMode';fast.setAttribute('aria-pressed','true');fast.title='不调用本地大模型，使用现有检索与规则';
  const expert=make('button','专家模式');expert.type='button';expert.id='v2ExpertMode';expert.disabled=true;expert.title='本地大模型接口待接入，暂不可用';expert.setAttribute('aria-describedby','v2ExpertPending');
  const pending=make('span','专家模式待接入');pending.id='v2ExpertPending';pending.className='v2-mode-pending';speed.append(fast,expert);toolbar.append(speed,pending,reset);document.querySelector('.ai-input-row').before(toolbar);
+ let responseMode='quick',modelAvailable=false,queryBusy=false,modeChosen=false,conversationType='normal';
+ function updateResponseMode(){
+  const ordering=mode.value==='ordering';
+  fast.setAttribute('aria-pressed',String(ordering||responseMode==='quick'));expert.setAttribute('aria-pressed',String(!ordering&&responseMode==='expert'));
+  fast.disabled=queryBusy;expert.disabled=queryBusy||ordering||!modelAvailable;
+  expert.title=ordering?'工程配单使用现有规则':modelAvailable?'使用本地大模型结合原文资料回答':'本地模型未连接，请检查模型服务';
+ }
+ fast.onclick=()=>{modeChosen=true;responseMode='quick';updateResponseMode();};
+ expert.onclick=()=>{if(modelAvailable&&!queryBusy&&mode.value!=='ordering'){modeChosen=true;responseMode='expert';updateResponseMode();}};
+ async function refreshModel(){
+  try{const capability=await json('/v2/offline/capabilities');modelAvailable=capability.expert?.available===true;
+   pending.textContent=modelAvailable?'本地模型已连接':'本地模型未连接';pending.title=capability.expert?.model||'请启动本地模型服务';
+   if(modelAvailable&&!modeChosen)responseMode='expert';
+  }catch{modelAvailable=false;pending.textContent='本地模型连接失败';}
+  updateResponseMode();
+ }
+ refreshModel();window.addEventListener('focus',refreshModel);mode.addEventListener('change',updateResponseMode);
 
  const help=make('details');help.className='v2-order-help';help.hidden=true;help.append(make('summary','配单输入示例与范围'),make('p','填写点间距、模组像素、扫描、接口、模组排列及接收卡。未核实的条件不会自动放行。也可提交标准需求JSON。'),make('code','配单 P2 模组160x80 40扫 HUB75 全彩 室内 同步接收卡 10宽8高 R716'));document.getElementById('aiMessages').before(help);
  const conditions=make('details');conditions.id='v2Conditions';conditions.append(make('summary','补充现场条件'));const factInputs={};
@@ -73,11 +90,11 @@ window.OfflineClient = Object.freeze({create(ui) {
  reset.addEventListener('click',()=>{for(const input of Object.values(factInputs))input.value='';checkAction.value='';checkResult.value='';originalMessage.value='';continuation.checked=false;feedback.textContent='';clearOcrImage();});
  async function request(body){
   const ordering=mode.value==='ordering';
-  if(!ordering)body={...body,facts:facts(),originalMessage:originalMessage.value||undefined,checks:checkAction.value||checkResult.value?[{action:checkAction.value,result:checkResult.value}]:[],continueQuery:continuation.checked};
+  if(!ordering)body={...body,mode:responseMode,conversationType,facts:facts(),originalMessage:originalMessage.value||undefined,checks:checkAction.value||checkResult.value?[{action:checkAction.value,result:checkResult.value}]:[],continueQuery:continuation.checked};
   return json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});
  }
  function render(data){
-  if(data.model!=='v2-offline-search'&&!data.error)return false;
+  if(data.model!=='v2-offline-search'&&data.actualMode!=='expert'&&!data.error)return false;
   const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';bubble.append(make('p',data.reply||'请求未完成，请稍后重试。'));
   for(const r of data.results||[])bubble.append(card(r,data.kind==='cases'));
   if(data.rawEvidence?.length){bubble.append(make('h4','相关原始资料（不等于已核验案例）'));for(const r of data.rawEvidence)bubble.append(card(r));}
@@ -144,9 +161,9 @@ window.OfflineClient = Object.freeze({create(ui) {
  }
  document.getElementById('quickSearchBtn').addEventListener('click',e=>{if(products)return;e.preventDefault();e.stopImmediatePropagation();search();},true);
  searchInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&!products){e.preventDefault();e.stopImmediatePropagation();search();}},true);
- return {request,render,legacy:false,mode,reset,setMode:modeChange,
+ return {request,render,legacy:false,mode,reset,setMode:modeChange,setConversationType(value){conversationType=value;},
   validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return false;}return true;},
-  beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':'检索资料…',
+  beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;queryBusy=busy;updateResponseMode();},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':responseMode==='expert'?'正在阅读资料并思考…':'检索资料…',
   acceptOcr(result){if(result.text.length<=240)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
  };
 }});
