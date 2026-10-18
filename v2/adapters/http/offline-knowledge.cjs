@@ -137,6 +137,9 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     if(image)return send(200,images?await images.recognize(b):{ok:false,message:'本地图片识别未配置，请输入文字。'});
     if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});
     let result;try{result=logs.receive(b);}catch(e){
+     if(e.message==='invalid-task-event')return send(400,{error:'invalid-task-event',message:'任务事件缺少稳定运行ID、序号或有效事件内容。'});
+     if(e.message==='task-event-conflict')return send(409,{error:'task-event-conflict',message:'相同任务事件或序号出现不同内容，原始记录未被覆盖。'});
+     if(e.message==='task-device-conflict')return send(409,{error:'task-device-conflict',message:'同一任务出现不同设备身份，请保留本地记录并检查任务ID生命周期。'});
      if(e.message==='invalid-log')return send(400,{error:'invalid-log',message:'日志正文必须为字符串且不超过900000个字符。'});
      if(e.message==='invalid-log-identity')return send(400,{error:'invalid-log-identity',message:'必须提供machine_id或devKey（最多160个字符），以及YYYY-MM-DD格式的log_date。'});
      return send(503,{error:'log-store-unavailable',message:'日志暂时无法保存，请保留本地日志并稍后重试。'});

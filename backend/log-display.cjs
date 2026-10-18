@@ -63,8 +63,8 @@ function buildDisplay(input){
   else if(identity&&!conflicting&&r.status==='succeeded'&&readback)value=before+' → '+r.after_version;
   else if(identity&&!conflicting&&r.status==='failed'&&readback)value=before+' → '+r.after_version+'（升级失败，保留实读结果）';
   else value=before+' → 升级后待确认';
-  const label=m?'接收卡'+m:'接收卡（型号未确认'+(Number.isSafeInteger(r.port)&&r.port>=0?'，网口'+r.port:'')+(r.card_id?'，卡号'+r.card_id:'')+'）';
-  const rowKey=m&&identity&&!conflicting?JSON.stringify([m,value]):signature;
+  const label=m?'接收卡'+m:'接收卡（型号未确认）';
+  const rowKey=identity&&!conflicting?JSON.stringify([r.run_id,r.device_id,m||'',r.firmware_model||'',r.firmware_model_source||'',value]):signature;
   if(!versionRows.has(rowKey))versionRows.set(rowKey,{label,value,cards:new Set()});
   if(identity&&!conflicting)versionRows.get(rowKey).cards.add(JSON.stringify([r.run_id,r.device_id,r.port,r.card_id]));
   if(!m)warnings.push('接收卡型号未确认，保留逐卡版本及目录关联来源');

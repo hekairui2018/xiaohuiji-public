@@ -64,6 +64,7 @@ function loadEnv() {
 const ENV = loadEnv();
 const siteDisplayEnabled = ENV.FEISHU_SITE_DISPLAY === '1';
 const appendOnly = ENV.FEISHU_LOG_APPEND_ONLY === '1';
+const machineOnly = ENV.FEISHU_LOG_MACHINE_ONLY === '1';
 const SITE_DISPLAY_FIELDS = ['产品型号', '版本信息', '现场环境（软/固件版本、源端设备、线材）', '自动建议-产品型号', '自动建议-版本信息', '自动建议-现场环境', '自动建议-缺失或冲突', '结构化日志详情', '自动写入基线'].map(name => ({name, type: 1}));
 const CFG = {
   appId: ENV.FEISHU_APP_ID || '',
@@ -321,11 +322,13 @@ async function findRecordId(model, logDate, rec) {
 // ---------------- 组装字段值（对齐正式表字段类型）+ 产出 TXT ----------------
 // 日志一律 TXT：先本地留底，再传附件；不写「日志全文」长文本列（该列已删除）。
 // 主键列内容：时间(到分钟)+发送型号（如 2026-10-07 10:44 VP210C-0）；无型号回退 机器码@日期（老版本兜底）。
+function senderIdentity(rec){return String(rec.device_code||(rec.devKey&&rec.devKey!==rec.machine_id?rec.devKey:'')||'');}
+function dailyMachineKey(rec){return String(rec.machine_id||'')+'＋'+(senderIdentity(rec)||'发送端未识别')+'@'+rec.log_date;}
 async function buildFields(rec) {
   const devKey = (rec.devKey || rec.machine_id || '');
   const model = sendModel(rec);
   const tsMin = clientTsMinute(rec.client_ts);
-  const key = model ? ([tsMin || rec.log_date, model].filter(Boolean).join(' ')) : (devKey + '@' + rec.log_date);
+  const key = machineOnly ? dailyMachineKey(rec) : model ? ([tsMin || rec.log_date, model].filter(Boolean).join(' ')) : (devKey + '@' + rec.log_date);
   const content = String(rec.content || '') + (siteDisplayEnabled ? '\n\n[结构化上报原始字段，仅供日志详情核对]\n' + JSON.stringify(require('./log-display.cjs').recordDetails(rec), null, 2) : '');
   const buf = Buffer.from(content, 'utf8');
   const fileName = appendOnly&&rec.receiver_upload_id ? txtFileName(rec).replace(/\.txt$/,'_'+rec.receiver_upload_id+'.txt') : txtFileName(rec);
@@ -376,7 +379,20 @@ async function syncHuiduRecordNow(rec) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       let recordId;
-      if(appendOnly&&rec.receiver_upload_id){
+      if(machineOnly){
+        if(!rec.machine_id)throw Error('missing-machine-identity');
+        const found=await api('POST',base+'/search',{page_size:1,filter:{conjunction:'and',conditions:[{field_name:primaryField,operator:'is',value:[dailyMachineKey(rec)]}]}});
+        recordId=found.items?.[0]?.record_id;
+        // Adopt one existing record for this machine without deleting historical rows.
+        if(!recordId){let pageToken='';do{
+          const page=await api('GET',base+'?page_size=500'+(pageToken?'&page_token='+encodeURIComponent(pageToken):''));
+          const cell=v=>Array.isArray(v)?v.map(x=>x?.text||'').join(''):String(v||'');
+          for(const item of page.items||[]){let detail={};try{detail=JSON.parse(cell(item.fields?.['结构化日志详情']));}catch{}
+            const keyText=cell(item.fields?.[primaryField]);
+            if((detail.machine_id===rec.machine_id&&senderIdentity(detail)===senderIdentity(rec)&&(detail.log_date===rec.log_date||keyText.startsWith(rec.log_date+' ')||keyText===rec.machine_id+'@'+rec.log_date))||keyText===dailyMachineKey(rec)){recordId=item.record_id;break;}}
+          pageToken=!recordId&&page.has_more?page.page_token:'';
+        }while(pageToken);}
+      }else if((appendOnly||machineOnly)&&rec.receiver_upload_id){
         const found=await api('POST',base+'/search',{page_size:2,filter:{conjunction:'and',conditions:[{field_name:'回传编号',operator:'is',value:[rec.receiver_upload_id]}]}});
         if(found.items?.length>1)throw Error('duplicate-upload-identity');
         if(found.items?.length===1)return {action:'already-received',record_id:found.items[0].record_id,key};
@@ -387,7 +403,7 @@ async function syncHuiduRecordNow(rec) {
         const display = buildDisplay(snapshot ? {...Object.fromEntries(['chips','site_env','hdset_version','hdplayer_version'].filter(k=>!Object.hasOwn(snapshot,k)).map(k=>[k,rec[k]])),...snapshot} : rec);
         const current = recordId ? await api('GET', base + '/' + recordId) : null;
         Object.assign(built.fields, displayPatch(display, {existing: !!recordId,currentFields: current?.record?.fields || {}}));
-        const detail = JSON.stringify(recordDetails(rec));
+        const detail = JSON.stringify({...recordDetails(rec),log_date:rec.log_date});
         built.fields['结构化日志详情'] = detail.length <= 16000 ? detail : JSON.stringify({machine_id: rec.machine_id, device_code: rec.device_code, note:'结构化明细较长，完整内容已保存在本条TXT附件和本地留底中，未截断原始证据'});
       }
       if (recordId) {
