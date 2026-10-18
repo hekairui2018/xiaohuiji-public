@@ -11,7 +11,9 @@ function selectFirmwareVersions(items){
  for(const item of items){const r=describeFirmware(item);if(r&&(!max.has(r.key)||compare(r.numbers,max.get(r.key))>0))max.set(r.key,r.numbers);}
  const selected=[],withheld=[],pending=[];
  for(const item of items){const r=describeFirmware(item),old=r&&compare(r.numbers,max.get(r.key))<0,record={...item,kind:'firmware',documentVersion:r?.version||null,versionBasis:r?'explicit-firmware-filename-and-slot':'not-established',versionSelection:old?'historical':r?'firmware-filename-latest-not-compatibility':'version-unknown'};
-  (old?withheld:!r&&item.status==='local-indexed'?pending:selected).push(record);
+  // Unknown version syntax does not make an identified product unclassified.
+  // Keep every non-historical firmware in the firmware browser, with its original review metadata.
+  (old?withheld:selected).push(record);
  }
  return {selected,withheld,pending};
 }

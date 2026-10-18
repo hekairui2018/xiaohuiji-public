@@ -36,9 +36,10 @@ test('New indexed installer candidates enter a separate software list, duplicate
  const input=[{name:'Example.exe',resourceType:'software',sha256:'a'.repeat(64),locationId:1,folders:['软件安装包'],resourceId:'r',versionId:'v'},{name:'renamed.exe',resourceType:'software',sha256:'a'.repeat(64),locationId:2,folders:['软件安装包']},{name:'Old.apk',resourceType:'software',sha256:'b'.repeat(64),locationId:3,folders:['安装包','旧版本安装包']},{name:'helper.exe',resourceType:'software',sha256:'c'.repeat(64),locationId:4,folders:['其他']}];
  const result=softwarePackages(input);assert.equal(result.packages.length,1);assert.equal(result.historicalPackages.length,1);assert.equal(result.packages[0].resourceVersionId,'v');assert.equal(result.packages[0].documentVersion,null);assert.equal(result.packages[0].reviewRequired,true);assert.equal(result.historicalPackages[0].versionStatus,'historical-source-folder');
 });
-test('Unversioned local firmware stays available as a pending record rather than disappearing from all catalogues',async()=>{
+test('Unversioned local firmware stays in firmware with review metadata, not classification pending',async()=>{
  const quick=createQuickService(appFor([{modelId:'HD-X9',displayName:'X9',documents:[],firmware:[]}]),{localCatalog:async()=>[{name:'X9_FPGA.bin',resourceType:'firmware',locationId:5,resourceId:'r',versionId:'v',folders:['固件']}]});
- const pending=(await quick.docs('pending')).docs;assert.equal(pending.items.length,1);assert.equal(pending.items[0].kind,'firmware');assert.equal(pending.items[0].versionStatus,'unknown');assert.equal(pending.items[0].reviewRequired,true);
+ const pending=(await quick.docs('pending')).docs;assert.equal(pending.items.length,0);
+ const firmware=(await quick.docs('firmware')).docs;assert.equal(firmware.items.length,1);assert.equal(firmware.items[0].kind,'firmware');assert.equal(firmware.items[0].versionStatus,'unknown');assert.equal(firmware.items[0].reviewRequired,true);assert.equal(firmware.firmwareCategories[0].key,'other');
 });
 test('Same-name binary evidence with different hashes is resolved independently, unavailable links retain a reason',async()=>{
  const http=require('node:http'),{createOfflineKnowledge}=require('../adapters/http/offline-knowledge.cjs'),seen=[];

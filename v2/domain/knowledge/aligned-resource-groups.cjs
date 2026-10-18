@@ -22,7 +22,7 @@ function fallback(model,group){
  if(/^MS\d/.test(m))return key('MS系列-服务器');
  if(/^(?:DCS|CT)\d/.test(m))return key('分布式、中控');
  if(/^WF\d/.test(m))return 'mono';
- if(/^[CD]\d/.test(m)&&group.label==='全彩')return 'cd-control';
+ if(/^[CD]\d/.test(m))return 'cd-control';
  if(/AI数字人/.test(group.label))return 'lcd';
  return definitions.some(d=>d.key===group.key)?group.key:'other';
 }

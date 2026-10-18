@@ -16,3 +16,11 @@ test('Firmware variants are never filtered by browse grouping; ambiguous unrecog
  const rows=alignedResourceGroups([{key:'other',label:'固件',products:[product('HD-R708',variants),product('HD-X99')]}],[]);
  assert.deepEqual(rows.map(g=>g.key),['receiver','other']);assert.deepEqual(rows[0].products[0].items.map(i=>i.fileId),['hw1','hw2']);assert.equal(rows[1].products[0].model,'HD-X99');
 });
+
+test('B/C/D firmware belongs to its product family even without a specification or full-color folder label',()=>{
+ const models=['HD-B6L','HD-C08L','HD-C15','HD-C16','HD-C16L','HD-C35','HD-D16','HD-C08'];
+ const rows=alignedResourceGroups([{key:'other',label:'固件',products:models.map(m=>product(m))}],[reference('HD-C08','配件')]);
+ assert.deepEqual(rows.map(g=>g.label),['B系列-广告机专用','C、D系列-全彩控制卡','配件']);
+ assert.deepEqual(rows[1].products.map(p=>p.model),models.slice(1,-1));
+ assert.equal(rows[2].products[0].model,'HD-C08');
+});
