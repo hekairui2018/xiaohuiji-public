@@ -7,6 +7,8 @@ function serveStatic(req,res,root=path.resolve(__dirname,'../../frontend'),{loca
  if(route==='/v2-site-compat.js'){res.writeHead(200,{'Content-Type':types['.js'],'X-Content-Type-Options':'nosniff'});fs.createReadStream(path.join(root,'site-compat.js')).pipe(res);return true;}
  if(['/wiki','/huiai','/'].includes(route))route='/index.html';
  const file=path.resolve(root,'.'+route);if(!file.startsWith(path.resolve(root)+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()||!types[path.extname(file)])return false;
- res.writeHead(200,{'Content-Type':types[path.extname(file)],'X-Content-Type-Options':'nosniff'});if(route==='/index.html')res.end(fs.readFileSync(file,'utf8').replace('</body>','<script src="/v2-site-compat.js"></script>'+(offlineKnowledge?'<script src="/v2/offline/client.js"></script>':localKnowledge?'<script src="/v2/local-knowledge/client.js"></script>':'')+'</body>'));else if(route==='/app.js')res.end(fs.readFileSync(file,'utf8').replace(/(["'])\/quick\1/g,'$1/wiki$1'));else fs.createReadStream(file).pipe(res);return true;
+ res.writeHead(200,{'Content-Type':types[path.extname(file)],'X-Content-Type-Options':'nosniff'});
+ if(route==='/index.html')res.end(fs.readFileSync(file,'utf8').replace(/<body(?: data-client="rules")?/, '<body data-client="'+(offlineKnowledge?'offline':localKnowledge?'local':'rules')+'"'));
+ else fs.createReadStream(file).pipe(res);return true;
 }
 module.exports={serveStatic};

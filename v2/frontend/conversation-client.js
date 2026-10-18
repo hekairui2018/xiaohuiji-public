@@ -1,6 +1,7 @@
 // Browser-local ordinary history; temporary conversations never enter this store.
-(() => {
+window.ConversationClient = Object.freeze({create(ui,channel) {
  'use strict';
+ const {state,events,clearImage:clearOcrImage}=ui;
  const requestedScope=new URLSearchParams(location.search).get('mode');
  const scope=['ordering','cases'].includes(requestedScope)?requestedScope:'all';
  const STORE='xhj_v2_conversations_v1',ACTIVE='xhj_v2_active_conversation_'+scope;
@@ -10,8 +11,8 @@
  let activeId;try{activeId=sessionStorage.getItem(ACTIVE);}catch{}
  let current=items.find(x=>x.id===activeId&&(x.mode||'all')===scope)||{id:id(),turns:[],fields:{},draft:'',mode:scope};
  let normalId=current.id,temporary=false,restoring=false,timer;
- window.__v2SessionId=current.id;
- window.addEventListener('DOMContentLoaded',()=>{
+ ui.setSessionId(current.id);
+
   const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
   const messages=document.getElementById('aiMessages'),input=document.getElementById('aiInput'),send=document.getElementById('aiSendBtn'),tempButton=document.getElementById('v2NewQuery'),toolbar=tempButton.parentElement,mode=document.getElementById('v2WorkMode');
   const normalButton=make('button','普通对话'),historyButton=make('button','历史对话');normalButton.type=historyButton.type='button';normalButton.id='v2NormalConversation';historyButton.id='v2ConversationHistory';
@@ -30,17 +31,17 @@
    try{sessionStorage.setItem(ACTIVE,current.id);}catch{}
   }
   function later(){if(!temporary&&!restoring){clearTimeout(timer);timer=setTimeout(remember,150);}}
-  function show(record,isTemporary){clearTimeout(timer);restoring=true;temporary=isTemporary;current=record;window.__v2SessionId=record.id;
-   chatHistory=[];triagePath=null;lastNumericOptions=null;window.__v2LastReply=null;clearOcrImage();input.value=record.draft||'';mode.value=['all','cases','ordering'].includes(record.mode)?record.mode:'all';modeChangeDisplay();
+  function show(record,isTemporary){clearTimeout(timer);restoring=true;temporary=isTemporary;current=record;ui.setSessionId(record.id);
+   state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;clearOcrImage();input.value=record.draft||'';mode.value=['all','cases','ordering'].includes(record.mode)?record.mode:'all';modeChangeDisplay();
    fields().forEach((e,i)=>{const v=record.fields?.[fieldKey(e,i)];if(e.type==='checkbox')e.checked=!!v;else e.value=typeof v==='string'?v:'';});
    const nodes=liveNodes.get(record.id);messages.replaceChildren(...(nodes||[]));
-   if(!nodes){for(const turn of record.turns){if(turn.role==='user')window.addUserMessage(turn.text);else window.addAssistantMessage({model:'v2-offline-search',reply:turn.text});}}
-   chatHistory=record.turns.map(t=>({role:t.role,content:t.text}));document.querySelector('.v2-feedback').textContent='';messages.scrollTop=messages.scrollHeight;restoring=false;notice();input.focus();
+   if(!nodes){for(const turn of record.turns){if(turn.role==='user')ui.addUserMessage(turn.text);else ui.addAssistantMessage({model:'v2-offline-search',reply:turn.text});}}
+   state.history=record.turns.map(t=>({role:t.role,content:t.text}));document.querySelector('.v2-feedback').textContent='';messages.scrollTop=messages.scrollHeight;restoring=false;notice();input.focus();
   }
-  function modeChangeDisplay(){document.querySelector('.v2-order-help').hidden=mode.value!=='ordering';document.getElementById('v2Conditions').hidden=mode.value!=='cases';input.placeholder=mode.value==='ordering'?'输入完整工程需求，或标准需求JSON':mode.value==='cases'?'输入故障现象、准确型号或版本':'输入型号、文件名、软件功能或正文关键词';}
-  const userMessage=window.addUserMessage,assistantMessage=window.addAssistantMessage;
-  window.addUserMessage=function(text,...args){const result=userMessage.call(this,text,...args);if(!restoring){current.turns.push({role:'user',text:typeof text==='string'&&text?text:'图片消息（图片不保存在前端历史）'});later();}return result;};
-  window.addAssistantMessage=function(data){const result=assistantMessage.call(this,data);if(!restoring){current.turns.push({role:'assistant',text:String(data.reply||data.clarifyQuestion||'结果已返回，详细资料或工程方案请重新查询。').slice(0,8000)});current.turns=current.turns.slice(-80);later();}return result;};
+  function modeChangeDisplay(){channel.setMode();}
+  events.addEventListener('user-message',event=>{if(!restoring){const text=event.detail.text;current.turns.push({role:'user',text:typeof text==='string'&&text?text:'图片消息（图片不保存在前端历史）'});later();}});
+  events.addEventListener('assistant-message',event=>{if(!restoring){const data=event.detail;current.turns.push({role:'assistant',text:String(data.reply||data.clarifyQuestion||'结果已返回，详细资料或工程方案请重新查询。').slice(0,8000)});current.turns=current.turns.slice(-80);later();}});
+  events.addEventListener('session-change',()=>{if(restoring)return;remember();current=items.find(x=>x.id===ui.getSessionId())||{id:ui.getSessionId(),turns:[],fields:{},draft:'',mode:mode.value};normalId=current.id;normalRecord=current;temporary=false;notice();});
   window.v2Conversations={startTemporary(){if(send.disabled)return;remember();if(temporary)liveNodes.delete(current.id);else{normalId=current.id;normalRecord=current;}show({id:id(),turns:[],fields:{},draft:'',mode:mode.value},true);}};
   normalButton.onclick=()=>{if(send.disabled||!temporary)return;liveNodes.delete(current.id);const record=items.find(x=>x.id===normalId)||normalRecord;show(record,false);};
   historyButton.onclick=()=>{if(send.disabled)return;remember();list.replaceChildren();if(!items.length)list.append(make('p','还没有普通对话记录。'));for(const item of items){const button=make('button');button.type='button';button.append(make('strong',item.title||'普通对话'),make('small',new Date(item.updated).toLocaleString()));button.onclick=()=>{if(temporary)liveNodes.delete(current.id);normalId=item.id;normalRecord=item;show(item,false);dialog.close();remember();};list.append(button);}dialog.showModal();};
@@ -55,5 +56,4 @@
   const originalRecord=current;
   if(originalRecord.turns.length){show(originalRecord,false);}else{current.mode=mode.value;notice();}
   remember();
- });
-})();
+}});

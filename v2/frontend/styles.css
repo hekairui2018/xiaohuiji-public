@@ -1074,7 +1074,6 @@ body[data-view="ai"] .ai-input-row{flex-shrink:0}
 .doc-catalog-flat .doc-flat{padding:14px 0;border-bottom:1px solid var(--border);align-items:flex-start}
 .doc-catalog-flat .doc-flat-name{color:var(--text);font-weight:600}
 .doc-link-nourl{opacity:.5;cursor:default}
-body[data-view="ai"] .v2-toolbar{margin:4px 0 10px;padding-bottom:10px;border-bottom:1px solid var(--border)}
 body[data-view="ai"] .ai-msg-bubble .v2-record{background:var(--surface);border-color:var(--border)}
 
 /* Full-text search is a direct, secondary action beside product search. */
@@ -1100,7 +1099,6 @@ body[data-view="ai"] .ai-msg-bubble .v2-record{background:var(--surface);border-
 body[data-view="ai"] .ai-section{padding-bottom:40px}
 body[data-view="ai"] .v2-toolbar{margin:8px 0;padding:0;border:0}
 body[data-view="ai"] .v2-toolbar>span{display:none}
-body[data-view="ai"] .v2-toolbar #v2NewQuery{margin-left:auto}
 @media(max-width:640px){body[data-view="ai"] .ai-section{padding-bottom:max(26px,env(safe-area-inset-bottom))}}
 
 .v2-business-mode{display:flex;align-items:center;gap:10px;color:var(--text-muted);font-size:12px;margin:4px 0 10px;flex-shrink:0}

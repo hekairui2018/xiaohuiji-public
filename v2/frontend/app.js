@@ -1,7 +1,10 @@
+(() => {
+'use strict';
 // 展示层：快查站前端逻辑
 // 职责：页面交互、调用后端 API、按契约渲染响应
 // 禁止：意图分类、型号识别、知识检索（这些在后端）
 
+const FrontendApp = { events: new EventTarget(), channel: null };
 const aiInput = document.getElementById("aiInput");
 const aiSendBtn = document.getElementById("aiSendBtn");
 const aiMessages = document.getElementById("aiMessages");
@@ -35,10 +38,12 @@ function applyView(view, opts) {
 
 // 售后会话历史：多轮反问时把已确认的现象/型号带给后端（元素 {role, content}）
 let chatHistory = [];
+let activeSessionId;
 function getSid() {
-  if (window.__v2SessionId) return window.__v2SessionId;
+  if (activeSessionId) return activeSessionId;
   let s = localStorage.getItem("xhj_sid");
   if (!s) { s = "w-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); localStorage.setItem("xhj_sid", s); }
+  activeSessionId = s;
   return s;
 }
 // 自动化自测开关：URL 带 ?selftest=1 或 localStorage xhj_selftest=1 时，请求标记 web-selftest，
@@ -56,7 +61,7 @@ let lastNumericOptions = null;
 // 从后端响应里提炼一段可被下一轮检索的纯文本（用于历史上下文）
 function assistantTextOf(data) {
   if (data.status === "answer" && data.model === "v2-rules" && data.result && data.result.bom) {
-    bubble.appendChild(renderV2Ordering(data.result));
+    return data.reply || "";
   } else if (data.status === "answer" && data.pyramid) {
     const p = data.pyramid;
     return [p.conclusion, p.scene, ...(p.steps || []).map((s) => s.action), p.fallback].filter(Boolean).join(" ");
@@ -84,6 +89,7 @@ function addUserMessage(text, imageDataUrl) {
   }
   aiMessages.appendChild(div);
   aiMessages.scrollTop = aiMessages.scrollHeight;
+  FrontendApp.events.dispatchEvent(new CustomEvent("user-message", {detail:{text,imageDataUrl}}));
 }
 
 function addAssistantLoading(label) {
@@ -286,6 +292,10 @@ function renderCaseTable(cands) {
 }
 
 function addAssistantMessage(data) {
+  if (FrontendApp.channel?.render?.(data)) {
+    FrontendApp.events.dispatchEvent(new CustomEvent("assistant-message", {detail:data}));
+    return;
+  }
   const div = document.createElement("div");
   div.className = "ai-msg ai-msg-assistant";
   const bubble = document.createElement("div");
@@ -306,7 +316,9 @@ function addAssistantMessage(data) {
   }
   lastNumericOptions = _numOpts.length ? { options: _numOpts, at: Date.now() } : null;
 
-  if (data.status === "answer" && data.pyramid) {
+  if (data.model === "v2-rules" && data.status === "answer" && data.result?.bom) {
+    bubble.appendChild(renderV2Ordering(data.result));
+  } else if (data.status === "answer" && data.pyramid) {
     bubble.appendChild(renderPyramid(data.pyramid));
     const caseTable = renderCaseTable(data.candidates);
     if (caseTable) bubble.appendChild(caseTable);
@@ -375,7 +387,9 @@ function addAssistantMessage(data) {
   aiMessages.appendChild(div);
   // 回答可能很长（结论+步骤+案例表），定位到本条回答开头，而不是滚到容器最底让客户往上翻
   const delta = div.getBoundingClientRect().top - aiMessages.getBoundingClientRect().top;
-  aiMessages.scrollTop += delta - 6;
+  if (data.model === "v2-rules" && data.status === "answer" && data.result?.bom) aiMessages.scrollTop = aiMessages.scrollHeight;
+  else aiMessages.scrollTop += delta - 6;
+  FrontendApp.events.dispatchEvent(new CustomEvent("assistant-message", {detail:data}));
 }
 
 // 软件回答：单软件给一张完整卡片（操作视频在线看 + 中文说明书 + 下载）；多软件/全家桶给紧凑清单
@@ -1123,9 +1137,7 @@ function sendOption(opt) {
 }
 
 // displayOverride：点分流按钮时界面显示累计路径，实际仍发送带内部标记的 message
-async function sendMessage(forceText, displayOverride) {
-  const text = (forceText !== undefined ? forceText : aiInput.value).trim();
-  if (!text) return;
+function prepareLegacyMessage(text, forceText) {
   if (forceText === undefined) {
     // 手动输入：若是“裸序号”且上一轮刚给过选项，等价于点对应按钮（1 / 1) / 1. / ①）；多位型号 410/6363 不拦截
     let _idx = -1;
@@ -1135,45 +1147,13 @@ async function sendMessage(forceText, displayOverride) {
     else if (_plain) _idx = parseInt(_plain[1], 10) - 1;
     const _opt = (_idx >= 0 && lastNumericOptions && Date.now() - lastNumericOptions.at < 15 * 60000)
       ? lastNumericOptions.options[_idx] : null;
-    if (_opt) { sendOption(_opt); return; }
+    if (_opt) { sendOption(_opt); return false; }
     triagePath = null;  // 手动输入=开启新问题，清空累计路径
     lastNumericOptions = null;  // 新问题开始，上一轮序号选项失效
   }
-  const displayText = (displayOverride !== undefined
-    ? displayOverride
-    : text.replace(/\[[A-Z_]+\]/g, "")).trim();  // 界面不显示内部分流标记
-  aiInput.value = "";
-  aiInput.disabled = true;
-  aiSendBtn.disabled = true;
-
-  addUserMessage(displayText);
-  const loading = addAssistantLoading();
-  const historyForRequest = chatHistory.slice(-8);
-
-  try {
-    const resp = await fetch("/api/ai/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, history: historyForRequest, source: isSelftestEnv() ? "web-selftest" : "quick-site", sessionId: getSid() })
-    });
-    const data = await resp.json();
-    removeLoading();
-    addAssistantMessage(data);
-    // 记录本轮到会话历史，供下一轮反问续问继承现象/型号
-    chatHistory.push({ role: "user", content: text });
-    chatHistory.push({ role: "assistant", content: assistantTextOf(data), model: data.model || "" });
-  } catch (err) {
-    removeLoading();
-    const div = document.createElement("div");
-    div.className = "ai-msg ai-msg-assistant";
-    div.innerHTML = `<div class="ai-msg-bubble" style="color:#c00">请求失败：${err.message}</div>`;
-    aiMessages.appendChild(div);
-  } finally {
-    aiInput.disabled = false;
-    aiSendBtn.disabled = false;
-    aiInput.focus();
-  }
+  return true;
 }
+function sendMessage(forceText, displayOverride) { return FrontendApp.chat.send(forceText, displayOverride); }
 
 aiSendBtn.addEventListener("click", () => sendMessage());
 aiInput.addEventListener("keydown", (e) => {
@@ -1231,69 +1211,8 @@ async function handleOcrFile(file) {
 
 // 图片消息：气泡只显示截图（识别文字不回填输入框、也不在气泡铺文字，避免和客户要打的字混淆）；
 // OCR 文字直接作为客户问题走原问答 / 配单链路，客户无需再点发送；识别失败或无字则提示直接打字。
-async function sendImageMessage(dataUrl) {
-  ocrState = { dataUrl, text: '', busy: true };
-  if (aiImgFile) aiImgFile.value = '';
-  addUserMessage('', dataUrl);  // 只显示截图，不显示识别文字
-  addAssistantLoading('正在识别图片文字…');
-  let text = '';
-  try {
-    const resp = await fetch('/api/ocr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl })
-    });
-    const j = await resp.json();
-    if (j.ok && j.text) text = String(j.text).trim();
-    const ocrImageId = (j.ok && j.imageId) ? j.imageId : '';
-  } catch (e) { text = ''; }
-  if (!text) {
-    removeLoading();
-    const div = document.createElement('div');
-    div.className = 'ai-msg ai-msg-assistant';
-    const b = document.createElement('div');
-    b.className = 'ai-msg-bubble';
-    b.textContent = '图片里没认出文字，请直接用文字把【设备型号】和【现场现象 / 屏体尺寸】发我（例如“C16L花屏一直闪”或“P3宽6米高3米同步”），我来帮你查。';
-    div.appendChild(b);
-    aiMessages.appendChild(div);
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-    ocrState = { dataUrl: null, text: '', busy: false };
-    return;
-  }
-  // 识别成功：文字直接进入对话历史与请求（界面不显示），客户无需再点发送
-  chatHistory.push({ role: 'user', content: text });
-  const lb = document.getElementById('aiLoading') && document.getElementById('aiLoading').querySelector('.ai-msg-bubble');
-  if (lb) lb.textContent = '思考中…';
-  aiInput.disabled = true;
-  aiSendBtn.disabled = true;
-  try {
-    const resp = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history: chatHistory.slice(-8), source: isSelftestEnv() ? 'web-selftest' : 'quick-site', sessionId: getSid(), images: ocrImageId ? [ocrImageId] : [] })
-    });
-    const data = await resp.json();
-    removeLoading();
-    addAssistantMessage(data);
-    chatHistory.push({ role: 'assistant', content: assistantTextOf(data), model: data.model || '' });
-  } catch (err) {
-    removeLoading();
-    const div = document.createElement('div');
-    div.className = 'ai-msg ai-msg-assistant';
-    const b = document.createElement('div');
-    b.className = 'ai-msg-bubble';
-    b.style.color = '#c00';
-    b.textContent = '请求失败：' + err.message;
-    div.appendChild(b);
-    aiMessages.appendChild(div);
-  } finally {
-    aiInput.disabled = false;
-    aiSendBtn.disabled = false;
-    ocrState = { dataUrl: null, text: '', busy: false };
-    aiInput.focus();
-    aiMessages.scrollTop = aiMessages.scrollHeight;
-  }
-}
+function sendImageMessage(dataUrl) { return FrontendApp.chat.sendImage(dataUrl); }
+
 if (aiImgBtn && aiImgFile) {
   aiImgBtn.addEventListener("click", () => aiImgFile.click());
   aiImgFile.addEventListener("change", () => {
@@ -1550,10 +1469,11 @@ function renderSearchResults(results, query, data) {
 }
 
 let quickRequestId = 0;
-window.invalidateQuickRequest = () => ++quickRequestId;
 async function doSearch() {
+  clearTimeout(searchTimer); // Explicit submission replaces the pending automatic search.
   const q = quickSearchInput.value.trim();
   if (!q) return;
+  updateQuickExamples(); // Preserve the final empty-state presentation previously applied by the timer.
   if (activeCat === "software") { await renderSoftwareCategory(q); return; } // 软件分类走独立端点
   if (activeCat === "video") { await renderVideoCategory(q); return; } // 视频分类走独立端点（按操作主题，与型号无关）
   if (["spec", "manual", "other", "pending"].includes(activeCat)) { await renderDocsCategory(activeCat, q); return; } // 规格书/说明书：分组页内展开命中大类
@@ -1569,19 +1489,17 @@ async function doSearch() {
     // “全部”分类下硬件无命中、也不是芯片固件速查时，兜底聚合软件与操作视频，避免搜 HDPlayer / 复位 显示空：
     // 明确软件名（isList=false 单软件命中，如 HDPlayer）直达软件卡；操作词（如 复位，软件不匹配）直达视频；都不中才显示硬件空态。
     if (activeCat === "all" && !hwResults.length && !data.chipFirmware) {
-      const [swData, vdData] = await Promise.all([
-        fetch("/api/software?q=" + encodeURIComponent(q)).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/videos?q=" + encodeURIComponent(q)).then((r) => r.json()).catch(() => ({})),
+      const [sw, vd] = await Promise.all([
+        fetchSoftware(q).catch(() => null),
+        fetchVideos(q).catch(() => null),
       ]);
       if (requestId !== quickRequestId) return;
-      const sw = swData.software;
       if (sw && Array.isArray(sw.items) && sw.items.length && sw.isList === false) {
         setActiveCat("software");
         updateQuickExamples();
         await renderSoftwareCategory(q);
         return;
       }
-      const vd = vdData.video;
       const vTotal = vd && typeof vd.total === "number"
         ? vd.total
         : (vd && Array.isArray(vd.groups) ? vd.groups.reduce((s, g) => s + ((g.videos || []).length), 0) : 0);
@@ -2143,6 +2061,7 @@ function scheduleSearch() {
 
 // 点分类：软件走独立端点；规格书/说明书/固件对当前产品结果本地过滤；空词先提示输入型号
 function onPickCategory(cat) {
+  clearTimeout(searchTimer);
   ++quickRequestId;
   setActiveCat(cat);
   updateQuickExamples();
@@ -2374,3 +2293,16 @@ function buildSoftwareAccessButton(s) {
   };
   return button;
 }
+
+// Explicit dependencies shared by the selected channel and browser-local conversation store.
+Object.assign(FrontendApp, {
+ input:aiInput,sendButton:aiSendBtn,messages:aiMessages,
+ state:{get history(){return chatHistory;},set history(v){chatHistory=v;},get triage(){return triagePath;},set triage(v){triagePath=v;},get numeric(){return lastNumericOptions;},set numeric(v){lastNumericOptions=v;}},
+ getSessionId:getSid,setSessionId(id){activeSessionId=id;window.__v2SessionId=id;FrontendApp.events.dispatchEvent(new Event("session-change"));},
+ resetState(){chatHistory=[];triagePath=null;lastNumericOptions=null;window.__v2LastReply=null;},
+ clearImage:clearOcrImage,setImageState(v){ocrState=v;},addUserMessage,addAssistantMessage,addLoading:addAssistantLoading,removeLoading,assistantTextOf,prepareLegacyMessage,isSelftestEnv,
+ catalog:{invalidate(){clearTimeout(searchTimer);++quickRequestId;},setActiveCat,updateQuickExamples,onPickCategory,get activeCat(){return activeCat;}}
+});
+
+window.FrontendApp = FrontendApp;
+})();

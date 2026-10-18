@@ -1,0 +1,62 @@
+'use strict';
+// The only text/OCR send lifecycle. Channels supply request data and presentation, never replace browser functions.
+window.ChatController = Object.freeze({create(ui, channel = {}) {
+ const legacy = channel.legacy !== false;
+ const request = channel.request || (async body => {
+  const response = await fetch('/api/ai/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  return response.json();
+ });
+ let sending = false;
+ function busy(value) {
+  sending = value;
+  ui.input.disabled = ui.sendButton.disabled = value;
+  channel.setBusy?.(value);
+ }
+ function payload(text, sessionId, imageId) {
+  return {message:text, sessionId, ...(legacy ? {history:ui.state.history.slice(-8),source:ui.isSelftestEnv()?'web-selftest':'quick-site'} : {}), ...(imageId ? {images:[imageId]} : {})};
+ }
+ async function query(text, sessionId, imageId) {
+  const response = await request(payload(text, sessionId, imageId));
+  if (ui.getSessionId() !== sessionId) return false;
+  ui.removeLoading();ui.addAssistantMessage(response);
+  ui.state.history.push({role:'user',content:text},{role:'assistant',content:legacy?ui.assistantTextOf(response):response.reply||''});
+  return true;
+ }
+ async function send(value, display) {
+  let text = typeof value==='string'?value:ui.input.value;
+  if (legacy) text=text.trim();
+  if (!text.trim() || sending || ui.sendButton.disabled) return;
+  if (legacy && !ui.prepareLegacyMessage(text,value)) return;
+  if (channel.validate?.(text)===false) return;
+  channel.beforeSend?.();const sessionId=ui.getSessionId();
+  const displayText=legacy?(display!==undefined?display:text.replace(/\[[A-Z_]+\]/g,'')).trim():display||text;
+  ui.input.value='';busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());
+  try {await query(text,sessionId);}
+  catch(error) {
+   if (ui.getSessionId()!==sessionId) return;
+   ui.removeLoading();
+   if (!legacy) {ui.input.value=text;ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});}
+   else {const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.style.color='#c00';bubble.textContent='请求失败：'+error.message;row.append(bubble);ui.messages.append(row);}
+  } finally {busy(false);ui.input.focus();}
+ }
+ async function sendImage(dataUrl) {
+  if (sending || ui.sendButton.disabled) return;
+  channel.beforeSend?.();const sessionId=ui.getSessionId();
+  ui.setImageState({dataUrl,text:'',busy:true});busy(true);ui.addUserMessage('',dataUrl);ui.addLoading(legacy?'识别图片中…':'本地识别图片文字…');
+  try {
+   const response=await fetch('/api/ocr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:dataUrl})});
+   const result=await response.json();window.__v2LastOCR=result;
+   if (ui.getSessionId()!==sessionId) return;
+   ui.removeLoading();
+   if (!response.ok || !result.ok || !result.text) {
+    ui.addAssistantMessage({model:'v2-offline-search',reply:result.message||'图片未识别到文字，请输入文字。'});return;
+   }
+   if (channel.acceptOcr?.(result)===false) return;
+   ui.addLoading(legacy?'思考中…':'检索资料…');await query(result.text,sessionId,result.imageId);
+  } catch {
+   if(ui.getSessionId()!==sessionId)return;
+   ui.removeLoading();ui.addAssistantMessage({model:'v2-offline-search',reply:'本地图片识别未完成，可继续文字查询。'});
+  } finally {ui.setImageState({dataUrl:null,text:'',busy:false});busy(false);}
+ }
+ return Object.freeze({send,sendImage});
+}});

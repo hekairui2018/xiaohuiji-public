@@ -1,12 +1,12 @@
 'use strict';
-// V2-only response presentation. The shared legacy frontend remains read-only.
-(() => {
- const previousText=window.assistantTextOf,previousRender=window.addAssistantMessage;
- window.assistantTextOf=function(data){return data.model==='v2-rules'&&data.result?.bom?data.reply||'':previousText(data);};
- window.addAssistantMessage=function(data){
-  if(data.model!=='v2-rules'||data.status!=='answer'||!data.result?.bom)return previousRender(data);
-  const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';
-  const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.appendChild(renderV2Ordering(data.result));
-  row.appendChild(bubble);const messages=document.getElementById('aiMessages');messages.appendChild(row);messages.scrollTop=messages.scrollHeight;
- };
-})();
+// Single composition root. Static delivery chooses a mode; providers only define factories.
+window.addEventListener('DOMContentLoaded', () => {
+ const mode=document.body.dataset.client||'rules';
+ const provider=mode==='offline'?window.OfflineClient:mode==='local'?window.LocalKnowledgeClient:null;
+ if(mode!=='rules'&&!provider)throw Error('Missing V2 request channel: '+mode);
+ const channel=provider?provider.create(FrontendApp):{};
+ FrontendApp.channel=channel;
+ FrontendApp.chat=ChatController.create(FrontendApp,channel);
+ if(mode==='offline')ConversationClient.create(FrontendApp,channel);
+ Object.freeze(FrontendApp);
+}, {once:true});

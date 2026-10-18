@@ -1,8 +1,9 @@
 'use strict';
 // Existing website style and DOM, independent no-model search/browse controls.
-(() => {
+window.OfflineClient = Object.freeze({create(ui) {
  const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
  const fetchOriginal=window.fetch.bind(window);
+ const {state,getSessionId:getSid,clearImage:clearOcrImage}=ui;
  async function json(url,init){const response=await fetchOriginal(url,init);let data;try{data=await response.json();}catch{throw Error('服务返回格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(typeof data.error==='string'?data.error:(data.reason||data.message||'服务暂不可用（'+response.status+'）'));return data;}
 
  const place=l=>typeof l==='string'?l:Object.entries(l||{}).map(([k,v])=>({page:'页',paragraph:'段',row:'行',sheet:'工作表',slide:'幻灯片',table:'表',section:'章节',part:'位置',line:'行'}[k]||k)+'：'+v).join(' · ');
@@ -43,7 +44,7 @@
  }
  const toolbar=make('div');toolbar.className='v2-toolbar';const mode=make('select');mode.id='v2WorkMode';
  for(const [value,label]of [['all','资料与操作检索'],['cases','历史售后案例'],['ordering','工程配单']]){const o=make('option',label);o.value=value;mode.append(o);}
- const reset=make('button','新查询');reset.type='button';reset.id='v2NewQuery';reset.onclick=()=>{localStorage.setItem('xhj_sid','w-'+crypto.randomUUID());chatHistory=[];triagePath=null;lastNumericOptions=null;window.__v2LastReply=null;document.getElementById('aiMessages').replaceChildren();document.getElementById('aiInput').value='';document.getElementById('aiInput').focus();};
+ const reset=make('button','新查询');reset.type='button';reset.id='v2NewQuery';reset.onclick=()=>{ui.setSessionId("w-"+crypto.randomUUID());state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;document.getElementById('aiMessages').replaceChildren();document.getElementById('aiInput').value='';document.getElementById('aiInput').focus();};
  mode.setAttribute('aria-label','查询方式');
  // Preserve explicit request scope internally; no query-purpose selector in the UI.
  mode.hidden=true;document.querySelector('.ai-section').append(mode);
@@ -60,41 +61,28 @@
  const continuation=make('input');continuation.type='checkbox';continuation.id='v2ContinueQuery';const cl=make('label','将本轮文字作为上一轮的补充检索');cl.className='v2-continuation';cl.prepend(continuation);conditions.append(cl);document.getElementById('aiMessages').before(conditions);
  const feedback=make('p');feedback.className='v2-feedback';feedback.setAttribute('role','status');document.querySelector('.ai-input-row').before(feedback);
  const facts=()=>Object.fromEntries(Object.entries(factInputs).map(([key,input])=>[key,input.value.split(/[;；、]/).map(s=>s.trim()).filter(Boolean)]));
- const modeChange=()=>{help.hidden=mode.value!=='ordering';conditions.hidden=mode.value!=='cases';document.getElementById('aiInput').placeholder=mode.value==='ordering'?'输入完整工程需求，或标准需求JSON':mode.value==='cases'?'输入故障现象、准确型号或版本':'输入型号、文件名、软件功能或正文关键词';};mode.onchange=()=>{localStorage.setItem('xhj_sid','w-'+crypto.randomUUID());chatHistory=[];continuation.checked=false;modeChange();};const requestedMode=new URLSearchParams(location.search).get('mode');if(['ordering','cases'].includes(requestedMode))mode.value=requestedMode;modeChange();
+ const modeChange=()=>{help.hidden=mode.value!=='ordering';conditions.hidden=mode.value!=='cases';document.getElementById('aiInput').placeholder=mode.value==='ordering'?'输入完整工程需求，或标准需求JSON':mode.value==='cases'?'输入故障现象、准确型号或版本':'输入型号、文件名、软件功能或正文关键词';};mode.onchange=()=>{ui.setSessionId("w-"+crypto.randomUUID());state.history=[];continuation.checked=false;modeChange();};const requestedMode=new URLSearchParams(location.search).get('mode');if(['ordering','cases'].includes(requestedMode))mode.value=requestedMode;modeChange();
  if(mode.value==='ordering'){document.querySelector('.ai-hint').textContent='填写完整屏体需求；配单结果由现有规则校验后展示。';document.querySelector('#aiMessages .ai-msg-bubble').textContent='请提供点间距、模组像素、排列及接收卡等已知条件，缺失条件会继续询问。';}else if(mode.value==='cases'){document.querySelector('.ai-hint').textContent='检索历史案例，结合型号、版本和现场条件核对。';document.querySelector('#aiMessages .ai-msg-bubble').textContent='输入故障现象和准确型号，可补充现场条件对照历史记录。历史措施不代表当前故障已经解决。';}
  const undo=make('button','撤销新查询');undo.type='button';undo.hidden=true;undo.className='v2-undo';toolbar.append(undo);
  let savedQuery=null,undoTimer;
  function forgetUndo(){savedQuery=null;clearTimeout(undoTimer);undo.hidden=true;}
  reset.addEventListener('click',()=>{const messages=document.getElementById('aiMessages');if(!messages.children.length&&!document.getElementById('aiInput').value&&!Object.values(factInputs).some(i=>i.value)&&!originalMessage.value&&!checkAction.value&&!checkResult.value)return;
- savedQuery={sid:getSid(),nodes:[...messages.childNodes],history:chatHistory.slice(),triage:triagePath,numeric:lastNumericOptions,reply:window.__v2LastReply,input:document.getElementById('aiInput').value,fields:Object.values(factInputs).map(i=>i.value),action:checkAction.value,result:checkResult.value,original:originalMessage.value,continue:continuation.checked};clearTimeout(undoTimer);undo.hidden=false;undoTimer=setTimeout(forgetUndo,10000);},true);
- undo.onclick=()=>{if(!savedQuery)return;const s=savedQuery;localStorage.setItem('xhj_sid',s.sid);document.getElementById('aiMessages').replaceChildren(...s.nodes);chatHistory=s.history;triagePath=s.triage;lastNumericOptions=s.numeric;window.__v2LastReply=s.reply;document.getElementById('aiInput').value=s.input;Object.values(factInputs).forEach((i,n)=>i.value=s.fields[n]);checkAction.value=s.action;checkResult.value=s.result;originalMessage.value=s.original;continuation.checked=s.continue;forgetUndo();document.getElementById('aiInput').focus();};
+ savedQuery={sid:getSid(),nodes:[...messages.childNodes],history:state.history.slice(),triage:state.triage,numeric:state.numeric,reply:window.__v2LastReply,input:document.getElementById('aiInput').value,fields:Object.values(factInputs).map(i=>i.value),action:checkAction.value,result:checkResult.value,original:originalMessage.value,continue:continuation.checked};clearTimeout(undoTimer);undo.hidden=false;undoTimer=setTimeout(forgetUndo,10000);},true);
+ undo.onclick=()=>{if(!savedQuery)return;const s=savedQuery;ui.setSessionId(s.sid);document.getElementById('aiMessages').replaceChildren(...s.nodes);state.history=s.history;state.triage=s.triage;state.numeric=s.numeric;window.__v2LastReply=s.reply;document.getElementById('aiInput').value=s.input;Object.values(factInputs).forEach((i,n)=>i.value=s.fields[n]);checkAction.value=s.action;checkResult.value=s.result;originalMessage.value=s.original;continuation.checked=s.continue;forgetUndo();document.getElementById('aiInput').focus();};
  mode.addEventListener('change',forgetUndo);
  reset.addEventListener('click',()=>{for(const input of Object.values(factInputs))input.value='';checkAction.value='';checkResult.value='';originalMessage.value='';continuation.checked=false;feedback.textContent='';clearOcrImage();});
- window.fetch=(input,init)=>{
-  if(input==='/api/ai/chat'&&mode.value==='ordering')return fetchOriginal('/v2/ordering/chat',init);
-  if(input==='/api/ai/chat'&&mode.value!=='ordering'){const b=JSON.parse(init.body);b.facts=facts();b.originalMessage=originalMessage.value||undefined;b.checks=checkAction.value||checkResult.value?[{action:checkAction.value,result:checkResult.value}]:[];b.continueQuery=continuation.checked;return fetchOriginal(input,{...init,headers:{...init?.headers,'X-V2-Offline-Knowledge':mode.value},body:JSON.stringify(b)});}
-  return fetchOriginal(input,init);
- };
- const previous=window.addAssistantMessage;
- window.addAssistantMessage=data=>{
-  if(data.model!=='v2-offline-search'&&!data.error)return previous(data);
+ async function request(body){
+  const ordering=mode.value==='ordering';
+  if(!ordering)body={...body,facts:facts(),originalMessage:originalMessage.value||undefined,checks:checkAction.value||checkResult.value?[{action:checkAction.value,result:checkResult.value}]:[],continueQuery:continuation.checked};
+  return json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});
+ }
+ function render(data){
+  if(data.model!=='v2-offline-search'&&!data.error)return false;
   const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';bubble.append(make('p',data.reply||'请求未完成，请稍后重试。'));
   for(const r of data.results||[])bubble.append(card(r,data.kind==='cases'));
   if(data.rawEvidence?.length){bubble.append(make('h4','相关原始资料（不等于已核验案例）'));for(const r of data.rawEvidence)bubble.append(card(r));}
-  row.append(bubble);const messages=document.getElementById('aiMessages');messages.append(row);messages.scrollTop=messages.scrollHeight;window.__v2LastReply=data;
+  row.append(bubble);const messages=document.getElementById('aiMessages');messages.append(row);messages.scrollTop=messages.scrollHeight;window.__v2LastReply=data;return true;
  };
- // Keep legacy presentation, but do not let its option/intent handling own V2 search.
- window.sendMessage=async(value,display)=>{const input=document.getElementById('aiInput'),button=document.getElementById('aiSendBtn'),text=typeof value==='string'?value:input.value;
-  if(!text.trim()||button.disabled)return;feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return;}forgetUndo();const sessionId=getSid();input.value='';input.disabled=true;button.disabled=true;reset.disabled=true;mode.disabled=true;addUserMessage(display||text);addAssistantLoading(mode.value==='ordering'?'计算并校验方案…':'检索资料…');
-  try{const response=await window.fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,sessionId})}).then(async r=>{const data=await r.json();if(!r.ok||data.error)throw Error(typeof data.error==='string'?data.error:(data.reason||'请求失败（'+r.status+'）'));return data;});if(getSid()!==sessionId)return;removeLoading();window.addAssistantMessage(response);chatHistory.push({role:'user',content:text},{role:'assistant',content:response.reply||''});}
-  catch(error){removeLoading();input.value=text;window.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});}finally{input.disabled=false;button.disabled=false;reset.disabled=false;mode.disabled=false;input.focus();}};
- // V2 fixes the legacy imageId block-scope bug without editing the V1 frontend.
- window.sendImageMessage=async dataUrl=>{forgetUndo();ocrState={dataUrl,text:'',busy:true};reset.disabled=true;mode.disabled=true;document.getElementById('aiSendBtn').disabled=true;document.getElementById('aiInput').disabled=true;addUserMessage('',dataUrl);addAssistantLoading('本地识别图片文字…');
-  try{const r=await fetchOriginal('/api/ocr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:dataUrl})}).then(r=>r.json());window.__v2LastOCR=r;removeLoading();
-   if(!r.ok||!r.text){window.addAssistantMessage({model:'v2-offline-search',reply:r.message||'图片未识别到文字，请输入文字。'});return;}
-   if(r.text.length>240){originalMessage.value=r.text.slice(0,8000);conditions.hidden=false;conditions.open=true;window.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return;}
-   addAssistantLoading('检索资料…');const body={message:r.text,sessionId:getSid(),facts:facts(),images:[r.imageId]},response=await window.fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());removeLoading();window.addAssistantMessage(response);
-  }catch{removeLoading();window.addAssistantMessage({model:'v2-offline-search',reply:'本地图片识别未完成，可继续文字查询。'});}finally{ocrState={dataUrl:null,text:'',busy:false};reset.disabled=false;mode.disabled=false;document.getElementById('aiSendBtn').disabled=false;document.getElementById('aiInput').disabled=false;}};
  const moreButton=document.getElementById('quickMoreDocsBtn');
  function highlight(text,query){
   const fragment=document.createDocumentFragment(),value=String(text||''),terms=(query.match(/[A-Za-z0-9.+_-]+|[\u4e00-\u9fff]+/g)||[]).filter(Boolean).slice(0,12);
@@ -123,7 +111,7 @@
  const scopeStatus=make('p');scopeStatus.className='v2-scope-status';scopeStatus.setAttribute('role','status');scopeStatus.hidden=true;
  document.querySelector('.search-box').after(scopeStatus);
  let products=true,searchId=0,controller;
- function invalidate(){searchId++;controller?.abort();clearTimeout(searchTimer);window.invalidateQuickRequest?.();document.getElementById('searchResults').setAttribute('aria-busy','false');}
+ function invalidate(){searchId++;controller?.abort();ui.catalog.invalidate();document.getElementById('searchResults').setAttribute('aria-busy','false');}
  function updateScope(){
   document.getElementById('resourceSearchTitle').textContent=products?'产品速查':'全文搜索';
   document.getElementById('resourceSearchHint').textContent=products?'输入产品型号，查参数、规格书、说明书、软件、固件和操作视频。':'输入关键词，搜索已索引资料的文件名、目录和正文，查看原文及来源。';
@@ -133,11 +121,11 @@
   scopeStatus.textContent='全文搜索 · 已索引资料的文件名、目录与正文';
   document.querySelectorAll('#quickCats .qc-btn').forEach(b=>b.setAttribute('aria-selected',String(products&&b.classList.contains('active'))));
   document.getElementById('quickExamples').hidden=!products;
-  if(products){setActiveCat(activeCat);updateQuickExamples();}
+  if(products){ui.catalog.setActiveCat(ui.catalog.activeCat);ui.catalog.updateQuickExamples();}
   else searchInput.placeholder='输入文件名、目录名或正文关键词';
  }
- function returnToProducts(run=true){invalidate();products=true;updateScope();if(run)onPickCategory(activeCat);}
- document.getElementById('quickProductTitle').onclick=()=>{returnToProducts(false);onPickCategory('all');};
+ function returnToProducts(run=true){invalidate();products=true;updateScope();if(run)ui.catalog.onPickCategory(ui.catalog.activeCat);}
+ document.getElementById('quickProductTitle').onclick=()=>{returnToProducts(false);ui.catalog.onPickCategory('all');};
  moreButton.onclick=()=>{invalidate();products=false;updateScope();search();if(!searchInput.value.trim())searchInput.focus();};
  document.getElementById('quickCats').addEventListener('click',e=>{if(!e.target.closest('.qc-btn')||products)return;returnToProducts(false);},true);
  searchInput.addEventListener('input',e=>{if(products)return;e.stopImmediatePropagation();invalidate();},true);
@@ -156,4 +144,9 @@
  }
  document.getElementById('quickSearchBtn').addEventListener('click',e=>{if(products)return;e.preventDefault();e.stopImmediatePropagation();search();},true);
  searchInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&!products){e.preventDefault();e.stopImmediatePropagation();search();}},true);
-})();
+ return {request,render,legacy:false,mode,reset,setMode:modeChange,
+  validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return false;}return true;},
+  beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':'检索资料…',
+  acceptOcr(result){if(result.text.length<=240)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
+ };
+}});

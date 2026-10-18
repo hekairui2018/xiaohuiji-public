@@ -14,7 +14,7 @@ test('Frontend development serves its own edits, proxies existing APIs and never
  const base=await listen(backend),reserve=http.createServer();await listen(reserve);const port=reserve.address().port;await close(reserve);
  const front=createFrontendServer({backend:base,frontendRoot:temp,port});await listen(front,port);const url='http://127.0.0.1:'+port;
  try{
-  assert.match(await fetch(url+'/wiki').then(r=>r.text()),/isolated UI/);assert.match(await fetch(url+'/huiai').then(r=>r.text()),/offline\/client.js/);
+  assert.match(await fetch(url+'/wiki').then(r=>r.text()),/isolated UI/);assert.match(await fetch(url+'/huiai').then(r=>r.text()),/data-client="offline"/);
   assert.equal((await fetch(url+'/quick',{redirect:'manual'})).status,404);const root=await fetch(url+'/?cat=manual',{redirect:'manual'});assert.equal(root.status,302);assert.equal(root.headers.get('location'),'/wiki?cat=manual');
   assert.equal(await fetch(url+'/app.js').then(r=>r.text()),'first');fs.writeFileSync(path.join(temp,'app.js'),'edited');assert.equal(await fetch(url+'/app.js').then(r=>r.text()),'edited');
   const r=await fetch(url+'/api/search?q=synthetic',{headers:{Cookie:'private=secret',Authorization:'Bearer secret','X-Upload-Key':'secret'}}).then(r=>r.json());assert.equal(r.results[0].name,'synthetic');assert.equal(seen[0].headers.cookie,undefined);assert.equal(seen[0].headers.authorization,undefined);assert.equal(seen[0].headers['x-upload-key'],undefined);
@@ -26,4 +26,12 @@ test('Frontend development serves its own edits, proxies existing APIs and never
 test('Frontend proxy exposes only the existing read-only software QR image route',async()=>{
  const backend=http.createServer((req,res)=>{res.setHeader('Content-Type','image/png');res.end('synthetic-image');});const base=await listen(backend),reserve=http.createServer();await listen(reserve);const port=reserve.address().port;await close(reserve);const front=createFrontendServer({backend:base,port});const url=await listen(front,port);
  try{const image=await fetch(url+'/v2/software-access/screen-control.png');assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/png');assert.equal(await image.text(),'synthetic-image');assert.equal((await fetch(url+'/v2/software-access/screen-control.png',{method:'POST'})).status,404);assert.equal((await fetch(url+'/v2/software-access/unregistered.png')).status,404);}finally{await close(front);await close(backend);}
+});
+
+test('Static delivery selects an explicit mode, does not inject scripts or rewrite JavaScript',async()=>{
+ const {serveStatic}=require('../adapters/http/static-service.cjs');const root=path.resolve(__dirname,'../frontend');
+ for(const [options,mode]of [[{},'rules'],[{offlineKnowledge:true},'offline'],[{localKnowledge:true},'local']]){
+  const server=http.createServer((req,res)=>{if(!serveStatic(req,res,root,options)){res.writeHead(404);res.end();}});const url=await listen(server);
+  try{const page=await fetch(url+'/huiai').then(r=>r.text());assert.match(page,new RegExp('data-client="'+mode+'"'));assert.equal((page.match(/src="site-compat.js/g)||[]).length,1);assert.ok(!page.includes('/v2/offline/client.js'));assert.ok(!page.includes('/v2/local-knowledge/client.js'));assert.equal(await fetch(url+'/app.js').then(r=>r.text()),fs.readFileSync(path.join(root,'app.js'),'utf8'));}finally{await close(server);}
+ }
 });
