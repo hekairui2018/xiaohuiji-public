@@ -5,7 +5,7 @@ function model(v){const s=text(v).toUpperCase().replace(/^HD[-_ ]/,'');return /^
 const split=v=>text(v).split(/[;；,，\n]/).map(model).filter(Boolean);
 function snapshot(input){
  const out={};
- for(const k of ['sender_model','upgrade_run_id','device_app_version','fpga_version','device_code','devKey','product_models','recv_models'])out[k]=text(input[k]).slice(0,k==='recv_models'||k==='product_models'?500:160);
+ for(const k of ['sender_model','upgrade_run_id','device_app_version','fpga_version','device_code','devKey','product_models','recv_models','chips','site_env'])out[k]=text(input[k]).slice(0,k==='site_env'?8000:['recv_models','product_models','chips'].includes(k)?500:160);
  if(input.receiver_inventory!==undefined){
   if(!Array.isArray(input.receiver_inventory)||input.receiver_inventory.length>256)throw Error('invalid-receiver-inventory');
   out.receiver_inventory=input.receiver_inventory.map(x=>{if(!x||typeof x!=='object'||Array.isArray(x))throw Error('invalid-receiver-inventory-entry');return {model:text(x.model),count:x.count};});
@@ -33,7 +33,14 @@ function buildDisplay(input){
  for(const r of rec.receiver_inventory||[]){const m=model(r.model);if(!m){warnings.push('接收卡型号缺失或不合法');continue;}const count=Number.isSafeInteger(r.count)&&r.count>0?r.count:null;
   if(inventory.has(m)){inventory.set(m,null);warnings.push(m+'库存重复，数量未合并');}else inventory.set(m,count);
  }
- for(const m of split(rec.recv_models))if(!inventory.has(m))inventory.set(m,null);
+ const structuredModels=new Set(inventory.keys());
+ for(const value of rec.recv_models.split(/[;；,，\n＋+]/)){
+  const counted=/^\s*((?:HD[-_ ]?)?[A-Z]{1,5}\d{1,5}[A-Z0-9]{0,5}?)\s*[×x*]\s*(\d+)\s*$/i.exec(value),m=model(counted?counted[1]:value);
+  if(!m)continue;
+  const n=counted?Number(counted[2]):null,count=Number.isSafeInteger(n)&&n>0?n:null;
+  if(!inventory.has(m))inventory.set(m,count);
+  else if(count!==null&&inventory.get(m)!==count){if(!structuredModels.has(m))inventory.set(m,null);warnings.push(m+'型号汇总数量冲突，未擅自合并');}
+ }
  const lines=['发送端应用：'+(rec.device_app_version||'未采集'),'发送端FPGA：'+(rec.fpga_version||'未采集')];
  const seen=new Map();
  for(const r of rec.receiver_upgrades||[]){
@@ -59,18 +66,21 @@ function buildDisplay(input){
  }
  for(const m of inventory.keys())if(!rec.receiver_upgrades.some(r=>model(r.model)===m))lines.push('接收卡'+m+'：原版本未采集 → 升级后待确认');
  if(!rec.receiver_upgrades?.length&&inventory.size)warnings.push('未提供逐卡版本记录，未使用汇总版本或目标固件推测前后关系');
- return {productModel:[sender,...[...inventory].map(([m,c])=>m+(c===null?'':'×'+c))].filter(Boolean).join('＋'),versionInfo:lines.join('\n'),warnings:[...new Set(warnings)],snapshot:rec};
+ const siteEnvironment=[rec.site_env,rec.chips?'驱动芯片：'+rec.chips:''].filter(Boolean).join('\n');
+ return {productModel:[sender,...[...inventory].map(([m,c])=>m+(c===null?'':'×'+c))].filter(Boolean).join('＋'),versionInfo:lines.join('\n'),siteEnvironment,warnings:[...new Set(warnings)],snapshot:rec};
 }
 const cell=v=>Array.isArray(v)?v.map(x=>typeof x==='string'?x:x?.text||'').join(''):typeof v==='string'?v:'';
 // Compare each current cell with its persisted last automatic value; a manual change/clear
 // permanently protects that field. Legacy values without a baseline are never assumed automatic.
 function displayPatch(display,{existing=false,currentFields={}}={}){
- const fields={'自动建议-产品型号':display.productModel,'自动建议-版本信息':display.versionInfo,'自动建议-缺失或冲突':display.warnings.join('\n')};
+ const environmentColumn='现场环境（软/固件版本、源端设备、线材）';
+ const fields={'自动建议-产品型号':display.productModel,'自动建议-版本信息':display.versionInfo,'自动建议-现场环境':display.siteEnvironment||'','自动建议-缺失或冲突':display.warnings.join('\n')};
  let previous={};try{previous=JSON.parse(cell(currentFields['自动写入基线']));}catch{}
  const state={schemaVersion:1,fields:{}};
- for(const [column,proposed]of [['产品型号',display.productModel],['版本信息',display.versionInfo]]){
+ for(const [column,proposed]of [['产品型号',display.productModel],['版本信息',display.versionInfo],[environmentColumn,display.siteEnvironment]]){
   const prior=previous?.fields?.[column];
-  const manual=existing&&(!prior||prior.manual===true||typeof prior.value!=='string'||cell(currentFields[column])!==prior.value);
+  const bootstrapEmptyEnvironment=column===environmentColumn&&!prior&&!cell(currentFields[column]);
+  const manual=existing&&!bootstrapEmptyEnvironment&&(!prior||prior.manual===true||typeof prior.value!=='string'||cell(currentFields[column])!==prior.value);
   state.fields[column]={manual,value:manual?(prior?.value??null):(proposed||cell(currentFields[column]))};
   if(!manual&&proposed)fields[column]=proposed;
  }

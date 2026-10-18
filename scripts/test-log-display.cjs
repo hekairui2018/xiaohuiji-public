@@ -3,6 +3,15 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {snapshot,mergeSnapshot,buildDisplay,displayPatch}=require('../backend/log-display.cjs');
 const base={sender_model:'C16L',device_code:'C16L-DEVICE-001',upgrade_run_id:'run-1',device_app_version:'7.11.50.0',fpga_version:'16.18.0.0',receiver_inventory:[{model:'R712',count:2}]};
 const card=(extra={})=>({run_id:'run-1',device_id:'C16L-DEVICE-001',port:0,card_id:'1',model:'R712',before_version:'25.13.01.30',after_version:'25.26.65.30',after_confirmed:true,status:'succeeded',...extra});
+test('旧独立接收型号字段明确带数量时展示数量，汇总版本不能代替逐卡回读',()=>{
+ const d=buildDisplay({product_models:'C16L',recv_models:'R712×1;R716×2',recv_versions:'25.13.99.30→25.13.99.30',receiver_inventory:[],receiver_upgrades:[],chips:'LS9931;LS9931/LS9931CS',site_env:'网口1'});
+ assert.equal(d.productModel,'C16L＋R712×1＋R716×2');assert.match(d.siteEnvironment,/网口1\n驱动芯片：LS9931/);assert.match(d.versionInfo,/接收卡R712：原版本未采集 → 升级后待确认/);assert.ok(!d.versionInfo.includes('已匹配'));
+});
+test('现场环境保留人工值与人工清空，空旧字段可首次自动补芯片',()=>{
+ const column='现场环境（软/固件版本、源端设备、线材）',d=buildDisplay({...base,chips:'LS9931',site_env:'网口1'}),first=displayPatch(d,{existing:true,currentFields:{}});assert.equal(first[column],'网口1\n驱动芯片：LS9931');
+ for(const manual of ['人工现场说明','']){const patch=displayPatch(buildDisplay({...base,chips:'OTHER'}),{existing:true,currentFields:{...first,[column]:manual}});assert.equal(Object.hasOwn(patch,column),false);assert.match(patch['自动建议-现场环境'],/OTHER/);}
+ assert.equal(Object.hasOwn(displayPatch(d,{existing:true,currentFields:{[column]:'原现场'}}),column),false);
+});
 test('单型号：只展示明确型号与数量，版本来自对应实读字段',()=>{const d=buildDisplay({...base,receiver_upgrades:[card()],app_version:'assistant',hdset_version:'software'});assert.equal(d.productModel,'C16L＋R712×2');assert.equal(d.versionInfo,'发送端应用：7.11.50.0\n发送端FPGA：16.18.0.0\n接收卡R712：25.13.01.30 → 25.26.65.30');assert.ok(!d.productModel.includes('DEVICE'));});
 test('多型号：数量分开，不能串接不同型号的前后版本',()=>{const d=buildDisplay({...base,receiver_inventory:[...base.receiver_inventory,{model:'R716',count:1}],receiver_upgrades:[card(),card({card_id:'2',model:'R716',before_version:'3',after_version:'4'})]});assert.equal(d.productModel,'C16L＋R712×2＋R716×1');assert.match(d.versionInfo,/接收卡R716：3 → 4/);});
 test('同型号不同版本、网口、卡号保持各自记录',()=>{const d=buildDisplay({...base,receiver_upgrades:[card(),card({port:1,card_id:'2',before_version:'1.2',after_version:'3.4'})]});assert.match(d.versionInfo,/25.13.01.30 → 25.26.65.30/);assert.match(d.versionInfo,/1.2 → 3.4/);assert.ok(!d.versionInfo.includes('25.13.01.30 → 3.4'));});

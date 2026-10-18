@@ -63,7 +63,7 @@ function loadEnv() {
 
 const ENV = loadEnv();
 const siteDisplayEnabled = ENV.FEISHU_SITE_DISPLAY === '1';
-const SITE_DISPLAY_FIELDS = ['产品型号', '版本信息', '自动建议-产品型号', '自动建议-版本信息', '自动建议-缺失或冲突', '结构化日志详情', '自动写入基线'].map(name => ({name, type: 1}));
+const SITE_DISPLAY_FIELDS = ['产品型号', '版本信息', '现场环境（软/固件版本、源端设备、线材）', '自动建议-产品型号', '自动建议-版本信息', '自动建议-现场环境', '自动建议-缺失或冲突', '结构化日志详情', '自动写入基线'].map(name => ({name, type: 1}));
 const CFG = {
   appId: ENV.FEISHU_APP_ID || '',
   appSecret: ENV.FEISHU_APP_SECRET || '',
@@ -376,7 +376,7 @@ async function syncHuiduRecordNow(rec) {
       const recordId = await findRecordId(sendModel(rec), rec.log_date, rec);
       if (siteDisplayEnabled) {
         const { buildDisplay, displayPatch, recordDetails } = require('./log-display.cjs');
-        const display = buildDisplay(rec.site_display_snapshot || rec);
+        const display = buildDisplay({...rec, ...(rec.site_display_snapshot || {})});
         const current = recordId ? await api('GET', base + '/' + recordId) : null;
         Object.assign(built.fields, displayPatch(display, {existing: !!recordId,currentFields: current?.record?.fields || {}}));
         const detail = JSON.stringify(recordDetails(rec));

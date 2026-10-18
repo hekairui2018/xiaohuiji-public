@@ -18,7 +18,7 @@ test('Offline pages and body search work without model tools; passage locations 
  let calls=0;const upstream=http.createServer((req,res)=>{calls++;assert.ok(!req.url.includes('/chat'));res.setHeader('Content-Type','application/json');res.end(JSON.stringify({results:[{name:'Z100 V1.pdf',blockId:1,sha256:'a'.repeat(64),ordinal:2,text:'说明正文',locator:{page:1,cells:['internal author']},locations:[{id:7,path:'G:\\private\\file.pdf'}]}]}));});
  const source=await listen(upstream),s=createServer(undefined,{offlineKnowledge:createOfflineKnowledge({knowledge:fakeKnowledge,resourceBase:source})}),base=await listen(s);
  try{
-  const html=await fetch(base+'/huiai').then(r=>r.text());assert.ok(html.includes('/v2/offline/client.js'));assert.ok(!html.includes('/v2/local-knowledge/client.js'));
+  const html=await fetch(base+'/huiai').then(r=>r.text());assert.ok(html.includes('offline-client.js'));assert.ok(html.includes('data-client="offline"'));assert.ok(!html.includes('/v2/local-knowledge/client.js'));
   const data=await fetch(base+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','X-V2-Offline-Knowledge':'text'},body:JSON.stringify({message:'Z100'})}).then(r=>r.json());
   assert.equal(data.model,'v2-offline-search');assert.equal(data.results[0].download,'/v2/offline/preview?id=7');assert.ok(!JSON.stringify(data).includes('G:'));assert.ok(!JSON.stringify(data).includes('internal author'));
   assert.equal((await fetch(base+'/v2/offline/read?block=../private')).status,400);
