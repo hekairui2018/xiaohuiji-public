@@ -4,15 +4,15 @@ const {snapshot,mergeSnapshot,buildDisplay,displayPatch}=require('../backend/log
 const base={sender_model:'C16L',device_code:'C16L-DEVICE-001',upgrade_run_id:'run-1',device_app_version:'7.11.50.0',fpga_version:'16.18.0.0',receiver_inventory:[{model:'R712',count:2}]};
 const card=(extra={})=>({run_id:'run-1',device_id:'C16L-DEVICE-001',port:0,card_id:'1',model:'R712',before_version:'25.13.01.30',after_version:'25.26.65.30',after_confirmed:true,status:'succeeded',...extra});
 test('HDSet和HDPlayer独立版本进入现场环境，不能进入发送端版本或代填缺失值',()=>{
- const d=buildDisplay({chips:'LS9931',hdset_version:'V4.0.38.11',hdplayer_version:'V7.11.51.0'});assert.equal(d.siteEnvironment,'驱动芯片：LS9931\nHDSet：V4.0.38.11\nHDPlayer：V7.11.51.0');assert.equal(d.versionInfo,'发送端应用：未采集\n发送端FPGA：未采集');assert.equal(buildDisplay({app_version:'assistant'}).siteEnvironment,'');
+ const d=buildDisplay({selected_chip:'LS9931',chips:'LS9931/LS9931CS',hdset_version:'V4.0.38.11',hdplayer_version:'V7.11.51.0'});assert.equal(d.siteEnvironment,'驱动芯片（手动选择）：LS9931\nHDSet：V4.0.38.11\nHDPlayer：V7.11.51.0');assert.equal(d.versionInfo,'发送端应用：未采集\n发送端FPGA：未采集');assert.equal(buildDisplay({app_version:'assistant'}).siteEnvironment,'');
 });
 test('旧独立接收型号字段明确带数量时展示数量，汇总版本不能代替逐卡回读',()=>{
- const d=buildDisplay({product_models:'C16L',recv_models:'R712×1;R716×2',recv_versions:'25.13.99.30→25.13.99.30',receiver_inventory:[],receiver_upgrades:[],chips:'LS9931;LS9931/LS9931CS',site_env:'网口1'});
- assert.equal(d.productModel,'C16L＋R712×1＋R716×2');assert.match(d.siteEnvironment,/网口1\n驱动芯片：LS9931/);assert.match(d.versionInfo,/接收卡R712：原版本未采集 → 升级后待确认/);assert.ok(!d.versionInfo.includes('已匹配'));
+ const d=buildDisplay({product_models:'C16L',recv_models:'R712×1;R716×2',recv_versions:'25.13.99.30→25.13.99.30',receiver_inventory:[],receiver_upgrades:[],selected_chip:'LS9931',chips:'LS9931;LS9931/LS9931CS',site_env:'网口1'});
+ assert.equal(d.productModel,'C16L＋R712×1＋R716×2');assert.match(d.siteEnvironment,/网口1\n驱动芯片（手动选择）：LS9931/);assert.match(d.versionInfo,/接收卡R712：原版本未采集 → 升级后待确认/);assert.ok(!d.versionInfo.includes('已匹配'));
 });
 test('现场环境保留人工值与人工清空，空旧字段可首次自动补芯片',()=>{
- const column='现场环境（软/固件版本、源端设备、线材）',d=buildDisplay({...base,chips:'LS9931',site_env:'网口1'}),first=displayPatch(d,{existing:true,currentFields:{}});assert.equal(first[column],'网口1\n驱动芯片：LS9931');
- for(const manual of ['人工现场说明','']){const patch=displayPatch(buildDisplay({...base,chips:'OTHER'}),{existing:true,currentFields:{...first,[column]:manual}});assert.equal(Object.hasOwn(patch,column),false);assert.match(patch['自动建议-现场环境'],/OTHER/);}
+ const column='现场环境（软/固件版本、源端设备、线材）',d=buildDisplay({...base,selected_chip:'LS9931',site_env:'网口1'}),first=displayPatch(d,{existing:true,currentFields:{}});assert.equal(first[column],'网口1\n驱动芯片（手动选择）：LS9931');
+ for(const manual of ['人工现场说明','']){const patch=displayPatch(buildDisplay({...base,selected_chip:'OTHER'}),{existing:true,currentFields:{...first,[column]:manual}});assert.equal(Object.hasOwn(patch,column),false);assert.match(patch['自动建议-现场环境'],/OTHER/);}
  assert.equal(Object.hasOwn(displayPatch(d,{existing:true,currentFields:{[column]:'原现场'}}),column),false);
 });
 test('单型号：只展示明确型号与数量，版本来自对应实读字段',()=>{const d=buildDisplay({...base,receiver_upgrades:[card()],app_version:'assistant',hdset_version:'software'});assert.equal(d.productModel,'C16L＋R712×2');assert.equal(d.versionInfo,'发送端应用：7.11.50.0\n发送端FPGA：16.18.0.0\n接收卡R712：25.13.01.30 → 25.26.65.30');assert.ok(!d.productModel.includes('DEVICE'));});
@@ -28,3 +28,5 @@ test('人工改写、人工清空及首次未知旧值均不会被后续回传�
 test('未人工修改的字段持续自动更新，E/F逐列保护并持久识别人工清空',()=>{const first=displayPatch(buildDisplay(base));const next=displayPatch(buildDisplay({...base,device_app_version:'8'}),{existing:true,currentFields:first});assert.match(next['版本信息'],/发送端应用：8/);const edited={...first,...next,'产品型号':''};const after=displayPatch(buildDisplay({...base,device_app_version:'9'}),{existing:true,currentFields:edited});assert.equal(Object.hasOwn(after,'产品型号'),false);assert.match(after['版本信息'],/发送端应用：9/);assert.equal(JSON.parse(after['自动写入基线']).fields['产品型号'].manual,true);const again=displayPatch(buildDisplay(base),{existing:true,currentFields:{...edited,...after}});assert.equal(Object.hasOwn(again,'产品型号'),false);});
 test('同一内容晚到的结构化版本不应被接收端判为完全重复；错误结构拒收',()=>{assert.notDeepEqual(snapshot(base),snapshot({...base,receiver_upgrades:[card()]}));assert.throws(()=>snapshot({receiver_upgrades:'text'}));});
 test('晚到缺字段只保留同一明确运行及设备的实读值，跨运行保持未知',()=>{const previous=snapshot(base);const same=mergeSnapshot({upgrade_run_id:'run-1',device_code:base.device_code},previous);assert.equal(same.device_app_version,'7.11.50.0');assert.equal(buildDisplay(same).productModel,'C16L＋R712×2');const other=mergeSnapshot({upgrade_run_id:'run-2',device_code:base.device_code},previous);assert.equal(other.device_app_version,'');assert.match(buildDisplay(other).versionInfo,/发送端应用：未采集/);});
+
+test('没有独立手选字段时不能从混合芯片值取第一个，也不能把读取值当手选',()=>{const d=buildDisplay({chips:'LS9931;LS9931/LS9931CS'});assert.equal(d.siteEnvironment,'驱动芯片（手动选择）：未上报');assert.ok(!d.siteEnvironment.includes('LS9931'));});
