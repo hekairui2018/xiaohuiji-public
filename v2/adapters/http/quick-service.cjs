@@ -8,6 +8,7 @@ const {resourceView,paginateDocs}=require('../../domain/knowledge/resource-view.
 const {newestFirst,newestIn}=require('../../domain/knowledge/document-dates.cjs');
 const {productCategories}=require('../../domain/knowledge/flat-resource-groups.cjs');
 const {augmentProducts}=require('../../domain/knowledge/local-resource-catalog.cjs');
+const {productCardFeatures}=require('../../domain/knowledge/product-card-features.cjs');
 const unavailableMessages={'original-not-registered':'对应原件未找到，当前不可下载','same-name-content-conflict':'同名文件存在不同内容，尚未确认对应原件','registered-content-hash-missing':'登记文件缺少内容哈希，暂不能确认原件','registered-content-does-not-match-source':'登记文件与已有来源哈希不一致','registered-original-unavailable-or-changed':'登记原件已不可访问或发生变化，需重新核对','resource-service-unavailable':'资料服务暂不可用，不能确认原件链接','invalid-document-identity':'文件身份信息不完整或无效','resource-resolution-unavailable':'无法确认此文件对应的原件'};
 function documentLabel(name){
  let label=String(name||'').replace(/\.(pdf|docx?|pptx?|xlsx?|txt|md|csv)$/i,'').replace(/_/g,' ').replace(/\s+/g,' ').trim();
@@ -22,7 +23,7 @@ function productView(p,{local=false}={}){
  const documents=selectQuickDocuments(p.documents||[],{local}).selected;
  const groups=['spec','manual','other','pending'].map(kind=>({key:kind,label:labels[kind],items:documents.filter(d=>d.kind===kind).map(link).sort(newestFirst)})).filter(g=>g.items.length);
  const fw=(p.firmware||[]).filter(f=>['uploaded','local-indexed'].includes(f.status)&&f.publicUrl);if(fw.length)groups.push({key:'firmware',label:'固件',items:fw.map(link)});
- return {name:p.displayName||p.model,deviceName:selectedDeviceName(documents),modelId:p.modelId||null,aliases:p.aliases||[],features:{series:p.parameters?.productSeries||'',load:p.parameters?.load||'',resolution:p.parameters?.resolution||'',outputs:p.parameters?.interfaces||''},specGroups:groups.filter(g=>g.key!=='firmware'),firmwareGroup:groups.find(g=>g.key==='firmware')||null,docGroups:groups,specFiles:documents.map(d=>d.name),specLinks:documents.map(d=>d.url)};
+ return {name:p.displayName||p.model,deviceName:selectedDeviceName(documents),modelId:p.modelId||null,aliases:p.aliases||[],features:productCardFeatures(p),specGroups:groups.filter(g=>g.key!=='firmware'),firmwareGroup:groups.find(g=>g.key==='firmware')||null,docGroups:groups,specFiles:documents.map(d=>d.name),specLinks:documents.map(d=>d.url)};
 }
 function createQuickService(app,{resolveDocuments,localCatalog}={}){
  const assets=app.quickResources();

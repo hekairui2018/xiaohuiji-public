@@ -12,8 +12,9 @@ function describeDocument(document){
  const scope=JSON.stringify({models:meta.coverModels||[],conditions:meta.scopeEvidence||[],nameConditions:nameConditions.map(x=>x.toUpperCase()),hardware:document.hardwareVersion||null,applicability:document.applicability||null});
  const title=meta.title?.replace(/V\d+(?:\.\d+)+/ig,'').trim();
  const familyStem=meta.familyId&&meta.classificationStatus==='manual-review'?'reviewed-family:'+meta.familyId:version&&version.index!==-1?stem.replace(version[0],'{version}'):title&&meta.coverModels?.length?meta.coverModels.join('|')+'|'+title:stem;
+ const familyTitle=version?familyStem.replace(/(?<![A-Za-z0-9])20\d{2}[-_.]?[01]\d[-_.]?[0-3]\d(?!\d)/g,''):familyStem;
  return {version:version?'V'+version[1]:null,numbers:version?version[1].split('.').map(Number):null,
-  family:familyStem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/\s*&\s*/g,' ').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase()+'|'+(/[\u4e00-\u9fff]/.test(stem)?'zh':'en')+'|'+scope+(isSignedDocument(document)?'|signed':'')+(document.presentationBasis==='local-operation-guide-in-other'?'|operation-guide':''),
+  family:familyTitle.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/\s*&\s*/g,' ').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase()+'|'+(/[\u4e00-\u9fff]/.test(stem)?'zh':'en')+'|'+scope+(isSignedDocument(document)?'|signed':'')+(document.presentationBasis==='local-operation-guide-in-other'?'|operation-guide':''),
   versionBasis:conflict?'filename-cover-version-conflict':original?'original-cover-version':named?'explicit-filename-version':'not-established',
   formatFamily:stem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase(),
   language:/[\u4e00-\u9fff]/.test(stem)?'zh':'unspecified-or-en',format:/\.([a-z0-9]+)$/i.exec(name)?.[1].toLowerCase()||null};

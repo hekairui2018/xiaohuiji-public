@@ -7,7 +7,7 @@ test('Candidate A4L isolates A6L text without editing the original record',async
  const original=knowledge.findProducts('A4L')[0];assert.match(original.parameters.load,/A6L/);
  const projected=app.quickLookup({modelId:'A4L'}).records[0];assert.doesNotMatch(JSON.stringify(projected.claims),/A6L/);assert.doesNotMatch(projected.parameters.load,/A6L/);assert.ok(projected.withheldClaims.length);
  assert.equal(knowledge.findProducts('A4L')[0].parameters.load,original.parameters.load);
- const reply=formatReply(await app.dialogue('A4L参数'));assert.doesNotMatch(reply,/A6L/);assert.match(reply,/请确认规格书版次/);
+ const reply=formatReply(await app.dialogue('A4L参数'));assert.doesNotMatch(reply,/A6L/);assert.match(reply,/资料版次：V1.3/);assert.equal(projected.parameters.resolution,'16384 / 8192');
 });
 test('Document version selects literal values and source; unsupported version cannot fall back to a default',async()=>{
  for(const [version,height]of [['V1.0',4096],['V1.3',8192]]){

@@ -627,4 +627,5 @@ function buildProductDetail(productName) {
   return { detail, adv, points: allHits.map((h) => h.label), scene };
 }
 
-module.exports = { buildProductFeatures, buildProductDetail, HIGHLIGHT_RULES, buildHighlightPool, inspectContext };
+module.exports = { buildProductFeatures, buildProductDetail, HIGHLIGHT_RULES, buildHighlightPool, inspectContext,
+  displayText: { fieldSentences, stripName, cleanSeries } };

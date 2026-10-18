@@ -1408,10 +1408,13 @@ function renderSearchResults(results, query, data) {
       const featRows = [];
       if (f.series) featRows.push(["类型", f.series]);
       if (f.color) featRows.push(["系列", f.color]);
+      if (f.parameterVersion) featRows.push(["参数版本", f.parameterVersion]);
       if (f.load) featRows.push(["带载", f.load]);
-      if (f.resolution) featRows.push(["分辨率", f.resolution]);
+      if (f.resolution) featRows.push([f.resolutionLabel || "分辨率", f.resolution]);
       if (f.inputs) featRows.push(["输入接口", f.inputs]);
       if (f.outputs) featRows.push(["输出接口", f.outputs]);
+      if (f.interfaces) featRows.push(["其他接口", f.interfaces]);
+      if (f.notice) featRows.push(["待确认", f.notice]);
       if (featRows.length) {
         html += `<div class="search-item-params-grid">`;
         featRows.forEach(([label, value]) => {

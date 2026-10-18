@@ -136,12 +136,16 @@ body[data-view="ai"] .ai-messages { height: 640px; }
 }
 .param-label {
   flex-shrink: 0;
-  width: 52px;
+  width: 5em;
+  padding-right: 8px;
   color: var(--text-muted);
   font-weight: 600;
 }
 .param-value {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
   color: var(--accent);
 }
 .search-item-meta { font-size: 13px; color: var(--accent); margin-bottom: 2px; }

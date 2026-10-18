@@ -408,7 +408,7 @@ def index_documents(work, limit=0, contains='', timeout=60, retry=False):
     db.close();return dict(results)
 
 
-def query(work, text, mode='all', model=None, limit=10, version=None, authorized_keys=None):
+def query(work, text, mode='all', model=None, limit=10, version=None, authorized_keys=None, include_history=False):
     started=time.perf_counter();db=connect(work,True);limit=max(1,min(int(limit),50));terms=list(dict.fromkeys(fts_tokens(text).split()))
     requested={normalize_model(model)} if model else model_tokens(text)
     # Long firmware identifiers are not treated as known product aliases.
@@ -421,6 +421,11 @@ def query(work, text, mode='all', model=None, limit=10, version=None, authorized
     if not match and not requested:db.close();return {'query':text,'results':[],'elapsedMs':0}
     conditions=["l.state='present'", "l.kind!='sensitive-metadata-only'"]
     args=[]
+    from current_documents import excluded_locations
+    excluded = frozenset() if include_history or version or re.search(r'\bV\d+(?:\.\d+)+\b', text, re.I) else excluded_locations(db, work)
+    if excluded:
+        # Internal integer identities, applied BEFORE FTS/file candidate limits.
+        conditions.append('l.id NOT IN ('+','.join(str(int(i)) for i in sorted(excluded))+')')
     # Apply caller authorization BEFORE either candidate limit. Post-filtering a
     # global Top N can hide permitted evidence behind unrelated/private hits.
     # None preserves the ordinary standalone catalogue search unchanged.
@@ -469,6 +474,7 @@ def query(work, text, mode='all', model=None, limit=10, version=None, authorized
         if key in seen:continue
         seen.add(key)
         locations=db.execute('SELECT id,path,name,resource_id,version_id,mtime_ns,cloud_id,cloud_url FROM locations WHERE '+('sha256=?' if hit.get('sha256') else 'id=?')+" AND state='present'",(hit.get('sha256') or hit.get('locationId'),)).fetchall()
+        locations=[l for l in locations if l['id'] not in excluded]
         if requested:
             locations=[l for l in locations if db.execute('SELECT 1 FROM models WHERE location_id=? AND model IN ('+','.join('?' for _ in requested)+')',[l['id']]+sorted(requested)).fetchone()]
         if not locations:continue

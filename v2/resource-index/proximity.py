@@ -135,7 +135,7 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
     queries += [' '.join(g[:2]) for g in groups[:4]]
     for model in requested:
         for q in queries:
-            for row in engine.query(work, q, 'text', model, 24, authorized_keys=authorized)['results']:
+            for row in engine.query(work, q, 'text', model, 24, authorized_keys=authorized, include_history=bool(documents or version))['results']:
                 candidates.setdefault(row['blockId'], row)
             if len(candidates) >= 120:
                 break

@@ -1,6 +1,7 @@
 'use strict';
 const {modelId}=require('../identity/model-id.cjs');
 const {documentBelongs,mentionsModel}=require('../identity/document-identity.cjs');
+const {selectDocumentVersions}=require('./document-versions.cjs');
 const cache=new WeakMap(),identityCache=new WeakMap();
 function sourceRows(knowledge){if(!cache.has(knowledge))cache.set(knowledge,knowledge.evidenceDocuments?.()||[]);return cache.get(knowledge);}
 function consumeProduct(product,knowledge,{documentVersion}={}){
@@ -11,7 +12,11 @@ function consumeProduct(product,knowledge,{documentVersion}={}){
  p.withheldClaims=(p.claims||[]).filter(c=>foreign(c.text)).map(c=>({claimId:c.claimId,reason:'foreign-model-without-owner-identity',sourceReference:c.sourceReference}));
  p.claims=(p.claims||[]).filter(c=>!foreign(c.text));
  for(const [field,value] of Object.entries(p.parameters||{}))if(typeof value==='string')p.parameters[field]=value.split('?').filter(s=>!foreign(s)).join('?');
- const rows=sourceRows(knowledge).filter(({document:d})=>d.sourceType==='official'&&d.verificationStatus==='verified'&&/规格书|Specification/i.test(d.name)&&documentBelongs(d.name,p.modelId)&&mentionsModel(d.pages[0]?.text,p.modelId));
+ const allRows=sourceRows(knowledge).filter(({document:d})=>d.sourceType==='official'&&d.verificationStatus==='verified'&&/规格书|Specification/i.test(d.name)&&documentBelongs(d.name,p.modelId)&&mentionsModel(d.pages[0]?.text,p.modelId));
+ // Default product facts follow the latest edition within each explicit family.
+ // An explicit historical-version request still reads that exact original.
+ const current=new Set(selectDocumentVersions(allRows.map(r=>r.document)).selected.map(d=>d.sha256));
+ const rows=documentVersion?allRows:allRows.filter(r=>current.has(r.document.sha256));
  const bindings=[];
  for(const {document:d,source} of rows){const version=/\bV\d+(?:\.\d+)+/i.exec(d.name)?.[0].toUpperCase();if(!version||!d.pages[0].text.replace(/\s+/g,'').toUpperCase().includes(version))continue;
   for(const page of d.pages){const text=page.text.replace(/\s+/g,' ');const excerpt=/最大控制范围[^；。]{1,250}垂直最大支持\s*[\d,]+\s*像素[；。]?/.exec(text)?.[0]||/The maximum control range[^.]{1,300}maximum vertical support is\s*[\d,]+\s*pixels/i.exec(text)?.[0];if(!excerpt)continue;
@@ -30,7 +35,7 @@ function consumeProduct(product,knowledge,{documentVersion}={}){
   p.parameters.load='';p.parameters.resolution='';p.claims=p.claims.filter(c=>c.field!=='load'&&!/宽\/高|maximum control range|垂直最大/i.test(c.text));
   if(documentVersion){p.parameters={};p.claims=[];}
  }else if(selected.length){
-  p.parameterStatus='document-scoped';p.selectedDocumentVersion=documentVersion||null;
+  p.parameterStatus='document-scoped';p.selectedDocumentVersion=documentVersion||([...new Set(selected.map(b=>b.version))].length===1?selected[0].version:null);
   if(documentVersion){p.parameters={};p.claims=p.claims.filter(c=>(c.sourceReferences||[c.sourceReference]).some(r=>r?.documentVersion===documentVersion&&r.sourceType==='official'&&r.verificationStatus==='verified'));}
   else p.claims=p.claims.filter(c=>!['load','resolution'].includes(c.field));
   for(const b of selected){p.claims.push({claimId:'document-load-'+b.sourceReference.originalSha256+'-'+b.sourceReference.page,field:'load',text:b.text,sourceType:'official',verificationStatus:'verified',sourceReference:b.sourceReference,sourceReferences:[b.sourceReference]});}
