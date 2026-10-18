@@ -194,16 +194,20 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536)return send(413,{error:'body-too-large'});chunks.push(chunk);}
     let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
     const requestedMode=input.mode||req.headers['x-v2-mode']||'quick';if(!['quick','expert'].includes(requestedMode))return send(400,{error:'invalid-mode'});
-    if(typeof input.message!=='string'||!input.message.trim()||input.message.length>240)return send(400,{error:'invalid-query',reply:'请输入240字以内的型号、故障现象或检索词。'});
+    if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
     if(requestedMode==='expert'){
+     state=sessions.expertState(state.id);
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
      const route=answers.expertClassify(input.message,state),readableBlocks=new Map();
+     const expertEvidence=require('./expert-evidence.cjs').createExpertEvidence({request,searchCases,caseMap,clean,location,defaultModels:route.models||[]});
      const execute=async(name,args)=>{
       if(name==='read_document'){
+       const context=await expertEvidence.read(args);if(context)return context;
        if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');
        const parent=readableBlocks.get(args.blockId),raw=await request('/read?block='+args.blockId);for(const b of raw.blocks||[])readableBlocks.set(b.id,parent);return {evidence:(raw.blocks||[]).map(b=>({evidenceId:'block-'+b.id,blockId:b.id,name:parent.name,download:parent.download,readUrl:'/v2/offline/read?block='+b.id,text:clean(b.text),locator:location(b.locator)}))};
       }
+      if(['cases','text','faq','firmware'].includes(args.kind))return expertEvidence.search(args);
       if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases','products','resources'].includes(args.kind))throw Error('expert-invalid-tool');
       let planned=answers.classify(args.query);
       planned.hardwareRequested=route.hardwareRequested||planned.hardwareRequested;
@@ -223,7 +227,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       }
       const wanted=/接口|HUB|网口/i.test(planned.query)?'ports':/带载|像素|分辨率/i.test(planned.query)?'load':null;
       const claims=[];for(const product of data.result?.knowledge?.records||[])for(const c of (product.claims||[]).filter(c=>!wanted||c.field===wanted).slice(0,3)){const ref=c.sourceReference;if(ref)claims.push({evidenceId:c.claimId,name:ref.originalName||product.displayName+' 产品索引',text:c.text,download:ref.url||null,locator:ref.page?{page:ref.page}:ref.record?{row:ref.record}:null,modelIds:[product.modelId],verificationStatus:c.verificationStatus||'indexed-not-content-verified'});}
-      if(planned.intent==='product')evidence=[...evidence.filter(e=>e.blockId),...claims,...evidence.filter(e=>!e.blockId)];
+      if(planned.intent==='product'){const near=await expertEvidence.search(args);evidence=[...near.evidence,...claims,...evidence.filter(e=>!e.blockId)];}
       return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
      };
     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);

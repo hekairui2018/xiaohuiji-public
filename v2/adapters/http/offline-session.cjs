@@ -19,6 +19,19 @@ function createOfflineSessions(directory){
  function recordResult(id,result){const s=get(id);s.retrievalHistory=[...(s.retrievalHistory||[]),result].slice(-30);return save(s,{type:'retrieval',...result,at:new Date().toISOString()});}
  function recordAnswer(id,result){const s=get(id);s.messages.push({role:'assistant',content:result.reply||'',model:result.model||'',status:result.status||'',at:new Date().toISOString()});s.messages=s.messages.slice(-30);return save(s,{type:'assistant-answer',result,at:new Date().toISOString()});}
  function closeGuest(id){const s=get(id);if(s.conversationType!=='guest')throw Error('not-guest-session');s.closedAt=new Date().toISOString();save(s,{type:'guest-context-released',at:s.closedAt});if(directory)memory.delete(id);return {ok:true,contextReleased:true};}
- return {get,update,recordResult,recordAnswer,closeGuest};
+ function expertState(id){
+  const s=get(id);if(s.closedAt)throw Error('session-closed');
+  const file=directory&&path.join(directory,id+'.history.jsonl');
+  if(file&&fs.existsSync(file)){
+   const messages=[];
+   for(const line of fs.readFileSync(file,'utf8').split('\n')){if(!line.trim())continue;const e=JSON.parse(line);
+    if(e.type==='customer-input')messages.push({role:'user',content:e.originalMessage||e.message,at:e.at});
+    if(e.type==='assistant-answer')messages.push({role:'assistant',content:e.result?.reply||'',at:e.at});
+   }
+   if(messages.length)s.messages=messages;
+  }
+  return s;
+ }
+ return {get,update,recordResult,recordAnswer,closeGuest,expertState};
 }
 module.exports={createOfflineSessions};
