@@ -196,7 +196,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
     if(requestedMode==='expert'){
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
-     const route=answers.classify(input.message),readableBlocks=new Map();
+     const route=answers.expertClassify(input.message,state),readableBlocks=new Map();
      const execute=async(name,args)=>{
       if(name==='read_document'){
        if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');
@@ -205,13 +205,12 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases','products','resources'].includes(args.kind))throw Error('expert-invalid-tool');
       let planned=answers.classify(args.query);
       planned.hardwareRequested=route.hardwareRequested||planned.hardwareRequested;
-      if(route.models.length&&planned.models.some(m=>!route.models.includes(m)))throw Error('expert-model-scope-conflict');
-      if(['social','clarify'].includes(planned.intent))return {intent:planned.intent,notice:'该请求没有明确的资料检索条件',evidence:[]};
-      if(route.models.length&&!planned.models.length)planned={...planned,query:route.models.join(' ')+' '+planned.query,models:route.models};
+      if(['products','resources'].includes(args.kind)&&route.models.length&&!planned.models.length)planned={...planned,query:route.models.join(' ')+' '+planned.query,models:route.models};
       if(args.kind==='cases')planned={...planned,intent:'aftersales'};
-      if(args.kind==='resources'&&route.category)planned={...planned,intent:'resources',category:planned.category||route.category};
-      const data=['products','resources','cases'].includes(args.kind)||['resources','product','aftersales','compatibility'].includes(planned.intent)?await answers.answer(planned,{facts:state.facts,sessionId:state.id+'-tool'}):await search(planned.query,args.kind,{limit:8});
-      if(!data.retrievalTrace)data.results=answers.filter(planned.query,data.results,route.models).slice(0,4);
+      if(args.kind==='products')planned={...planned,intent:'product'};
+      if(args.kind==='resources')planned={...planned,intent:'resources',category:planned.category||route.category};
+      const data=['products','resources','cases'].includes(args.kind)?await answers.answer(planned,{facts:state.facts,sessionId:state.id+'-tool'}):await search(planned.query,args.kind,{limit:8});
+      if(!data.retrievalTrace)data.results=answers.filter(planned.query,data.results,planned.models).slice(0,4);
       for(const r of data.results||[])if(r.blockId)readableBlocks.set(r.blockId,r);
       let evidence=(data.results||[]).slice(0,4).map((r,i)=>({evidenceId:r.id||r.evidenceId||r.resourceId||'evidence-'+require('node:crypto').createHash('sha256').update(JSON.stringify([r.name,r.text,r.download])).digest('hex').slice(0,16),blockId:r.blockId||null,name:clean(r.name||r.sources?.[0]?.name||('历史案例：'+(r.title||'未命名'))).split(/\r?\n/)[0].slice(0,110),text:clean(r.sourceExcerpt||r.text||r.phenomenon||r.name||'').slice(0,1000),scope:r.scope||null,modelIds:r.modelIds||r.mentionedModels||planned.models,verificationStatus:r.verificationStatus||'unknown',locator:r.locator||(r.sources?.[0]?.locator?{section:r.sources[0].locator}:null),readUrl:r.readUrl||null,download:r.download||r.sources?.find(s=>s.original)?.original||null,referenceOnly:true}));
       if(planned.intent==='product'){
@@ -223,11 +222,11 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       const wanted=/接口|HUB|网口/i.test(planned.query)?'ports':/带载|像素|分辨率/i.test(planned.query)?'load':null;
       const claims=[];for(const product of data.result?.knowledge?.records||[])for(const c of (product.claims||[]).filter(c=>!wanted||c.field===wanted).slice(0,3)){const ref=c.sourceReference;if(ref)claims.push({evidenceId:c.claimId,name:ref.originalName||product.displayName+' 产品索引',text:c.text,download:ref.url||null,locator:ref.page?{page:ref.page}:ref.record?{row:ref.record}:null,modelIds:[product.modelId],verificationStatus:c.verificationStatus||'indexed-not-content-verified'});}
       if(planned.intent==='product')evidence=[...evidence.filter(e=>e.blockId),...claims,...evidence.filter(e=>!e.blockId)];
-      return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],resultCount:data.results?.length||0,compatibilityConfirmed:false},evidence:evidence.slice(0,6)};
+      return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
      };
     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
     let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller)modelRequests.delete(state.id);}
-    state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,sessionState:state});
+    state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const started=Date.now(),route=answers.classify(query);

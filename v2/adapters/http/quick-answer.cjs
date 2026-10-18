@@ -1,5 +1,5 @@
 'use strict';
-const {chatIntent}=require('../../domain/parser/chat-intent.cjs');
+const {chatIntent,expertIntent}=require('../../domain/parser/chat-intent.cjs');
 const {extractKnownModels}=require('../../domain/identity/extract-models.cjs');
 const {modelId}=require('../../domain/identity/model-id.cjs');
 const {createQuickService}=require('./quick-service.cjs');
@@ -52,6 +52,6 @@ function createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolv
   const rows=relevantEvidence(route.query,data.results,lookup,route.models);
   return {...base,reply:rows.length?'找到相关原文参考，尚不能据此确认答案；请核对原文或使用专家模式进一步分析。':'没有找到支持该问题的公司资料。请补充型号或具体操作条件。',results:unique(rows).map(r=>({...r,text:null}))};
  }
- return {classify,answer:retrieve,filter:(query,rows,models)=>relevantEvidence(query,rows,lookup,models)};
+ return {classify,expertClassify:(text,state)=>expertIntent(text,lookup,state),answer:retrieve,filter:(query,rows,models)=>relevantEvidence(query,rows,lookup,models)};
 }
 module.exports={createQuickAnswer};

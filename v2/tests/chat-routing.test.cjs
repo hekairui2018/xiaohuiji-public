@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {chatIntent}=require('../domain/parser/chat-intent.cjs');
+const {chatIntent,expertIntent}=require('../domain/parser/chat-intent.cjs');
 const {createQuickAnswer}=require('../adapters/http/quick-answer.cjs');
 const {createEvidenceExpert}=require('../model-adapter/evidence-expert.cjs');
 const lookup={findProducts:id=>['HD-C16L','HD-R512','HD-R512S'].includes(id)?[{modelId:id}]:[]};
@@ -28,7 +28,7 @@ test('Expert social replies genuinely call the model, use plain text and never i
  const f=fake(['你好，需要我协助查什么资料？']);const r=await createEvidenceExpert(f).answer({message:'你好',route:{intent:'social'},execute:()=>{throw Error('must not search');}});assert.equal(r.status,'answer');assert.equal(f.calls.length,1);assert.equal(f.calls[0].response_format,undefined);assert.equal(r.toolTrace.length,0);
 });
 test('Expert validates structured tools and renders real names rather than internal citation IDs',async()=>{
- const f=fake([{action:'answer',claims:[{text:'找到对应规格书',evidenceIds:['file-synthetic-id']}],generalAdvice:[],question:''}]);const r=await createEvidenceExpert(f).answer({message:'C16L规格书',route:{intent:'resources'},execute:async()=>({evidence:[{evidenceId:'file-synthetic-id',name:'C16L规格书 V2.0.pdf',text:'说明原文件',download:'/synthetic-source'}]})});assert.equal(r.status,'answer');assert.ok(f.calls[0].response_format.schema);assert.match(r.reply,/C16L规格书 V2.0.pdf/);assert.ok(!r.reply.includes('file-synthetic-id'));assert.equal(r.results[0].download,'/synthetic-source');
+ const f=fake([{action:'answer',claims:[{text:'找到对应规格书',evidenceIds:['file-synthetic-id']}],generalAdvice:[],question:''}]);const r=await createEvidenceExpert(f).answer({message:'C16L规格书',route:{intent:'resources',simpleResource:true},execute:async()=>({evidence:[{evidenceId:'file-synthetic-id',name:'C16L规格书 V2.0.pdf',text:'说明原文件',download:'/synthetic-source'}]})});assert.equal(r.status,'answer');assert.ok(f.calls[0].response_format.schema);assert.match(r.reply,/C16L规格书 V2.0.pdf/);assert.ok(!r.reply.includes('file-synthetic-id'));assert.equal(r.results[0].download,'/synthetic-source');
 });
 test('Unexpected model format and truncation fail explicitly without a search-result fallback',async()=>{
  for(const output of ['not JSON',{action:'unknown'}]){const f=fake([output]);const r=await createEvidenceExpert(f).answer({message:'技术问题',execute:()=>{throw Error('must not search');}});assert.equal(r.status,'unavailable');assert.deepEqual(r.results,[]);}
@@ -40,29 +40,50 @@ test('Uncited company claims fail; general advice is separately labelled and can
 test('A real citation cannot justify a fabricated numeric specification or compatibility assertion',async()=>{
  for(const text of ['最大带载999万点','该固件可以通用']){
   const f=fake([{action:'answer',claims:[{text,evidenceIds:['source']}],generalAdvice:[],question:''}]);
-  const r=await createEvidenceExpert(f).answer({message:'R512规格书',route:{intent:'resources'},execute:async()=>({evidence:[{evidenceId:'source',name:'R512规格书',text:'R512原始资料，适用关系未确认'}]})});assert.equal(r.status,'unavailable');assert.ok(['expert-unsupported-number','expert-unconfirmed-compatibility'].includes(r.error));
+  const r=await createEvidenceExpert(f).answer({message:'R512规格书',route:{intent:'resources',simpleResource:true},execute:async()=>({evidence:[{evidenceId:'source',name:'R512规格书',text:'R512原始资料，适用关系未确认'}]})});assert.equal(r.status,'unavailable');assert.ok(['expert-unsupported-number','expert-unconfirmed-compatibility'].includes(r.error));
  }
 });
 test('A supplied model identifier in a caution is not mistaken for an invented numeric specification',async()=>{
- const f=fake([{action:'answer',claims:[{text:'该经验不能直接认定HD-C16L的当前原因。',evidenceIds:['source']}],generalAdvice:[],question:''}]);
+ const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'answer',claims:[{text:'该经验不能直接认定HD-C16L的当前原因。',evidenceIds:['source']}],generalAdvice:[],question:''}]);
  const r=await createEvidenceExpert(f).answer({message:'C16L闪烁',route:{intent:'aftersales',models:['HD-C16L']},execute:async()=>({evidence:[{evidenceId:'source',name:'历史经验',text:'排线检查的历史记录'}]})});assert.equal(r.status,'answer');
 });
-test('Thought budget exhaustion permits only one bounded model retry without thinking and preserves validation',async()=>{
- const calls=[];let count=0;const expert=createEvidenceExpert({transport:async(url,init)=>{
-  if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'synthetic'}]})};
-  const body=JSON.parse(init.body);calls.push(body);count++;
-  return {ok:true,json:async()=>count===1?{choices:[{finish_reason:'length',message:{content:'',reasoning_content:'synthetic internal thought'}}],usage:{completion_tokens:1200}}:{choices:[{finish_reason:'stop',message:{content:JSON.stringify({action:'answer',claims:[],generalAdvice:['先核对现场条件，不认定具体原因。'],question:''})}}],usage:{completion_tokens:40}}};
- }});const r=await expert.answer({message:'复杂LED工程问题',route:{intent:'technical'}});
- assert.equal(r.status,'answer');assert.equal(calls.length,2);assert.equal(calls[0].chat_template_kwargs.reasoning_effort,'low');assert.equal(calls[1].chat_template_kwargs.enable_thinking,false);assert.ok(calls.every(c=>c.max_tokens<=1200));assert.equal(r.modelCalls[0].recovery,'retry-once-without-thinking');assert.equal(r.modelCalls[0].reasoningTokens,null);
+test('Compatibility denials pass while affirmative claims in later clauses still require confirmation',async()=>{
+ for(const [text,allowed] of [['当前资料不能确认R512与R512S固件可以通用。',true],['不支持直接互刷。',true],['历史案例未找到明确说明R512与R512S固件通用性的记录。',true],['当前不能确认，但固件可以通用。',false],['固件可以通用，但没有资料确认。',false]]){
+  const f=fake([{action:'answer',claims:[{text,evidenceIds:['source']}],generalAdvice:[],question:''}]);
+  const r=await createEvidenceExpert(f).answer({message:'R512和R512S固件',route:{intent:'resources',simpleResource:true,models:['HD-R512','HD-R512S']},execute:async()=>({evidence:[{evidenceId:'source',name:'固件目录',text:'R512 R512S 固件候选，兼容关系未确认'}]})});
+  assert.equal(r.status,allowed?'answer':'unavailable',text);if(!allowed)assert.equal(r.error,'expert-unconfirmed-compatibility');
+ }
 });
-test('Known technical requests prepare evidence before a single model call, keeping observations and source checks',async()=>{
+test('Only model-requested low analysis can consume a thought budget; recovery stays bounded',async()=>{
+ const calls=[];let count=0;const expert=createEvidenceExpert({transport:async(url,init)=>{
+  if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'synthetic'}]})};calls.push(JSON.parse(init.body));count++;
+  return {ok:true,json:async()=>({choices:[count===1?{finish_reason:'stop',message:{content:JSON.stringify({action:'analyze',reason:'对照两种可能的排查分支'})}}:count===2?{finish_reason:'length',message:{content:'',reasoning_content:'synthetic thought'}}:{finish_reason:'stop',message:{content:JSON.stringify({action:'answer',claims:[],generalAdvice:['先核对条件，不认定原因。'],question:''})}}],usage:{completion_tokens:count===2?900:40}})};
+ }});const r=await expert.answer({message:'复杂LED问题',route:{intent:'technical'}});
+ assert.equal(r.status,'answer');assert.equal(calls.length,3);assert.equal(calls[0].chat_template_kwargs.enable_thinking,false);assert.equal(calls[1].chat_template_kwargs.reasoning_effort,'low');assert.equal(calls[1].chat_template_kwargs.enable_thinking,true);assert.equal(calls[2].chat_template_kwargs.enable_thinking,false);assert.equal(r.modelCalls[1].recovery,'retry-once-without-thinking');
+});
+test('Only explicit simple resources can preload evidence; candidate preparation does not remove search',async()=>{
  const f=fake([{action:'answer',claims:[{text:'历史记录提供排线检查经验，不能直接认定当前原因。',evidenceIds:['source']}],generalAdvice:['已换过排线仍固定异常，下一步记录对应接口接触情况，逐项验证。'],question:'接收卡与芯片型号是什么？'}]);let retrieves=0;
- const r=await createEvidenceExpert(f).answer({message:'C16L局部异常，换过排线无变化',route:{intent:'aftersales',models:['HD-C16L']},sessionState:{facts:{knownNormal:['其他区域正常']}},execute:async(name,args)=>{assert.equal(f.calls.length,0);assert.equal(name,'search_evidence');assert.equal(args.kind,'cases');retrieves++;return {evidence:[{evidenceId:'source',name:'现场案例索引',locator:{paragraph:12},text:'排线检查的历史经验'}]};}});
- assert.equal(r.status,'answer');assert.equal(retrieves,1);assert.equal(f.calls.length,1);assert.equal(f.calls[0].chat_template_kwargs.enable_thinking,false);const input=JSON.parse(f.calls[0].messages[1].content);assert.equal(input.preparedEvidence.evidence.length,1);assert.deepEqual(input.facts.knownNormal,['其他区域正常']);assert.match(r.reply,/段 12/);assert.equal(r.modelCalls[0].purpose,'grounded-analysis-with-prepared-evidence');
- const outputSchema=f.calls[0].response_format.schema;assert.equal(outputSchema.properties.generalAdvice.maxItems,3);assert.deepEqual(outputSchema.properties.claims.items.properties.evidenceIds.items.enum,['source']);
+ const r=await createEvidenceExpert(f).answer({message:'C16L局部异常，换过排线无变化',route:{intent:'resources',simpleResource:true,models:['HD-C16L']},sessionState:{facts:{knownNormal:['其他区域正常']}},execute:async(name,args)=>{assert.equal(f.calls.length,0);assert.equal(name,'search_evidence');assert.equal(args.kind,'resources');retrieves++;return {evidence:[{evidenceId:'source',name:'现场案例索引',locator:{paragraph:12},text:'排线检查的历史经验'}]};}});
+ assert.equal(r.status,'answer');assert.equal(retrieves,1);assert.equal(f.calls.length,1);assert.equal(f.calls[0].chat_template_kwargs.enable_thinking,false);const input=JSON.parse(f.calls[0].messages[1].content);assert.equal(input.preparedEvidence.evidence.length,1);assert.deepEqual(input.facts.knownNormal,['其他区域正常']);assert.match(r.reply,/段 12/);assert.equal(r.modelCalls[0].purpose,'autonomous-answer-or-tool');
+ assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));const outputSchema=f.calls[0].response_format.schema.oneOf.find(s=>s.properties.action.const==='answer');assert.equal(outputSchema.properties.generalAdvice.maxItems,3);assert.deepEqual(outputSchema.properties.claims.items.properties.evidenceIds.items.enum,['source']);
 });
 test('Additional original reading is allowed only when needed; valid fenced JSON never causes regeneration',async()=>{
  const f=fake([{action:'read',blockId:7},'```json\n'+JSON.stringify({action:'answer',claims:[{text:'原文检查记录',evidenceIds:['block-8']}],generalAdvice:[],question:''})+'\n```']);const seen=[];
- const r=await createEvidenceExpert(f).answer({message:'C16L参数',route:{intent:'product'},execute:async(name)=>{seen.push(name);return name==='search_evidence'?{evidence:[{evidenceId:'block-7',blockId:7,name:'产品原文',text:'有待阅读全文'}]}:{evidence:[{evidenceId:'block-8',blockId:8,name:'产品原文',text:'原文检查记录'}]};}});
+ const r=await createEvidenceExpert(f).answer({message:'C16L参数',route:{intent:'resources',simpleResource:true},execute:async(name)=>{seen.push(name);return name==='search_evidence'?{evidence:[{evidenceId:'block-7',blockId:7,name:'产品原文',text:'有待阅读全文'}]}:{evidence:[{evidenceId:'block-8',blockId:8,name:'产品原文',text:'原文检查记录'}]};}});
  assert.equal(r.status,'answer');assert.deepEqual(seen,['search_evidence','read_document']);assert.equal(f.calls.length,2);assert.equal(r.modelCalls.length,2);
+});
+test('Expert routing preserves context without treating an unresolved followup as social or forcing fault search',()=>{
+ const state={messages:[{role:'user',content:'C16L升级后闪烁'}]};
+ const followup=expertIntent('还是这样',lookup,state);assert.equal(followup.intent,'technical');assert.equal(followup.decisionAuthority,'bonsai');assert.equal(followup.simpleResource,false);assert.deepEqual(followup.contextModels,['HD-C16L']);
+ const doc=expertIntent('C16L说明书，不是故障排查',lookup,state);assert.equal(doc.intent,'resources');assert.equal(doc.simpleResource,true);
+ assert.equal(expertIntent('C16L升级后闪烁',lookup,state).simpleResource,false);
+});
+test('Bonsai can select cases, supplement with text, then read an authorized passage and answer',async()=>{
+ const f=fake([{action:'search',query:'C16L升级后闪烁',kind:'cases'},{action:'search',query:'DCLK 相位',kind:'text',reason:'案例缺少时钟原文条件'},{action:'read',blockId:7},{action:'answer',claims:[{text:'原文记录了时钟核查条件',evidenceIds:['block-8']}],generalAdvice:['先核对升级前后版本，再验证现场。'],question:''}]);const seen=[];
+ const r=await createEvidenceExpert(f).answer({message:'还是这样',route:expertIntent('还是这样',lookup,{messages:[{role:'user',content:'C16L升级后闪烁'}]}),sessionState:{messages:[{role:'user',content:'C16L升级后闪烁'}]},execute:async(name,args)=>{seen.push([name,args.kind]);return name==='read_document'?{evidence:[{evidenceId:'block-8',name:'时钟原文',text:'原文记录了时钟核查条件'}]}:args.kind==='text'?{evidence:[{evidenceId:'block-7',blockId:7,name:'时钟原文',text:'时钟条件摘要'}]}:{evidence:[{evidenceId:'case-source',name:'案例',text:'历史闪烁记录'}]};}});
+ assert.equal(r.status,'answer');assert.deepEqual(seen,[['search_evidence','cases'],['search_evidence','text'],['read_document',undefined]]);assert.equal(r.toolCallCount,3);assert.equal(r.modelCallCount,4);assert.match(f.calls[0].messages[1].content,/C16L升级后闪烁/);assert.ok(f.calls[1].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));
+});
+test('Identical tool queries reuse evidence while changed model suffixes remain distinct',async()=>{
+ const f=fake([{action:'search',query:'R512 固件',kind:'files'},{action:'search',query:'r512   固件',kind:'files',reason:'重复候选核对'},{action:'search',query:'R512S 固件',kind:'files',reason:'另一准确型号'},{action:'answer',claims:[],generalAdvice:['两种型号必须分别核对硬件，当前不能确认兼容。'],question:''}]);let reads=0;
+ const r=await createEvidenceExpert(f).answer({message:'比较两卡',route:{intent:'technical'},execute:async()=>{reads++;return {evidence:[]};}});assert.equal(r.status,'answer');assert.equal(reads,2);assert.equal(r.toolCallCount,2);assert.equal(r.toolRequestCount,3);assert.equal(r.toolTrace[1].cached,true);
 });

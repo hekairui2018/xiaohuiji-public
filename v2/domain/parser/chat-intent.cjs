@@ -16,4 +16,15 @@ function chatIntent(text,lookup){
  if(/LED|屏幕|显示屏|控制卡|接收卡|发送卡|芯片|智能设置|HUB75|扫描|灰阶/i.test(query))return {intent:'technical',query,models,unknownModels};
  return {intent:'clarify',query,models,unknownModels};
 }
-module.exports={chatIntent};
+// Expert hints never decide the meaning of an engineering request or restrict its tools.
+function expertIntent(text,lookup,state={}){
+ const hint=chatIntent(text,lookup);
+ if(hint.intent==='social')return {...hint,decisionAuthority:'social-shortcut'};
+ let remainder=hint.query.replace(/(?:不是|并非|无需|不需要|不用)(?:做)?(?:故障排查|故障诊断|故障|售后排查)/g,'');
+ remainder=remainder.replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi,token=>extractKnownModels(token,lookup).length?'':token);
+ remainder=remainder.replace(/请给我|请提供|帮我找|给我|查询|查找|下载|我要|需要|请|的|一份|一下|说明书|手册|规格书|固件|中文|英文|即可|版本|资料|[\s，,。.!！?？、：:]/g,'');
+ const simple=hint.intent==='resources'&&hint.models.length===1&&!hint.unknownModels.length&&!remainder;
+ const history=(state.messages||[]).filter((m,i,a)=>m.role==='user'&&!(i===a.length-1&&m.content===text)).slice(-6);
+ return {...hint,intent:simple?'resources':'technical',hintIntent:hint.intent,simpleResource:simple,decisionAuthority:simple?'simple-resource-shortcut':'bonsai',contextModels:[...new Set(history.flatMap(m=>extractKnownModels(m.content||'',lookup)))]};
+}
+module.exports={chatIntent,expertIntent};
