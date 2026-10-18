@@ -1,6 +1,10 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const context={window:{}};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../frontend/product-resources.js'),'utf8'),context);const rows=context.window.ProductResources.documentRows;
+test('Shared H20/H16 manuals pair Chinese and English before the additional Chinese-folder copy',()=>{
+ const cn={name:'HD-H20、H16用户手册V1.0.pdf',documentLanguage:'zh'},extra={name:'HD-H20、H16 User manaualV1.0.pdf',clean:'HD-H20、H16 User manaualV1.0 · 全彩 / 中文'},en={name:'HD-H20、H16 user manaualV1.0.pdf',clean:'HD-H20、H16 user manaualV1.0 · 全彩 / 英文'};
+ const result=rows([cn,extra,en]);assert.equal(result[0].zh,cn);assert.equal(result[0].other,en);assert.equal(result[1].zh,extra);assert.equal(result.flatMap(r=>[r.zh,r.other]).filter(Boolean).length,3);
+});
 test('Bilingual software pairing preserves original objects, versions and unmatched files',()=>{
  const cn={name:'屏掌控标准版（全彩）操作说明V5.2.pdf',url:'/cn'},en={name:'Screen Control Standard Edition (Full Color) Operating Instructions V5.2.pdf',url:'/en'},different={name:'Screen Control Standard Edition (Full Color) Operating Instructions V5.1.pdf'},unknown={name:'cloud setting-1.pdf'};
  const result=rows([unknown,en,different,cn]);assert.equal(result.length,2);assert.equal(result[0].zh,cn);assert.equal(result[0].other,en);assert.equal(result.flatMap(r=>[r.zh,r.other]).filter(Boolean).length,4);assert.equal(cn.url,'/cn');assert.equal(en.url,'/en');

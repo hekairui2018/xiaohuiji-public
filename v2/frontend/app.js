@@ -2031,6 +2031,17 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       + (kwUp ? " · 匹配 " + shownModels + " 款" : " · 可输入型号筛选");
     if (groups.length === 1) wrap.classList.add("doc-catalog-flat");
   }
+  const toggleAll = document.createElement('button');
+  toggleAll.type = 'button'; toggleAll.className = 'sw-btn-detail'; toggleAll.style.marginLeft = '12px';
+  const categories = () => [...wrap.children].filter(node => node.matches('details.doc-cat-group'));
+  const updateToggle = () => {
+    const rows = categories(), allOpen = rows.length > 0 && rows.every(node => node.open);
+    toggleAll.textContent = allOpen ? '全部收起' : '全部展开';
+    toggleAll.title = (allOpen ? '收起' : '展开') + '当前' + catLabel + '的全部分类';
+    toggleAll.setAttribute('aria-expanded', String(allOpen));
+  };
+  toggleAll.onclick = () => { const rows = categories(), open = !rows.every(node => node.open); for (const node of rows) node.open = open; updateToggle(); };
+  wrap.addEventListener('toggle', updateToggle, true); updateToggle(); head.appendChild(toggleAll);
   searchResults.appendChild(wrap);
   searchResults.style.display = "block";
 }

@@ -3,6 +3,17 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {identifyDocument}=require('../domain/knowledge/document-catalog.cjs');
 const {augmentProducts}=require('../domain/knowledge/local-resource-catalog.cjs');
 const {selectDocumentVersions}=require('../domain/knowledge/document-versions.cjs');
+test('Cached cover and explicit document title correct folder mismatch without inventing model conflicts',()=>{
+ const folders=['产品规格书（LED）','矩阵'];
+ assert.equal(identifyDocument({name:'HD-PS08说明书V1.1.pdf',folders,documentMetadata:{kind:'manual',coverModels:['PS08']}}).kind,'manual');
+ assert.equal(identifyDocument({name:'HD-C08L Specification V1.1.pdf',folders,documentMetadata:{kind:'manual',coverModels:['C08L']}}).kind,'spec');
+ assert.equal(identifyDocument({name:'HD-S208传感器规格书 V2.0.pdf',documentMetadata:{kind:'spec',coverModels:['S208HD-S208']}}).modelIds[0],'HD-S208');
+ assert.equal(identifyDocument({name:'HD-AP0x0x规格书V1.1.pdf',documentMetadata:{kind:'spec',coverModels:['AP0808','AP1616']}}).kind,'spec');
+ assert.equal(identifyDocument({name:'C1 Cloud使用手册 V1.0.pdf',documentMetadata:{kind:'manual',coverModels:['MS1000-2U']}}).kind,'manual');
+ for(const name of ['CR UL测试.pdf','电池ROHS.pdf','灰度国高证书.pdf','互联网云平台管理方案V3.1.pptx'])assert.equal(identifyDocument({name,documentMetadata:{coverModels:['UNRELATED99']}}).kind,'other');
+ assert.equal(require('../domain/knowledge/source-classification.cjs').sourceClassification({name:'352C升级.mp4',folders:['操作说明','LCD']}).kind,'video');
+ assert.equal(identifyDocument({name:'352C升级.mp4',folders:['操作说明','LCD']}),null);
+});
 test('Numeric LCD models and English latest PDF are included without aliasing suffixes or languages',()=>{
  const rows=augmentProducts([{modelId:'HD-3566S',documents:[]},{modelId:'HD-3566P',documents:[]}],[{name:'3566S系统操作手册.docx',sha256:'a'.repeat(64)},{name:'3566P User Manual V1.0.pdf'},{name:'3566P User Manual V2.0.pdf'},{name:'3566P User Manual V2.0.docx'}]);
  assert.equal(rows[0].documents.length,1);const docs=selectDocumentVersions(rows[1].documents).selected;assert.deepEqual(docs.map(x=>x.name),['3566P User Manual V2.0.pdf']);

@@ -74,7 +74,12 @@
 
  // Language pairing affects layout only; it never merges files or version families.
  function documentRows(items){
-  const chinese=d=>/[\u4e00-\u9fff]/.test(d.name||'');
+  const chinese=d=>{
+   const qualifier=d.displayQualifier||d.clean||'';
+   if(/(?:^|\/)\s*英文\s*$/.test(qualifier)||d.documentLanguage==='en')return false;
+   if(/(?:^|\/)\s*中文\s*$/.test(qualifier)||d.documentLanguage==='zh')return true;
+   return /[\u4e00-\u9fff]/.test(d.name||'');
+  };
   const families=[
    ['cube',/立方屏APP|LED cube APP/i],
    ['screen-lcd',/屏掌控.*LCD|Screen Control.*LCD Version/i],
@@ -85,8 +90,8 @@
   ];
   const keys=new Map();
   for(const item of items){const family=families.find(([,pattern])=>pattern.test(item.name||''));const version=(item.name||'').match(/V(\d+(?:\.\d+)+)/i)?.[1];if(family&&version&&item.versionStatus!=='conflict')keys.set(item,family[0]+'|'+version);
-   const named=(item.name||'').match(/^(?:HD[-_ ]?)?([A-Za-z]+\d+[A-Za-z0-9-]*(?:\s+(?:Pro|Plus))?)\s*(规格书|Specifications?|使用说明书|使用说明|User Manual)/i);
-   if(named&&version&&item.versionStatus!=='conflict')keys.set(item,'model:'+named[1].toUpperCase()+'|'+(/规格|spec/i.test(named[2])?'spec':'manual')+'|'+version);}
+   const named=(item.name||'').match(/^(?:HD[-_ ]?)?([A-Za-z]+\d+[A-Za-z0-9-]*(?:\s+(?:Pro|Plus))?(?:\s*[、,，&/+]\s*(?:HD[-_ ]?)?[A-Za-z]+\d+[A-Za-z0-9-]*)*)\s*(规格书|Specifications?|使用说明书|使用说明|用户手册|User\s+man(?:ual|aual))/i);
+   if(named&&version&&item.versionStatus!=='conflict')keys.set(item,'model:'+named[1].replace(/\s/g,'').replace(/[、，&/+]/g,',').toUpperCase()+'|'+(/规格|spec/i.test(named[2])?'spec':'manual')+'|'+version);}
   const used=new Set(),rows=[];
   for(const item of [...items.filter(chinese),...items.filter(d=>!chinese(d))]){
    if(used.has(item))continue;used.add(item);let partner=null;

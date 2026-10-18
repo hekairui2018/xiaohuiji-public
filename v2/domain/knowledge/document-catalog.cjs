@@ -12,10 +12,14 @@ function identifyDocument(resource,products=[]){
  if(source.kind){
   kind=source.kind;basis=source.basis;
   if(source.formatConflict){kind='pending';classificationConflict='source-folder-file-format-conflict';}
-  else if(bodyKind&&source.exclusive&&bodyKind!==source.kind){kind='pending';classificationConflict='source-folder-original-content-conflict';}
+  else if(bodyKind&&source.exclusive&&bodyKind!==source.kind){
+   if(filenameKind===bodyKind&&['spec','manual'].includes(source.kind)){kind=bodyKind;basis='filename-and-original-title-confirmed';}
+   else if(filenameKind!==source.kind){kind='pending';classificationConflict='source-folder-original-content-conflict';}
+  }
   if(classificationConflict)basis=classificationConflict;
  }else if(bodyKind){kind=bodyKind;basis=meta.classificationStatus||'original-title-confirmed';}
- else if(/certificate|认证证书|检测报告|合格证|test report/i.test(name)){kind='other';basis='certificate-document-not-specification';}
+ else if(/certificate|证书|报告|合格证|test report|ROHS|UL测试|注册码/i.test(name)){kind='other';basis='certificate-or-reference-document-not-specification';}
+ if(!kind&&(/\.(?:pptx?|xlsx?)$/i.test(name)||/方案|报价单|技术分享|选型|improve\s+plan/i.test(name))){kind='other';basis='presentation-or-technical-reference';}
  if(!kind&&/^\s*(?:PRODUCT\s+SPECIFICATIONS?|产品规格书|技术规格书)\s*$/im.test(intro)){kind='spec';basis='cached-original-cover';}
  if(!kind&&/^\s*(?:用户手册|产品说明书|使用说明书|USER\s+MANUAL|PRODUCT\s+MANUALS?)\s*$/im.test(intro)){kind='manual';basis='cached-original-cover';}
  if(!kind&&meta.coverModels?.length){kind='pending';basis='original-model-role-unconfirmed';}
@@ -27,7 +31,12 @@ function identifyDocument(resource,products=[]){
  const token=/^(?:[A-Z]+\d+[A-Z0-9]*|\d+[A-Z]{1,3}\d*)(?:[-_][A-Z0-9]+)*(?:\s+(?:PRO|PLUS|MAX|MINI|LITE))?(?![A-Z0-9])/i.exec(prefix)?.[0];
  if(kind!=='other'&&token&&!/^V\d|^HD20(?:18|20)$/i.test(token)){const id=modelId(token);if(id)ids.add(id);}
  let modelConflict=false;
- if(meta.coverModels?.length){const known=new Set(products.map(p=>p.modelId).filter(Boolean)),originalIds=meta.coverModels.map(modelId).filter(id=>id&&(kind!=='other'||meta.classificationStatus==='manual-review'||known.has(id)));modelConflict=ids.size>0&&originalIds.length>0&&![...ids].some(id=>originalIds.includes(id));if(originalIds.length)ids.clear();if(!modelConflict)for(const id of originalIds)ids.add(id);else {kind='pending';basis='filename-original-model-conflict';}}
+ if(meta.coverModels?.length){const known=new Set(products.map(p=>p.modelId).filter(Boolean)),originalIds=meta.coverModels.map(value=>{
+  const repeated=/^(?:HD[-_ ]?)?([A-Z]+\d+[A-Z0-9-]*?)HD[-_ ]?\1$/i.exec(value);return modelId(repeated?repeated[1]:value);
+ }).filter(id=>id&&(kind!=='other'||meta.classificationStatus==='manual-review'||known.has(id)));
+ const component=source.component||/模块(?:数据)?手册/i.test(name),softwareTitle=/\bC1\s+Cloud\b/i.test(name);
+ const genericModel=/x/i.test(token||'')&&originalIds.length>0&&originalIds.every(id=>new RegExp('^HD-'+token.replace(/0x/ig,'\\d{2}').replace(/x/ig,'\\d')+'$','i').test(id));
+ modelConflict=!component&&!softwareTitle&&!genericModel&&ids.size>0&&originalIds.length>0&&![...ids].some(id=>originalIds.includes(id));if(originalIds.length)ids.clear();if(!modelConflict)for(const id of originalIds)ids.add(id);else {kind='pending';basis='filename-original-model-conflict';}}
  if(!ids.size&&basis==='cached-original-cover')for(const line of intro.split(/\r?\n/).slice(0,12)){
   const t=line.trim();if(/^(?:HD[-_ ]?)?(?:[A-Z]+\d+[A-Z0-9]*(?:[-_][A-Z0-9]+)*|\d+[A-Z][A-Z0-9]*)(?:\s+(?:Pro|Plus))?$/i.test(t)&&!/^V\d/i.test(t)){const id=modelId(t);if(id)ids.add(id);}
  }

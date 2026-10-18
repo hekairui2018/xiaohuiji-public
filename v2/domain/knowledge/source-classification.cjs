@@ -21,7 +21,7 @@ function sourceClassification(resource){
   const s=folders[i];let role=null,strict=false,cert=false;
   if(/^(?:.*产品)?规格书(?:[（(](?:LED|LCD)[）)])?$|^(?:.*模块|.*产品|.*设备)规格书$/.test(s)){role='spec';strict=true;}
   else if(/^(?:系统操作手册|操作说明|使用说明|用户手册|烧录操作说明|操作文档|中文文档|英文文档)$/.test(s)||s==='文档'&&folders.slice(0,i).some(x=>/^(?:操作说明|操作视频和文档)$/.test(x))){role='manual';strict=true;}
-  else if(!/品质资料|控标文件和认证证书/.test(s)&&/认证证书|合格证|检验报告|检测报告|运输鉴定|认证资料及证书/.test(s)){role='other';strict=true;cert=true;}
+  else if(!/品质资料|控标文件和认证证书/.test(s)&&/认证证书|合格证|检验报告|检测报告|运输鉴定|认证资料及证书|模块(?:的)?认证资料$/.test(s)){role='other';strict=true;cert=true;}
   else if(/^(?:培训资料|日常培训文档|培训文档|产品技术培训PPT|产品宣讲PPT|产品彩页|产品宣传单页|竞品对比表|销售一指禅|技术参考|二次开发资料|SDK资料|芯片调试手册|故障排查文档|经验总结与对比资料)$/.test(s)||s==='文档'&&folders.includes('小文档与视频'))role='other';
   if(role){kind=role;exclusive=strict;certificate=cert;roleFolder=s;}
   if(/^(?:产品规格书[（(]LED[）)]|操作说明)$/.test(s)&&folders[i+1])group=browseGroup(folders[i+1]);
@@ -29,7 +29,7 @@ function sourceClassification(resource){
   if(s==='操作视频'&&folders[i+1])group=browseGroup(folders[i+1]);
  }
  const confirmedAccessoryModule=group?.key==='accessory'&&/^(?:GPS模块天线\s+XH4P-2\.54|Quectel[_ ]EC25系列[_ ]LTE[_ ]Standard[_ ]模块产品规格书)/i.test(name);
- const component=confirmedAccessoryModule||folders.some(s=>/^(?:4G|5G|LTE|通讯|通信)模块规格书$/i.test(s))?'communication-module':folders.some(s=>/^(?:产品型号电池一览表|迈洛克电池报告)$/.test(s))?'battery':null;
+ const component=confirmedAccessoryModule||folders.some(s=>/^(?:4G|5G|LTE|通讯|通信)模块规格书$|模块(?:的)?认证资料$/i.test(s))?'communication-module':folders.some(s=>/^(?:产品型号电池一览表|迈洛克电池报告)$/.test(s))?'battery':null;
  const directoryTable=/\.(?:xlsx?|csv)$/i.test(name)&&(resource.documentMetadata?.evidence||[]).some(e=>(e.locator?.cells||[]).filter(c=>/^(?:资料名称|资料分类|资料内容)$/.test(c.value||'')).length>=2)&&resource.documentMetadata?.classificationStatus!=='manual-review';
  if(directoryTable){kind='other';exclusive=false;}
  const conflict=!!(resource.sourceDomainConflict||lcd&&led);
@@ -39,7 +39,8 @@ function sourceClassification(resource){
  // User-confirmed browse taxonomy; retain source domain and model evidence.
  if(solution)group={key:'lcd',label:'LCD'};
  const binary=/\.(?:exe|msi|apk)$/i.test(name)?'software':/\.bin$/i.test(name)&&resource.resourceType==='firmware'?'firmware':/\.(?:mp4|webm|mov)$/i.test(name)?'video':null;
- const formatConflict=!!binary&&exclusive&&['spec','manual'].includes(kind);
+ // Actual media format wins over a document folder's role; retain the source folder separately.
+ const formatConflict=!!binary&&binary!=='video'&&exclusive&&['spec','manual'].includes(kind);
  if(binary&&!formatConflict){kind=binary;certificate=false;exclusive=false;}
  if(!document&&!binary)kind=null;
  if(!group&&folders.some(s=>/^(?:软件|软件下载器|小灰云、APP)$/.test(s)))group={key:'software-cloud',label:'软件、云平台、APP'};

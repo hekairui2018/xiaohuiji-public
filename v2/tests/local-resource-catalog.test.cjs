@@ -16,9 +16,9 @@ test('Known named accessories retain exact source documents without inventing nu
  const rows=augmentProducts(products,[{name:'HD-IR-SENSOR规格书V1.0.pdf',locationId:1},{name:'HD-IR-SENSORPLUS规格书V1.0.pdf',locationId:2},{name:'USB无线设备说明书.pdf',locationId:3},{name:'HD-IR-SENSOR规格书V2.0.pdf',locationId:4,folders:['签章规格书']}]);
  assert.equal(rows[0].modelId,null);assert.equal(rows[0].documents.length,1);assert.equal(rows[0].documents[0].name,'HD-IR-SENSOR规格书V1.0.pdf');assert.equal(rows[1].documents.length,1);
 });
-test('Legacy underscore version notation is comparable; unresolved new binaries stay in raw search',()=>{
+test('Legacy underscore versions are comparable; unversioned binaries stay visible with unknown version metadata',()=>{
  const result=latestFirmware([{file:'C16L_FPGA_9_16_85_65.bin',status:'local-indexed'},{file:'C16L_FPGA_9_17_85_65.bin',status:'local-indexed'},{file:'R7_fpga_CHIP9_V19.03.01.17.bin',status:'local-indexed'},{file:'R7_fpga_CHIP9_V19.04.01.17.bin',status:'local-indexed'},{file:'opaque.bin',status:'local-indexed'}]);
- assert.deepEqual(result.map(r=>r.file),['C16L_FPGA_9_17_85_65.bin','R7_fpga_CHIP9_V19.04.01.17.bin']);
+ assert.deepEqual(result.map(r=>r.file),['C16L_FPGA_9_17_85_65.bin','R7_fpga_CHIP9_V19.04.01.17.bin','opaque.bin']);assert.equal(result.at(-1).versionSelection,'version-unknown');
 });
 test('Plus suffix never joins the base model, and unknown firmware names stay unassigned',()=>{
  const result=augmentProducts([{modelId:'HD-R5S',documents:[],firmware:[]},{modelId:'HD-R5SPLUS',documents:[],firmware:[]}],[{name:'R5s_Plus_FPGA_V25.01.01.37.bin',locationId:1,resourceType:'firmware'},{name:'Unknown9_FPGA_V1.0.0.1.bin',locationId:2,resourceType:'firmware'},{name:'EF_30_3840x2160.bin',locationId:3,resourceType:'file'}]);

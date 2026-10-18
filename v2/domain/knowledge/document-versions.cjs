@@ -4,15 +4,15 @@ function describeDocument(document){
  const name=document.name||document.file||'';
  // Preserve everything except the explicit document version and file extension:
  // language, model suffix, hardware tags and signed/unsigned identity stay separate.
- const stem=name.replace(/\.[a-z0-9]+$/i,''),matches=[...stem.matchAll(/(?<![A-Za-z0-9])V(\d+(?:\.\d+)+)(?![A-Za-z0-9.])/ig)],named=matches.length===1?matches[0]:null,meta=document.documentMetadata||{};
+ const stem=name.replace(/\.[a-z0-9]+$/i,'').replace(/[-_ ]*已修改$/,''),matches=[...stem.matchAll(/V\s*(\d+(?:\.\d+)+)(?![A-Za-z0-9.])/ig)],named=matches.length===1?Object.assign([...matches[0]],{index:matches[0].index}):null,meta=document.documentMetadata||{};
  const original=/^V\d+(?:\.\d+)+$/i.test(meta.version||'')?meta.version.toUpperCase():null;
- const conflict=original&&named&&original!==named[0].toUpperCase();
+ const conflict=original&&named&&original!=='V'+named[1];
  const version=conflict?null:named|| (original?Object.assign([original,original.slice(1)],{index:-1}):null);
  const nameConditions=stem.match(/(?<![A-Za-z0-9])(?:E\d+|HW[-_ ]?[A-Za-z0-9.]+|REV[-_ ]?[A-Za-z0-9.]+|Android\s*\d+(?:\.\d+)?|安卓\d+(?:\.\d+)?|BOX|TP)(?![A-Za-z0-9])/ig)||[];
  const scope=JSON.stringify({models:meta.coverModels||[],conditions:meta.scopeEvidence||[],nameConditions:nameConditions.map(x=>x.toUpperCase()),hardware:document.hardwareVersion||null,applicability:document.applicability||null});
  const title=meta.title?.replace(/V\d+(?:\.\d+)+/ig,'').trim();
- const familyStem=meta.familyId&&meta.classificationStatus==='manual-review'?'reviewed-family:'+meta.familyId:title&&meta.coverModels?.length?meta.coverModels.join('|')+'|'+title:version&&version.index!==-1?stem.replace(version[0],'{version}'):stem;
- return {version:version?.[0].toUpperCase()||null,numbers:version?version[1].split('.').map(Number):null,
+ const familyStem=meta.familyId&&meta.classificationStatus==='manual-review'?'reviewed-family:'+meta.familyId:version&&version.index!==-1?stem.replace(version[0],'{version}'):title&&meta.coverModels?.length?meta.coverModels.join('|')+'|'+title:stem;
+ return {version:version?'V'+version[1]:null,numbers:version?version[1].split('.').map(Number):null,
   family:familyStem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/\s*&\s*/g,' ').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase()+'|'+(/[\u4e00-\u9fff]/.test(stem)?'zh':'en')+'|'+scope+(isSignedDocument(document)?'|signed':'')+(document.presentationBasis==='local-operation-guide-in-other'?'|operation-guide':''),
   versionBasis:conflict?'filename-cover-version-conflict':original?'original-cover-version':named?'explicit-filename-version':'not-established',
   formatFamily:stem.replace(/^HD[-_ ]?/i,'').replace(/\bspecifications\b/ig,'Specification').replace(/_/g,' ').replace(/\s+/g,' ').trim().toUpperCase(),
