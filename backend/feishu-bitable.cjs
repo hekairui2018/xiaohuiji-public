@@ -18,6 +18,7 @@ const path = require('path');
 const DOMAIN = 'https://open.feishu.cn';
 // 主列可以被用户重命名，必须从字段 API 的 is_primary 读取，不能硬编码旧列名。
 let primaryField = '';
+let logDateField = '日期';
 const TXT_DIR = path.join(__dirname, '..', 'data', 'huidulogs', 'txt'); // 服务器本地 TXT 留底目录
 // 上报类型中文化：done→完成 batch→补传 manual→手动（显示层映射；写字符串，飞书单选自动新增中文选项）
 const REASON_CN = { done: '完成', batch: '补传', manual: '手动' };
@@ -171,11 +172,13 @@ async function ensureSchema(force = false) {
   schemaReady = false;
   schemaLoading = (async () => {
     const fields = await readTableFields();
-    const primary = fields.find((f) => f.is_primary === true);
+    // An explicit stable field ID keeps log upserts independent from the display index.
+    const primary = ENV.FEISHU_LOG_KEY_FIELD_ID ? fields.find(f=>f.field_id===ENV.FEISHU_LOG_KEY_FIELD_ID) : fields.find((f) => f.is_primary === true);
     if (!primary || !primary.field_name || primary.type !== 1) {
       throw new Error('飞书主列缺失或不是文本类型，停止同步；请核对现有表结构');
     }
     primaryField = primary.field_name;
+    if(ENV.FEISHU_LOG_DATE_FIELD_ID){const date=fields.find(f=>f.field_id===ENV.FEISHU_LOG_DATE_FIELD_ID);if(!date||date.type!==5)throw new Error('独立日志日期字段缺失或类型错误，停止同步');logDateField=date.field_name;}
     const existing = new Set(fields.map((f) => f.field_name));
     const base = '/open-apis/bitable/v1/apps/' + CFG.appToken + '/tables/' + CFG.tableId + '/fields';
 
@@ -269,7 +272,7 @@ async function findRecordId(model, logDate, rec) {
             conjunction: 'and',
             conditions: [
               { field_name: '发送型号', operator: 'is', value: [model] },
-              { field_name: '日期', operator: 'is', value: [dayMs] }
+              { field_name: logDateField, operator: 'is', value: ['ExactDate', String(dayMs)] }
             ]
           }
         });
@@ -350,7 +353,7 @@ async function buildFields(rec) {
   if (rec.hdset_version) fields['HDSet版本'] = rec.hdset_version;
   if (rec.hdplayer_version) fields['HDPlayer版本'] = rec.hdplayer_version;
   const dayMs = dayStartMs(rec.log_date);
-  if (dayMs !== null) fields['日期'] = dayMs;
+  if (dayMs !== null) { fields[logDateField] = dayMs;if(ENV.FEISHU_LOG_DATE_FIELD_ID)fields['日期']=String(rec.log_date); }
   if (rec.server_ts) {
     const t = new Date(rec.server_ts).getTime();
     if (!Number.isNaN(t)) fields['服务器接收时间'] = t;

@@ -84,3 +84,8 @@ Local software/video and document metadata responses support gzip and Server-Tim
 本地说明书 groups 使用规格书已确认的型号归属和同序大类，原 sourceGroup、associatedModels、身份、版本及链接不修改。没有明确归属的放“其他”。
 
 本地固件保持原 groups（型号→items）以兼容已有客户端，新增 firmwareCategories: [{key,label,models:[型号]}]，只索引型号，不重复固件文件载荷。分页仍作用于原 groups/items；浏览客户端按 models 对当前返回的型号行建立二级菜单。此字段也适用于 list=1。固件选择、硬件条件及原件下载不变。
+
+
+## 2026-10-18 公网日志接收
+
+指定publicOrigin可POST /api/huidu/log，沿用X-Upload-Key密钥验证、1MiB正文上限、原有结构校验/幂等/TXT留底及飞书outbox。不支持无密钥写入、跨站浏览器写入或GET读日志。OCR、对话、会话、日志状态及内网原件仍不对公网开放。客户端使用已配置的完整外网域名/api/huidu/log，不发送到域名解析IP。

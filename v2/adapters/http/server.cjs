@@ -20,6 +20,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   if(accessGuard&&!accessGuard(req,res))return;
   const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
   const route=req.url.split('?')[0];
+  if(req.v2Public&&route==='/api/huidu/log'&&req.method==='POST'){if(offlineKnowledge&&await offlineKnowledge.handle(req,res))return;res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'log-store-not-configured'}));return;}
   if(req.v2Public&&!publicCatalog){res.writeHead(503);res.end('Public resources are not configured');return;}
   if(route==='/'){res.writeHead(302,{Location:'/wiki'});res.end();return;}
   if(!req.v2Public&&offlineKnowledge&&await offlineKnowledge.handle(req,res))return;

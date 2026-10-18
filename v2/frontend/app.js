@@ -2036,14 +2036,17 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       const title=document.createElement('strong');title.textContent='请选择左侧型号';title.setAttribute('aria-live','polite');
       const close=document.createElement('button');close.type='button';close.className='firmware-panel-close';close.textContent='×';close.title='关闭固件资料';close.setAttribute('aria-label','关闭固件资料');close.hidden=true;
       const files=document.createElement('div');files.className='firmware-panel-files';files.tabIndex=0;files.setAttribute('role','region');files.setAttribute('aria-label','固件文件列表');
-      let active=null;
-      function clearSelection(){const previous=active;if(active)active.setAttribute('aria-pressed','false');active=null;files.replaceChildren();title.textContent='请选择型号查看固件';close.hidden=true;previous?.focus({preventScroll:true});}
-      close.onclick=clearSelection;
-      panel.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection();});
+      let active=null,pinned=false,leaveTimer;
+      function clearSelection(restoreFocus=false){clearTimeout(leaveTimer);const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;files.replaceChildren();title.textContent='请选择型号查看固件';close.hidden=true;if(restoreFocus)previous?.focus({preventScroll:true});}
+      function showFiles(button,product,pin){clearTimeout(leaveTimer);if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));button.dataset.preview=String(!pin);title.textContent=product.label+' · '+product.count+' 个固件';close.hidden=!pin;files.replaceChildren(...product.items.map(item=>docFileActions(item,true)));files.scrollTop=0;}
+      const leave=()=>{if(!pinned){clearTimeout(leaveTimer);leaveTimer=setTimeout(()=>clearSelection(),150);}};
+      panel.addEventListener('pointerenter',()=>clearTimeout(leaveTimer));panel.addEventListener('pointerleave',leave);
+      close.onclick=()=>clearSelection(true);
+      panel.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection(true);});
       header.append(title,close);panel.append(header,files);
       matches.forEach(product=>{
         const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.title='查看 '+product.model+' 固件';button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-pressed','false');
-        button.onclick=()=>{if(active)active.setAttribute('aria-pressed','false');active=button;button.setAttribute('aria-pressed','true');title.textContent=product.label+' · '+product.count+' 个固件';close.hidden=false;files.replaceChildren(...product.items.map(item=>docFileActions(item,true)));files.scrollTop=0;};
+        button.addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')showFiles(button,product,false);});button.addEventListener('pointerleave',leave);button.onclick=()=>showFiles(button,product,true);button.title='悬浮临时查看；点击固定 '+product.model+' 固件';
         models.append(button);
       });
       pack.body.append(models,panel);wrap.append(pack.det);

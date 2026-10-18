@@ -128,6 +128,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value,(_k,v)=>typeof v==='string'?clean(v):v));return true;};
   const host=req.headers.host;if(req.headers.origin&&req.headers.origin!=='http://'+host)return send(403,{error:'origin-not-allowed'});
   try{
+   if(logRoute&&req.method==='POST'){if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});}
    if(image||logRoute){if(req.method!=='POST')return send(405,{error:'method-not-allowed'});let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>(image?15*1024*1024:1024*1024))return send(413,{error:'body-too-large'});chunks.push(chunk);}let b;try{b=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
     if(image)return send(200,images?await images.recognize(b):{ok:false,message:'本地图片识别未配置，请输入文字。'});
     if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});return send(200,logs.receive(b));}

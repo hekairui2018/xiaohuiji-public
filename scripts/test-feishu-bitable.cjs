@@ -24,7 +24,7 @@ function fixture(options = {}) {
     Buffer, FormData, Blob, console,
     require: (name) => name === 'fs' ? {
       existsSync: () => true,
-      readFileSync: () => 'FEISHU_APP_ID=test\nFEISHU_APP_SECRET=test\nFEISHU_APP_TOKEN=test\nFEISHU_TABLE_ID=test',
+      readFileSync: () => 'FEISHU_APP_ID=test\nFEISHU_APP_SECRET=test\nFEISHU_APP_TOKEN=test\nFEISHU_TABLE_ID=test'+(options.keyFieldId?'\nFEISHU_LOG_KEY_FIELD_ID='+options.keyFieldId:'')+(options.dateFieldId?'\nFEISHU_LOG_DATE_FIELD_ID='+options.dateFieldId:''),
       mkdirSync: () => {}, writeFileSync: (fp, buf) => state.files.push({ fp, text: buf.toString() })
     } : require(name),
     fetch: async (url, init = {}) => {
@@ -35,6 +35,8 @@ function fixture(options = {}) {
       if (url.includes('/fields?')) {
         state.fieldsReads++;
         const fields = names.filter(name=>!(options.missingFields||[]).includes(name)).map((field_name) => ({ field_name, type: 1, is_primary: false }));
+        if(options.dateFieldId)fields.push({field_name:'native-log-date',field_id:options.dateFieldId,type:5,is_primary:false});
+        if(options.keyFieldId&&!options.keyFieldMissing)fields.push({field_name:'stable-log-key',field_id:options.keyFieldId,type:1,is_primary:false});
         if (!options.noPrimary) fields.push({ field_name: state.primary, type: options.primaryType || 1, is_primary: true });
         if (options.paginate && !url.includes('page_token=')) return ok({ items: fields.slice(0, 5), has_more: true, page_token: 'next' });
         return ok({ items: options.paginate ? fields.slice(5) : fields, has_more: false });
@@ -49,11 +51,12 @@ function fixture(options = {}) {
         state.searches.push(body);
         if (options.renameOnSearch && !state.renamed) { state.primary = '再次改名'; state.renamed = true; return fail(1254045); }
         if (options.searchUnsupported) return fail(1254001);
-        if (body.filter.conditions.some((c) => !names.includes(c.field_name) && c.field_name !== state.primary)) return fail(1254045);
+        if (body.filter.conditions.some((c) => !names.includes(c.field_name) && c.field_name!=='native-log-date' && c.field_name !== state.primary && c.field_name !== (options.keyFieldId?'stable-log-key':state.primary))) return fail(1254045);
+        const dateCondition=body.filter.conditions.find(c=>['日期','native-log-date'].includes(c.field_name));if(dateCondition)assert.deepEqual(dateCondition.value.slice(0,1),['ExactDate']);
         const rows = state.rows.filter((r) => body.filter.conditions.every((c) => {
           const v = r.fields[c.field_name];
           const text = Array.isArray(v) ? v.map((x) => x.text || '').join('') : v;
-          return text === c.value[0];
+          return c.value[0]==='ExactDate'?Number(text)===Number(c.value[1]):text === c.value[0];
         }));
         return ok({ items: rows });
       }
@@ -63,7 +66,7 @@ function fixture(options = {}) {
         state.mutations.push({ method, body });
         if (options.renameOnWrite && !state.renamed) { state.primary = '再次改名'; state.renamed = true; }
         if (options.writeError) return fail(options.writeError);
-        if (Object.keys(body.fields).some((name) => !names.includes(name) && name !== state.primary)) return fail(1254045);
+        if (Object.keys(body.fields).some((name) => !names.includes(name) && name!=='native-log-date' && name !== state.primary && name !== (options.keyFieldId?'stable-log-key':state.primary))) return fail(1254045);
         if (method === 'PUT') {
           const row = state.rows.find((r) => url.endsWith('/' + r.record_id));
           Object.assign(row.fields, body.fields);
@@ -204,4 +207,22 @@ test('旧记录无真实芯片/设备应用字段时不从FPGA/软件/正文回�
   await fb.syncHuiduRecord({...rec,fpga_version:'FPGA-only',hdset_version:'HDSet-only',hdplayer_version:'HDPlayer-only',version_info:'APP guessing forbidden',content:'芯片FM6363 应用V1.0，仅正文不作字段'});
   assert.equal(state.rows[0].fields['驱动芯片'],undefined);assert.equal(state.rows[0].fields['应用版本'],undefined);
   assert.deepEqual(state.fieldCreates,[{field_name:'驱动芯片',type:1}]);
+});
+
+
+test('展示日期主列与稳定日志键分离：重复回传仍更新原行并保留人工内容',async()=>{
+ const {fb,state}=fixture({primary:'日期',primaryType:5,keyFieldId:'fld-stable'});
+ await fb.syncHuiduRecord(rec);state.rows[0].fields['备注']='人工保留';const original=state.rows[0].record_id;
+ await fb.syncHuiduRecord({...rec,content:'second upload'});assert.equal(state.rows.length,1);assert.equal(state.rows[0].record_id,original);assert.equal(state.rows[0].fields['备注'],'人工保留');assert.equal(typeof state.rows[0].fields['日期'],'number');assert.equal(typeof state.rows[0].fields['stable-log-key'],'string');assert.ok(state.searches.some(s=>s.filter.conditions.length===1&&s.filter.conditions[0].field_name==='stable-log-key'));assert.ok(!state.searches.some(s=>s.filter.conditions.length===1&&s.filter.conditions[0].field_name==='日期'));
+});
+test('显式日志键缺失时停止同步，不能回退到日期或另建记录',async()=>{
+ const {fb,state}=fixture({primary:'日期',primaryType:5,keyFieldId:'missing',keyFieldMissing:true});await assert.rejects(fb.syncHuiduRecord(rec));assert.equal(state.mutations.length,0);
+});
+
+test('文本日期首列仅展示原日期，原生日期与日志键分别保存在详情，回传不串行',async()=>{
+ const {fb,state}=fixture({primary:'日期',primaryType:1,keyFieldId:'fld-key',dateFieldId:'fld-date'});await fb.syncHuiduRecord(rec);state.rows[0].fields['备注']='人工';const id=state.rows[0].record_id;await fb.syncHuiduRecord({...rec,content:'again'});assert.equal(state.rows.length,1);assert.equal(state.rows[0].record_id,id);assert.equal(state.rows[0].fields['日期'],rec.log_date);assert.equal(typeof state.rows[0].fields['native-log-date'],'number');assert.equal(state.rows[0].fields['备注'],'人工');assert.ok(state.searches.some(s=>s.filter.conditions.some(c=>c.field_name==='native-log-date')));
+});
+
+test('异步卡同日不同客户端时间仍更新原行，日期筛选必须为ExactDate字符串协议',async()=>{
+ const {fb,state}=fixture();await fb.syncHuiduRecord(rec);const id=state.rows[0].record_id;state.rows[0].fields['备注']='人工';await fb.syncHuiduRecord({...rec,client_ts:'2026-10-12T22:40:00+08:00',content:'later'});assert.equal(state.rows.length,1);assert.equal(state.rows[0].record_id,id);assert.equal(state.rows[0].fields['备注'],'人工');assert.ok(state.searches.some(s=>s.filter.conditions.some(c=>c.field_name==='日期'&&c.value[0]==='ExactDate'&&typeof c.value[1]==='string')));
 });

@@ -48,3 +48,8 @@ index.html 顺序：v2-components.js → product-resources.js → app.js → con
 主聊天负责审查治理提交与同步后的增量，按提交合并并解决冲突；不得再次整目录覆盖。最终运行针对性回归，再按项目规范同步公开源码和脱敏报告。GitHub同步不代表部署。
 
 Frontend synchronized baseline commit: `87f2445` (work/v2-frontend). Use this commit as the governance merge base.
+
+
+## 2026-10-18 启动器配套核验补充
+
+治理版index已显式加载site-compat等脚本，8620必须用前端工作区自己的v2/tools/start-frontend.cjs启动；不要用旧综合工作区静态服务再次注入脚本。后者会重复执行组合入口，对冻结后的FrontendApp.channel赋值报错。现已切换到配套启动器，两入口50型号及悬浮/固定/关闭/键盘/手机/下载检查均无初始化错误；主聊天最终合并时必须同时审查入口与静态服务。

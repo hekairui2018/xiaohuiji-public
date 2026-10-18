@@ -17,3 +17,22 @@ test('Only approved cloud originals get short-lived links; local locations and e
   assert.match(out.items[0].url,/^https:\/\/synthetic-bucket/);assert.equal(new URL(out.items[0].url).searchParams.get('Expires'),'1300');assert.equal(out.items[1].url,null);assert.equal(out.items[1].available,false);assert.equal(out.sourceExcerpt,undefined);assert.equal(out.items[0].sourceReference,undefined);assert.ok(!JSON.stringify(out).includes('synthetic-secret'));assert.ok(!JSON.stringify(out).includes('/v2/offline/file'));
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('Public log upload reaches only the existing authenticated receiver and never opens internal APIs',async()=>{
+ const {createServer}=require('../adapters/http/server.cjs'),{createOfflineKnowledge}=require('../adapters/http/offline-knowledge.cjs');
+ let received=[];const logs={authorized:key=>key==='synthetic-key',receive:body=>{received.push(body);return {ok:true,dedup:false};}};
+ const offline=createOfflineKnowledge({knowledge:{cases:()=>[],products:()=>[],evidenceDocuments:()=>[]},logs});
+ const guard=createLanGuard({address:'127.0.0.2',cidr:'127.0.0.2/24',port:8520,publicOrigin:'http://trial.example'});
+ const server=createServer(undefined,{offlineKnowledge:offline,accessGuard:guard});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
+ const send=(route,method='POST',headers={},body='{}')=>new Promise((resolve,reject)=>{const request=require('node:http').request(base+route,{method,headers:{Host:'trial.example','Content-Type':'application/json',...headers}},response=>{const chunks=[];response.on('data',c=>chunks.push(c));response.on('end',()=>resolve({status:response.statusCode,json:async()=>JSON.parse(Buffer.concat(chunks))}));});request.on('error',reject);request.end(method==='GET'?undefined:body);});
+ try{
+  for(const key of ['', 'wrong']){const r=await send('/api/huidu/log','POST',{'x-upload-key':key});assert.equal(r.status,403);assert.equal((await r.json()).error,'upload-key-required');}assert.equal(received.length,0);
+  const payload={machine_id:'synthetic',log_date:'2026-10-18',content:'synthetic upload'};const r=await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key'},JSON.stringify(payload));assert.equal(r.status,200);assert.equal((await r.json()).ok,true);assert.deepEqual(received,[payload]);
+  assert.equal((await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key'},'{')).status,400);
+  assert.equal((await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key'},JSON.stringify({content:'x'.repeat(1024*1024)}))).status,413);
+  for(const route of ['/api/huidu/log','/v2/offline/session?id=another','/v2/offline/log-status','/api/health'])assert.equal((await send(route,'GET')).status,403);
+  for(const route of ['/api/ai/chat','/api/ocr','/v2/ordering/chat'])assert.equal((await send(route,'POST',{'x-upload-key':'synthetic-key'})).status,403);
+  assert.equal((await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key',Origin:'https://evil.example'})).status,403);assert.equal(received.length,1);
+ }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
+});
