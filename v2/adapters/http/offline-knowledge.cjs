@@ -131,7 +131,12 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    if(logRoute&&req.method==='POST'){if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});}
    if(image||logRoute){if(req.method!=='POST')return send(405,{error:'method-not-allowed'});let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>(image?15*1024*1024:1024*1024))return send(413,{error:'body-too-large'});chunks.push(chunk);}let b;try{b=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
     if(image)return send(200,images?await images.recognize(b):{ok:false,message:'本地图片识别未配置，请输入文字。'});
-    if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});return send(200,logs.receive(b));}
+    if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});
+    let result;try{result=logs.receive(b);}catch(e){
+     if(e.message==='invalid-log')return send(400,{error:'invalid-log',message:'日志正文必须为字符串且不超过900000个字符。'});
+     if(e.message==='invalid-log-identity')return send(400,{error:'invalid-log-identity',message:'必须提供machine_id或devKey（最多160个字符），以及YYYY-MM-DD格式的log_date。'});
+     return send(503,{error:'log-store-unavailable',message:'日志暂时无法保存，请保留本地日志并稍后重试。'});
+    }return send(200,result);}
    if(req.method==='GET'&&p==='/v2/offline/session'){return send(200,sessions.get(u.searchParams.get('id')));}
    if(req.method==='GET'&&p==='/v2/offline/log-status')return send(200,logs?.status()||{configured:false});
    if(legacy){const d=documentLinks.get(p),raw=await request('/search?q='+encodeURIComponent(d.name)+'&mode=files&limit=10');const file=(raw.results||[]).find(r=>r.kind==='file'&&Number.isInteger(r.locationId)&&r.name===d.name&&(!d.sha256||r.sha256===d.sha256));if(!file)return send(404,{error:'original-not-located',message:'索引中尚未定位此版本原件，请使用资料搜索核对版本。'});const target=fileUrl(file.locationId,d.name);if(target.includes('/preview?')){res.writeHead(302,{Location:target});res.end();return true;}await stream('/resource?id='+file.locationId,res);return true;}

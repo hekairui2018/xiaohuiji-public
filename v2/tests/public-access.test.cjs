@@ -1,6 +1,21 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {createLanGuard}=require('../adapters/http/lan-access.cjs'),{createPublicCatalog}=require('../adapters/http/public-catalog.cjs');
+test('Real log validation returns actionable 400 while storage failure remains retryable 503',async()=>{
+ const {createServer}=require('../adapters/http/server.cjs'),{createOfflineKnowledge}=require('../adapters/http/offline-knowledge.cjs'),{createFeishuLogs}=require('../external-services/feishu-logs.cjs');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v2-log-validation-')),configFile=path.join(dir,'feishu.env');fs.writeFileSync(configFile,'HUIDU_UPLOAD_KEY=synthetic-key\n');
+ const logs=createFeishuLogs({directory:path.join(dir,'logs'),configFile,autoStart:false});
+ const offline=createOfflineKnowledge({knowledge:{cases:()=>[],products:()=>[],evidenceDocuments:()=>[]},logs});
+ const server=createServer(undefined,{offlineKnowledge:offline});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const post=async body=>{const r=await fetch('http://127.0.0.1:'+server.address().port+'/api/huidu/log',{method:'POST',headers:{'Content-Type':'application/json','x-upload-key':'synthetic-key'},body:JSON.stringify(body)});return {status:r.status,body:await r.json()};};
+ try{
+  for(const body of [{},[],{content:42},{content:'x'.repeat(900001)}])assert.deepEqual((({status,body})=>[status,body.error])(await post(body)),[400,'invalid-log']);
+  for(const body of [{content:'synthetic'},{content:'synthetic',machine_id:'test',log_date:'bad'}])assert.deepEqual((({status,body})=>[status,body.error])(await post(body)),[400,'invalid-log-identity']);
+  const payload={machine_id:'synthetic',log_date:'2026-10-18',content:'synthetic upload'};
+  assert.equal((await post(payload)).status,200);assert.equal((await post(payload)).body.dedup,true);
+  logs.receive=()=>{throw Error('private-storage-detail');};const failed=await post(payload);assert.equal(failed.status,503);assert.equal(failed.body.error,'log-store-unavailable');assert.ok(!JSON.stringify(failed).includes('private-storage-detail'));
+ }finally{server.closeAllConnections();await new Promise(r=>server.close(r));logs.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
 test('Exact tunnel origin grants only public quick routes; internal files, sessions and write APIs stay denied',()=>{
  const guard=createLanGuard({address:'192.168.1.100',cidr:'192.168.1.100/24',port:8520,publicOrigin:'http://trial.example'});
  const run=(url,method='GET',extra={})=>{const req={url,method,headers:{host:'trial.example',...extra},socket:{remoteAddress:'127.0.0.1'}},res={setHeader(){},writeHead(s){this.status=s;},end(){}};return{ok:guard(req,res),status:res.status,public:req.v2Public};};
