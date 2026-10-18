@@ -2024,39 +2024,30 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
   if (cat === "firmware") {
     const categories=docs.firmwareCategories||[{key:'other',label:'其他',models:groups.map(g=>g.model)}];
     const byModel=new Map(groups.map(g=>[g.model,g]));
-    const panel=document.createElement('div');panel.className='firmware-panel';panel.id='firmware-download-panel';panel.popover='manual';panel.tabIndex=-1;panel.setAttribute('role','dialog');
-    let active=null,pinned=false,leaveTimer;
-    const closePanel=()=>{clearTimeout(leaveTimer);if(panel.matches(':popover-open'))panel.hidePopover();if(active)active.setAttribute('aria-expanded','false');active=null;pinned=false;};
-    const leave=()=>{if(!pinned){clearTimeout(leaveTimer);leaveTimer=setTimeout(closePanel,150);}};
-    function show(button,product,pin){
-      clearTimeout(leaveTimer);if(pinned&&!pin)return;
-      if(active&&active!==button)active.setAttribute('aria-expanded','false');active=button;pinned=pin;
-      panel.replaceChildren();panel.setAttribute('aria-label',product.label+' 固件下载');
-      const header=document.createElement('div');header.className='firmware-panel-header';
-      const title=document.createElement('strong');title.textContent=product.label+' · '+product.count+' 个固件';
-      const close=document.createElement('button');close.type='button';close.className='firmware-panel-close';close.textContent='×';close.title='关闭固件下载';close.setAttribute('aria-label','关闭固件下载');close.hidden=!pin;close.onclick=()=>{const trigger=active;closePanel();trigger?.focus({preventScroll:true});};header.append(title,close);
-      const files=document.createElement('div');files.className='firmware-panel-files';product.items.forEach(item=>files.append(docFileActions(item,true)));panel.append(header,files);
-      if(!panel.matches(':popover-open'))panel.showPopover();button.setAttribute('aria-expanded','true');
-      const r=button.getBoundingClientRect(),bounds=panel.getBoundingClientRect(),above=r.top-bounds.height-8,below=r.bottom+8;const top=above>=12?above:below+bounds.height<=innerHeight-12?below:Math.max(12,Math.min(above,innerHeight-bounds.height-12));panel.style.left=Math.max(12,Math.min(r.left,innerWidth-bounds.width-12))+'px';panel.style.top=top+'px';
-      if(pin)panel.focus({preventScroll:true});
-    }
-    panel.addEventListener('pointerenter',()=>clearTimeout(leaveTimer));panel.addEventListener('pointerleave',leave);
-    panel.addEventListener('keydown',event=>{if(event.key==='Escape'){const trigger=active;closePanel();trigger?.focus({preventScroll:true});}});
-    panel.addEventListener('toggle',event=>{if(event.newState==='closed'){if(active)active.setAttribute('aria-expanded','false');active=null;pinned=false;}});
     categories.forEach(category=>{
       const products=category.models.map(model=>byModel.get(model)).filter(Boolean);
       const term=String(qArg||'').trim().toUpperCase(),matches=products.filter(p=>!term||p.model.toUpperCase().includes(term)||p.items.some(i=>i.name.toUpperCase().includes(term)));if(!matches.length)return;
       const pack=docCatSummary(category.label,matches.length+' 款型号');pack.det.className='doc-cat-group firmware-category';
       pack.det.dataset.docState='firmware:group:'+category.key;pack.det.open=states.get(pack.det.dataset.docState)??!!term;
-      pack.body.className='doc-cat-group-body firmware-models';
+      pack.body.className='doc-cat-group-body firmware-browser';
+      const models=document.createElement('div');models.className='firmware-models';models.setAttribute('role','group');models.setAttribute('aria-label',category.label+'型号');
+      const panel=document.createElement('section');panel.className='firmware-panel';panel.id='firmware-files-'+category.key;
+      const header=document.createElement('div');header.className='firmware-panel-header';
+      const title=document.createElement('strong');title.textContent='请选择左侧型号';title.setAttribute('aria-live','polite');
+      const close=document.createElement('button');close.type='button';close.className='firmware-panel-close';close.textContent='×';close.title='关闭固件资料';close.setAttribute('aria-label','关闭固件资料');close.hidden=true;
+      const files=document.createElement('div');files.className='firmware-panel-files';files.tabIndex=0;files.setAttribute('role','region');files.setAttribute('aria-label','固件文件列表');
+      let active=null;
+      function clearSelection(){const previous=active;if(active)active.setAttribute('aria-pressed','false');active=null;files.replaceChildren();title.textContent='请选择型号查看固件';close.hidden=true;previous?.focus({preventScroll:true});}
+      close.onclick=clearSelection;
+      panel.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection();});
+      header.append(title,close);panel.append(header,files);
       matches.forEach(product=>{
-        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.title='悬浮查看；点击固定显示固件下载';button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-expanded','false');
-        button.addEventListener('pointerenter',event=>{if(event.pointerType==='mouse')show(button,product,false);});button.addEventListener('pointerleave',leave);button.onclick=()=>show(button,product,true);
-        button.addEventListener('keydown',event=>{if(event.key==='Escape')closePanel();});pack.body.append(button);
+        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.title='查看 '+product.model+' 固件';button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-pressed','false');
+        button.onclick=()=>{if(active)active.setAttribute('aria-pressed','false');active=button;button.setAttribute('aria-pressed','true');title.textContent=product.label+' · '+product.count+' 个固件';close.hidden=false;files.replaceChildren(...product.items.map(item=>docFileActions(item,true)));files.scrollTop=0;};
+        models.append(button);
       });
-      pack.det.addEventListener('toggle',()=>{if(!pack.det.open&&active&&pack.body.contains(active))closePanel();});wrap.append(pack.det);
+      pack.body.append(models,panel);wrap.append(pack.det);
     });
-    wrap.append(panel);
   } else {
     const kwFlat = (qArg == null ? quickSearchInput.value.trim() : String(qArg).trim());
     const kwUp = kwFlat.toUpperCase();
