@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../backend/feishu-bitable.cjs'), 'utf8');
 const names = ['APP版本', '上报类型', '日期', '客户端时间', '服务器接收时间',
   '上传次数', '日志附件', '入库时间', '发送型号', 'FPGA版本', '应用版本',
-  '接收卡型号', '接收卡版本', 'HDSet版本', 'HDPlayer版本', '驱动芯片'];
+  '接收卡型号', '接收卡版本', 'HDSet版本', 'HDPlayer版本', '驱动芯片', '回传编号'];
 const rec = { machine_id: 'test-machine', devKey: 'A3L-00-test', device_code: 'A3L-00-test',
   device_class: 'async', log_date: '2026-10-12', app_version: 'test-build', reason: 'done',
   content: 'test log', client_ts: '2026-10-12T10:30:00+08:00',
@@ -24,7 +24,7 @@ function fixture(options = {}) {
     Buffer, FormData, Blob, console,
     require: (name) => name === 'fs' ? {
       existsSync: () => true,
-      readFileSync: () => 'FEISHU_APP_ID=test\nFEISHU_APP_SECRET=test\nFEISHU_APP_TOKEN=test\nFEISHU_TABLE_ID=test'+(options.keyFieldId?'\nFEISHU_LOG_KEY_FIELD_ID='+options.keyFieldId:'')+(options.dateFieldId?'\nFEISHU_LOG_DATE_FIELD_ID='+options.dateFieldId:''),
+      readFileSync: () => 'FEISHU_APP_ID=test\nFEISHU_APP_SECRET=test\nFEISHU_APP_TOKEN=test\nFEISHU_TABLE_ID=test'+(options.keyFieldId?'\nFEISHU_LOG_KEY_FIELD_ID='+options.keyFieldId:'')+(options.dateFieldId?'\nFEISHU_LOG_DATE_FIELD_ID='+options.dateFieldId:'')+(options.appendOnly?'\nFEISHU_LOG_APPEND_ONLY=1':''),
       mkdirSync: () => {}, writeFileSync: (fp, buf) => state.files.push({ fp, text: buf.toString() })
     } : require(name),
     fetch: async (url, init = {}) => {
@@ -92,6 +92,12 @@ test('主列重命名为日期-时间后可创建；不重建列、不写人工�
   assert.equal(state.rows[0].fields['日志附件'][0].file_token, 'attachment');
   assert.equal(state.files[0].text, rec.content);
   assert.equal(state.fieldCreates.length, 0);
+});
+
+test('追加模式同设备同日不同回传新增行；同一次回传重试不改原行或人工内容',async()=>{
+ const {fb,state}=fixture({appendOnly:true});const first={...rec,receiver_upload_id:'a'.repeat(64)},second={...rec,receiver_upload_id:'b'.repeat(64),content:'next upload'};
+ assert.equal((await fb.syncHuiduRecord(first)).action,'created');state.rows[0].fields['产品型号']='人工型号';const before=JSON.stringify(state.rows[0]);
+ assert.equal((await fb.syncHuiduRecord(second)).action,'created');assert.equal((await fb.syncHuiduRecord(first)).action,'already-received');assert.equal(state.rows.length,2);assert.equal(JSON.stringify(state.rows[0]),before);assert.equal(state.mutations.filter(x=>x.method==='PUT').length,0);assert.ok(state.files[0].fp.includes(first.receiver_upload_id));assert.notEqual(state.files[0].fp,state.files[1].fp);
 });
 
 test('旧名仍兼容；重复同步更新原行并保留人工列', async () => {

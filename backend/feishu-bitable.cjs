@@ -63,6 +63,7 @@ function loadEnv() {
 
 const ENV = loadEnv();
 const siteDisplayEnabled = ENV.FEISHU_SITE_DISPLAY === '1';
+const appendOnly = ENV.FEISHU_LOG_APPEND_ONLY === '1';
 const SITE_DISPLAY_FIELDS = ['产品型号', '版本信息', '现场环境（软/固件版本、源端设备、线材）', '自动建议-产品型号', '自动建议-版本信息', '自动建议-现场环境', '自动建议-缺失或冲突', '结构化日志详情', '自动写入基线'].map(name => ({name, type: 1}));
 const CFG = {
   appId: ENV.FEISHU_APP_ID || '',
@@ -182,7 +183,7 @@ async function ensureSchema(force = false) {
     const existing = new Set(fields.map((f) => f.field_name));
     const base = '/open-apis/bitable/v1/apps/' + CFG.appToken + '/tables/' + CFG.tableId + '/fields';
 
-    for (const f of [...EXPECTED_FIELDS, ...(siteDisplayEnabled ? SITE_DISPLAY_FIELDS : [])]) {
+    for (const f of [...EXPECTED_FIELDS, ...(siteDisplayEnabled ? SITE_DISPLAY_FIELDS : []), ...(appendOnly ? [{name:'回传编号',type:1}] : [])]) {
       if (existing.has(f.name)) continue;
       const payload = { field_name: f.name, type: f.type };
       if (f.property) payload.property = f.property;
@@ -327,7 +328,7 @@ async function buildFields(rec) {
   const key = model ? ([tsMin || rec.log_date, model].filter(Boolean).join(' ')) : (devKey + '@' + rec.log_date);
   const content = String(rec.content || '') + (siteDisplayEnabled ? '\n\n[结构化上报原始字段，仅供日志详情核对]\n' + JSON.stringify(require('./log-display.cjs').recordDetails(rec), null, 2) : '');
   const buf = Buffer.from(content, 'utf8');
-  const fileName = txtFileName(rec);
+  const fileName = appendOnly&&rec.receiver_upload_id ? txtFileName(rec).replace(/\.txt$/,'_'+rec.receiver_upload_id+'.txt') : txtFileName(rec);
 
   const localPath = saveLocalTxt(fileName, buf);            // 1) 服务器本地留底（失败即抛）
   const fileToken = await uploadTxt(fileName, buf);          // 2) 上传为多维表附件
@@ -339,6 +340,7 @@ async function buildFields(rec) {
     '上传次数': Number(rec.upload_count) || 1,
     '日志附件': [{ file_token: fileToken }] // 日志不再写全文，一律附件承载
   };
+  if(appendOnly&&rec.receiver_upload_id)fields['回传编号']=rec.receiver_upload_id;
   // Only explicit nonempty fields update these columns; older records must not erase manual values.
   for (const [column, key] of [['驱动芯片', 'chips'], ['应用版本', 'device_app_version'], ['APP版本', 'app_version']]) {
     const value = typeof rec[key] === 'string' ? rec[key].trim() : '';
@@ -373,10 +375,16 @@ async function syncHuiduRecordNow(rec) {
   const base = '/open-apis/bitable/v1/apps/' + CFG.appToken + '/tables/' + CFG.tableId + '/records';
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const recordId = await findRecordId(sendModel(rec), rec.log_date, rec);
+      let recordId;
+      if(appendOnly&&rec.receiver_upload_id){
+        const found=await api('POST',base+'/search',{page_size:2,filter:{conjunction:'and',conditions:[{field_name:'回传编号',operator:'is',value:[rec.receiver_upload_id]}]}});
+        if(found.items?.length>1)throw Error('duplicate-upload-identity');
+        if(found.items?.length===1)return {action:'already-received',record_id:found.items[0].record_id,key};
+      }else recordId = await findRecordId(sendModel(rec), rec.log_date, rec);
       if (siteDisplayEnabled) {
         const { buildDisplay, displayPatch, recordDetails } = require('./log-display.cjs');
-        const display = buildDisplay({...rec, ...(rec.site_display_snapshot || {})});
+        const snapshot=rec.site_display_snapshot;
+        const display = buildDisplay(snapshot ? {...Object.fromEntries(['chips','site_env','hdset_version','hdplayer_version'].filter(k=>!Object.hasOwn(snapshot,k)).map(k=>[k,rec[k]])),...snapshot} : rec);
         const current = recordId ? await api('GET', base + '/' + recordId) : null;
         Object.assign(built.fields, displayPatch(display, {existing: !!recordId,currentFields: current?.record?.fields || {}}));
         const detail = JSON.stringify(recordDetails(rec));
@@ -401,7 +409,7 @@ async function syncHuiduRecordNow(rec) {
 
 let siteSyncQueue = Promise.resolve();
 function syncHuiduRecord(rec) {
-  if (!siteDisplayEnabled) return syncHuiduRecordNow(rec);
+  if (!siteDisplayEnabled&&!appendOnly) return syncHuiduRecordNow(rec);
   const task = siteSyncQueue.then(() => syncHuiduRecordNow(rec));
   siteSyncQueue = task.catch(() => {});
   return task;

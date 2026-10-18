@@ -16,24 +16,28 @@ function loadWriter({directory,configFile,fetchImpl=fetch}){
 function createFeishuLogs({directory,configFile,fetchImpl,interval=60000,autoStart=true}={}){
  directory=path.resolve(directory);for(const sub of ['records','outbox','txt'])fs.mkdirSync(path.join(directory,sub),{recursive:true});
  const cfg=readConfig(configFile),writer=loadWriter({directory,configFile,fetchImpl});
- const enabled=cfg.FEISHU_SYNC_ENABLED==='1'&&writer.isConfigured();let running=false,lastError=null,lastSuccess=null;
+ const enabled=cfg.FEISHU_SYNC_ENABLED==='1'&&writer.isConfigured(),appendOnly=cfg.FEISHU_LOG_APPEND_ONLY==='1';let running=false,lastError=null,lastSuccess=null;
  const digest=s=>crypto.createHash('sha256').update(s).digest('hex');
  function receive(input){
   if(!input||typeof input!=='object'||Array.isArray(input)||typeof input.content!=='string'||input.content.length>900000)throw Error('invalid-log');
   const dev=String(input.devKey||input.machine_id||'');if(!dev||dev.length>160||!/^\d{4}-\d{2}-\d{2}$/.test(input.log_date||''))throw Error('invalid-log-identity');
-  const id=digest(dev+'@'+input.log_date),file=path.join(directory,'records',id+'.json'),pending=path.join(directory,'outbox',id+'.json');
+  const id=appendOnly?digest(JSON.stringify(Object.fromEntries(Object.entries(input).sort(([a],[b])=>a.localeCompare(b))))):digest(dev+'@'+input.log_date),file=path.join(directory,'records',id+'.json'),pending=path.join(directory,'outbox',id+'.json');
   const old=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):null;
-  const record={...old};for(const [k,v]of Object.entries(input))if(v!==null&&v!==undefined&&v!=='')record[k]=v;
+  if(appendOnly&&old)return {ok:true,dedup:true,sync:enabled?'queued-or-synced':'configuration-required'};
+  const record=appendOnly?{}:{...old};for(const [k,v]of Object.entries(input))if(v!==null&&v!==undefined&&v!=='')record[k]=v;
   // Snapshot this upload, never inherit another run's before/after readings for presentation.
-  record.site_display_snapshot=mergeSnapshot(input,old?.site_display_snapshot);
+  record.site_display_snapshot=mergeSnapshot(input,appendOnly?undefined:old?.site_display_snapshot);
   record.machine_id=String(input.machine_id||old?.machine_id||dev);record.devKey=dev;
   const comparison={...record};for(const k of ['server_ts','upload_count','contentHash'])delete comparison[k];
   const hash=digest(JSON.stringify(Object.fromEntries(Object.entries(comparison).sort(([a],[b])=>a.localeCompare(b)))));
   if(old?.contentHash===hash)return {ok:true,dedup:true,sync:enabled?'queued-or-synced':'configuration-required'};
   record.contentHash=hash;record.server_ts=new Date().toISOString();record.upload_count=(old?.upload_count||0)+1;
-  fs.writeFileSync(file+'.tmp',JSON.stringify(record));fs.renameSync(file+'.tmp',file);
+  if(appendOnly)record.receiver_upload_id=id;
+  if(!appendOnly){fs.writeFileSync(file+'.tmp',JSON.stringify(record));fs.renameSync(file+'.tmp',file);}
   fs.writeFileSync(path.join(directory,'txt',id+'.txt'),record.content,'utf8');
   fs.writeFileSync(pending+'.tmp',JSON.stringify(record));fs.renameSync(pending+'.tmp',pending);
+  // In append mode, the receipt exists only after TXT and retry queue are durable.
+  if(appendOnly){fs.writeFileSync(file+'.tmp',JSON.stringify(record));fs.renameSync(file+'.tmp',file);}
   if(enabled&&autoStart)setImmediate(()=>drain());return {ok:true,dedup:false,sync:enabled?'queued':'configuration-required'};
  }
  async function drain(){if(running||!enabled)return {skipped:true};running=true;let completed=0;
@@ -50,6 +54,6 @@ function createFeishuLogs({directory,configFile,fetchImpl,interval=60000,autoSta
  const timer=setInterval(()=>drain(),interval);timer.unref();
  if(enabled&&autoStart)setImmediate(()=>drain());
  return {receive,activity,drain,authorized:key=>!!cfg.HUIDU_UPLOAD_KEY&&typeof key==='string'&&key===cfg.HUIDU_UPLOAD_KEY,
-  status:()=>({enabled,configured:writer.isConfigured(),pending:fs.readdirSync(path.join(directory,'outbox')).filter(x=>x.endsWith('.json')).length,running,lastSuccess,lastError,knowledgeSync:false}),close:()=>clearInterval(timer)};
+  status:()=>({enabled,configured:writer.isConfigured(),appendOnly,pending:fs.readdirSync(path.join(directory,'outbox')).filter(x=>x.endsWith('.json')).length,running,lastSuccess,lastError,knowledgeSync:false}),close:()=>clearInterval(timer)};
 }
 module.exports={createFeishuLogs,loadWriter};
