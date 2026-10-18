@@ -17,7 +17,7 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
   const messages=document.getElementById('aiMessages'),input=document.getElementById('aiInput'),send=document.getElementById('aiSendBtn'),tempButton=document.getElementById('v2NewQuery'),toolbar=tempButton.parentElement,mode=document.getElementById('v2WorkMode');
   const normalButton=make('button','普通对话'),guestButton=make('button','访客对话');normalButton.type=guestButton.type='button';normalButton.id='v2NormalConversation';guestButton.id='v2GuestConversation';tempButton.hidden=true;
   const controls=make('div');controls.className='v2-conversation-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','对话保存方式');controls.append(normalButton,guestButton);
-  const status=make('p');status.className='v2-conversation-status';status.setAttribute('role','status');toolbar.before(status);document.querySelector('.ai-input-row').before(controls);
+  const status=make('p');status.className='v2-conversation-status';status.setAttribute('role','status');toolbar.before(status);toolbar.append(controls);
   const liveNodes=new Map();let storageError=false,normalRecord=current;
   const fields=()=>[...document.querySelectorAll('#v2Conditions input,#v2Conditions textarea')];
   const fieldKey=(e,i)=>e.dataset.fact||e.id||'field-'+i;
