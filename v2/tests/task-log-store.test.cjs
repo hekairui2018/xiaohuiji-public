@@ -47,3 +47,31 @@ test('A success-table error does not block exception-table delivery',async()=>{
  const store=createTaskLogStore({directory,autoStart:false,writer:{async sync(kind){if(kind==='success')throw Error('task-schema-not-confirmed');failureWrites++;return {record_id:'failure-record'};}}});
  try{store.receive(failure());store.receive(success(2));const result=await store.drain();assert.equal(result.completed,1);assert.equal(result.failed,1);assert.equal(failureWrites,1);assert.equal(store.status().lastError.kind,'success');assert.equal(store.status().pending,1);}finally{store.close();fs.rmSync(directory,{recursive:true,force:true});}
 });
+
+const source='hdset_selected_device_label_model_prefix';
+const receiverFacts={sender_model:'C16L',sender_model_source:source,recv_models_source:'firmware_directory',receiver_inventory:[{count:1,model_source:'not_collected',firmware_model:'R712',firmware_model_source:'firmware_directory'}],receiver_upgrades:[{...card,status:'failed',model_source:'not_collected',firmware_model:'R712',firmware_model_source:'firmware_directory'}]};
+test('Model identified before exception survives missing fields only inside current device/run',async()=>{const f=fixture();try{
+ f.store.receive({...base,...receiverFacts});f.store.receive(failure(2));await f.store.drain();
+ let r=f.writes.at(-1).state.latest;for(const key of Object.keys(receiverFacts))assert.deepEqual(r[key],receiverFacts[key]);assert.equal(f.rows.size,1);assert.equal(f.writes[0].kind,'failure');
+ f.store.receive({...failure(3),upgrade_run_id:'receiver-new-run'});await f.store.drain();r=f.writes.at(-1).state.latest;
+ assert.equal(r.sender_model,undefined);assert.equal(r.sender_model_source,undefined);assert.equal(r.receiver_inventory,undefined);assert.equal(r.receiver_upgrades,undefined);assert.equal(r.recv_models_source,undefined);
+}finally{f.close();}});
+test('Model source changes are effective content; duplicate, stale and restarted delivery remain idempotent',async()=>{const f=fixture();try{
+ const event={...failure(),...receiverFacts};delete event.sender_model_source;f.store.receive(event);await f.store.drain();assert.equal(f.writes.length,1);
+ const next={...event,event_id:'event-0003',event_sequence:3,sender_model_source:source};f.store.receive(next);await f.store.drain();assert.equal(f.writes.length,2);
+ assert.equal(f.store.receive(next).dedup,true);await f.store.drain();assert.equal(f.writes.length,2);
+ f.store.receive({...base,event_id:'event-0002',event_sequence:2,sender_model:'OLD1',sender_model_source:'old-source'});await f.store.drain();assert.equal(f.writes.length,2);
+ const changed={...next,event_id:'event-0004',event_sequence:4,recv_models_source:'not_collected'};f.store.receive(changed);await f.store.drain();assert.equal(f.writes.length,3);assert.equal(f.writes.at(-1).state.latest.sender_model,'C16L');
+ f.restart();await f.store.drain();assert.equal(f.writes.length,3);
+ const archives=fs.readdirSync(path.join(f.directory,'events',fs.readdirSync(path.join(f.directory,'events'))[0]));assert.equal(archives.length,4);
+}finally{f.close();}});
+test('Same model different device/new task never inherit source, model or receivers; conflicts remain rejected',async()=>{const f=fixture();try{
+ f.store.receive({...failure(),...receiverFacts});await f.store.drain();
+ f.store.receive({...failure(),task_run_id:'task-device-2',device_code:'C16L-other-serial',sender_model:'C16L'});await f.store.drain();let r=f.writes.at(-1).state.latest;assert.equal(r.sender_model_source,null);assert.equal(r.receiver_inventory,undefined);
+ f.store.receive({...failure(),task_run_id:'task-new-run-3'});await f.store.drain();r=f.writes.at(-1).state.latest;assert.equal(r.sender_model,undefined);assert.equal(r.receiver_upgrades,undefined);assert.equal(f.rows.size,3);
+ assert.throws(()=>f.store.receive({...failure(2),device_code:'C16L-other-serial'}),/task-device-conflict/);
+}finally{f.close();}});
+test('Source length/type is validated but old source-less helpers stay accepted',()=>{const f=fixture();try{
+ assert.equal(f.store.receive(failure()).success_qualified,false);
+ for(const sender_model_source of [1,{},'x'.repeat(161)])assert.throws(()=>f.store.receive({...failure(2),sender_model_source}),/invalid-task-event/);
+}finally{f.close();}});

@@ -57,7 +57,7 @@ test('Unconfirmed hardware models group same transitions without losing raw card
  const {buildDisplay}=require('../../backend/log-display.cjs');
  const cards=Array.from({length:26},(_,i)=>({run_id:'run',device_id:'device',port:Math.floor(i/4),card_id:String(i%4+1),model_source:'not_collected',firmware_model:'R712',firmware_model_source:'firmware_directory',before_version:i<23?'25.06.02.30':'25.09.01.30',after_version:'25.26.65.30',after_version_source:'hdset_upgrade_readback',after_confirmed:true,status:'succeeded'}));
  const result=buildDisplay({upgrade_run_id:'run',device_code:'device',receiver_upgrades:cards});
- assert.equal(result.versionInfo.split('\n').length,4);assert.match(result.versionInfo,/23张/);assert.match(result.versionInfo,/3张/);assert.equal(result.snapshot.receiver_upgrades.length,26);
+ assert.equal(result.versionInfo.split('\n')[0],'发送设备：device');assert.equal(result.versionInfo.split('\n').length,5);assert.match(result.versionInfo,/23张/);assert.match(result.versionInfo,/3张/);assert.equal(result.snapshot.receiver_upgrades.length,26);
 });
 
 test('Transport feedback and request time changes skip sync; equipment facts and real failures do not',()=>{

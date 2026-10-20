@@ -8,7 +8,7 @@ function fixture({cleanLeader=false}={}){
  const fetchImpl=async(url,init)=>{
   requests.push({url,method:init.method,body:init.body});
   if(url.includes('/permissions/'))return ok({permission_public:{link_share_entity:privateAccess?'closed':'tenant_readable',external_access:false}});
-  if(url.includes('/fields?'))return ok({items:[{field_name:'任务编号',is_primary:true,type:1},...['产品型号','版本信息','现场环境（软/固件版本、源端设备、线材）','非人工暂停记录','自动写入基线','自动建议-产品型号','自动建议-版本信息','自动建议-现场环境','自动建议-缺失或冲突','备注','人工备注','验收人工备注','运行ID','机器码','异常记录','运行日志','日志附件','设备信息','异常次数','服务器接收时间'].filter(n=>!cleanLeader||(!n.startsWith('自动建议-')&&n!=='自动写入基线')).map(field_name=>({field_name,type:1}))]});
+  if(url.includes('/fields?'))return ok({items:[{field_name:'任务编号',is_primary:true,type:1},...['产品型号','版本信息','现场环境（软/固件版本、源端设备、线材）','非人工暂停记录','自动写入基线','自动建议-产品型号','自动建议-版本信息','自动建议-现场环境','自动建议-缺失或冲突','备注','人工备注','验收人工备注','运行ID','机器码','异常记录','运行日志','日志附件','设备信息','发送型号','异常次数','服务器接收时间'].filter(n=>!cleanLeader||(!n.startsWith('自动建议-')&&n!=='自动写入基线')).map(field_name=>({field_name,type:1}))]});
   if(url.includes('/upload_all')){assert.ok(init.body instanceof FormData);return ok({file_token:'synthetic-log'});}
   const kind=url.includes('/tables/leader/')?'success':'failure';
   if(url.includes('/records/search'))return ok({items:rows.has(kind)?[rows.get(kind)]:[]});
@@ -53,4 +53,45 @@ test('Deleted leadership technical columns stay deleted; local baseline still pr
 test('Prepared local baseline survives an ambiguous create and protects a subsequent human edit',async()=>{
  const f=fixture({cleanLeader:true});let prepared;f.loseNextResponse();await assert.rejects(()=>f.writer.sync('success',f.state,{},value=>{prepared=value;}),/response-lost/);
  f.rows.get('success').fields['版本信息']='';await f.writer.sync('success',f.state,{prepared_baseline:prepared});assert.equal(f.rows.get('success').fields['版本信息'],'');
+});
+
+const modelSource='hdset_selected_device_label_model_prefix';
+function failureModelState(f,overrides={}){return {...f.state,exceptions:[{event_id:'synthetic-model-event',node:'upgrade',message:'upgrade failed'}],latest:{...f.state.latest,sender_model:'C16L',sender_model_source:modelSource,recv_models_source:'firmware_directory',receiver_inventory:[{count:1,model_source:'not_collected',firmware_model:'R712',firmware_model_source:'firmware_directory'}],receiver_upgrades:[{...f.state.latest.receiver_upgrades[0],status:'failed',model_source:'not_collected',firmware_model:'R712',firmware_model_source:'firmware_directory'}],...overrides}};}
+test('Failure sender is standalone; equipment and full TXT retain all provenance without hardware claims',async()=>{
+ const f=fixture(),state=failureModelState(f);await f.writer.sync('failure',state,{});
+ const fields=f.rows.get('failure').fields,equipment=JSON.parse(fields['设备信息']);
+ assert.equal(fields['发送型号'],'C16L');assert.equal(equipment.product_model_display,'C16L＋R712（接收卡型号：固件目录关联）');
+ for(const key of ['sender_model','sender_model_source','receiver_inventory','receiver_upgrades','recv_models_source'])assert.deepEqual(equipment[key],state.latest[key]);
+ const upload=f.requests.find(r=>r.url.includes('/upload_all')).body;
+ const txt=await upload.get('file').text();assert.equal(Number(upload.get('size')),Buffer.byteLength(txt));
+ const stored=JSON.parse(txt.split('设备信息：\n')[1].split('\n完整运行日志：')[0]);assert.deepEqual(stored,equipment);assert.ok(txt.endsWith(state.latest.content));
+ assert.equal(f.rows.has('success'),false);
+});
+test('Legacy sender has no invented source; combined label and missing fields never fill standalone sender',async()=>{
+ for(const sender_model of ['C16L','C16L＋R712',undefined]){
+  const f=fixture(),state=failureModelState(f,{sender_model,sender_model_source:undefined,receiver_inventory:undefined,receiver_upgrades:undefined,recv_models_source:undefined});await f.writer.sync('failure',state,{});
+  const fields=f.rows.get('failure').fields,equipment=JSON.parse(fields['设备信息']);
+  assert.equal(fields['发送型号'],sender_model==='C16L'?'C16L':'');assert.equal(equipment.sender_model_source,null);assert.deepEqual(equipment.receiver_inventory,[]);assert.deepEqual(equipment.receiver_upgrades,[]);
+ }
+});
+test('Large failure inventories remain complete in TXT while cell points to attachment',async()=>{
+ const f=fixture(),state=failureModelState(f,{receiver_inventory:Array.from({length:256},(_,i)=>({count:1,model_source:'not_collected',firmware_model:'R712',firmware_model_source:'firmware_directory',note:'original-detail-'+i+'x'.repeat(100)})),content:'large original log'.repeat(1500)});
+ await f.writer.sync('failure',state,{});const fields=f.rows.get('failure').fields;
+ assert.match(fields['设备信息'],/完整receiver_inventory/);const txt=await f.requests.find(r=>r.url.includes('/upload_all')).body.get('file').text();
+ assert.ok(txt.includes('original-detail-255'));assert.ok(txt.endsWith(state.latest.content));assert.ok(txt.length>12000);
+});
+test('Failure upload response loss retries update the same run row and never touch remarks',async()=>{
+ const f=fixture(),state=failureModelState(f);f.loseNextResponse();await assert.rejects(()=>f.writer.sync('failure',state,{}),/response-lost/);
+ f.rows.get('failure').fields['人工备注']='keep';await f.writer.sync('failure',state,{});
+ assert.equal(f.requests.filter(x=>x.method==='POST'&&x.url.includes('/records?')).length,1);assert.equal(f.rows.get('failure').fields['人工备注'],'keep');
+});
+
+test('Unknown hardware and foreign card identities never become a confirmed receiver model',async()=>{
+ const f=fixture(),state=failureModelState(f,{receiver_inventory:[{count:1,model:'R712',model_source:'not_collected'}],receiver_upgrades:[{device_id:'foreign-device',run_id:'foreign-run',firmware_model:'R512S',firmware_model_source:'firmware_directory'}]});
+ await f.writer.sync('failure',state,{});const equipment=JSON.parse(f.rows.get('failure').fields['设备信息']);assert.equal(equipment.product_model_display,'C16L');assert.equal(equipment.receiver_inventory[0].model_source,'not_collected');
+});
+test('Shared snapshot and record details keep optional sender provenance without changing display',()=>{
+ const {snapshot,recordDetails,buildDisplay}=require('../../backend/log-display.cjs'),f=fixture(),r=failureModelState(f).latest;
+ assert.equal(snapshot(r).sender_model_source,modelSource);assert.equal(recordDetails(r).sender_model_source,modelSource);
+ const legacy={...r};delete legacy.sender_model_source;assert.equal(buildDisplay(r).productModel,buildDisplay(legacy).productModel);
 });

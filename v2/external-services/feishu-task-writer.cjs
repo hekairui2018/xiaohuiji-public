@@ -1,7 +1,8 @@
 'use strict';
 // Explicit two-table adapter. Reads schema, never creates/renames/reorders fields or permissions.
-const {buildDisplay,displayPatch}=require('../../backend/log-display.cjs');
+const {model,buildDisplay,displayPatch}=require('../../backend/log-display.cjs');
 const {hash}=require('./task-log-store.cjs');
+const {receiverLabel,hardwareModel,cardIdentity,cardResult}=require('../../backend/receiver-evidence.cjs');
 const DOMAIN='https://open.feishu.cn/open-apis/';
 function createFeishuTaskWriter({cfg,getTenantToken,fetchImpl=fetch}){
  const targets={success:{app:cfg.FEISHU_APP_TOKEN,table:cfg.FEISHU_TABLE_ID},failure:{app:cfg.FEISHU_FAILURE_APP_TOKEN,table:cfg.FEISHU_FAILURE_TABLE_ID}};
@@ -33,21 +34,43 @@ function createFeishuTaskWriter({cfg,getTenantToken,fetchImpl=fetch}){
   if(!names.has('自动写入基线'))current['自动写入基线']=receipt.prepared_baseline||receipt.baseline||'';
   const pauses=state.exceptions.map(x=>x.node+'：'+x.message).join('\n');let patch;
   if(kind==='success'){
-   const display=buildDisplay(r),upgraded=r.receiver_upgrades.filter(x=>x.status==='succeeded').length,checked=r.receiver_upgrades.length-upgraded;
-   display.versionInfo+='\n接收卡结果：'+[upgraded?'已升级（'+upgraded+'张）':'',checked?'已检查无需升级（'+checked+'张）':''].filter(Boolean).join('；');
+   const display=buildDisplay(r),counts={upgraded:0,checked:0,reported:0,failed:0,pending:0},seen=new Set();
+   const conflicts=new Map();for(const card of display.snapshot.receiver_upgrades){const k=JSON.stringify([card.port,card.card_id]),signatures=conflicts.get(k)||new Set();signatures.add(hash(card));conflicts.set(k,signatures);}
+   for(const card of display.snapshot.receiver_upgrades){
+    if(!cardIdentity(card,r))continue;const identity=JSON.stringify([card.port,card.card_id]);if(seen.has(identity))continue;seen.add(identity);
+    if(conflicts.get(identity).size>1){counts.pending++;continue;}
+    const result=cardResult(card);
+    if(result.upgraded)counts.upgraded++;else if(result.matched)counts.checked++;else if(card.status==='failed'||result.report&&card.write_reported_status==='failed')counts.failed++;else if(result.report&&!result.reportConflict)counts.reported++;else counts.pending++;
+   }
+   display.versionInfo+='\n接收卡结果：'+[counts.upgraded?'升后实读确认（'+counts.upgraded+'张）':'',counts.checked?'已检查无需升级（'+counts.checked+'张）':'',counts.reported?'HDSet报告写入成功；升后版本未实读（'+counts.reported+'张）':'',counts.failed?'升级或写入报告失败（'+counts.failed+'张）':'',counts.pending?'已采集，结果待确认（'+counts.pending+'张）':''].filter(Boolean).join('；');
+   if(state.readback_success_qualified===false)display.versionInfo+='\n采集记录，不代表全部接收卡实读成功或客户问题已解决';
    patch=displayPatch(display,{existing:!!row,currentFields:current});
    patch['非人工暂停记录']=state.exceptions.length?'共'+state.exceptions.length+'次\n'+state.exceptions.slice(-20).map(x=>x.node+'：'+x.message.slice(0,280)).join('\n')+'\n完整异常见内部异常表':'无';
    // Dates only on creation. The existing human/business columns are never bulk replaced.
    if(!row&&names.has('日期'))patch['日期']=Date.parse(r.log_date+'T00:00:00+08:00');
    for(const [name,key]of [['APP版本','app_version'],['发送型号','sender_model'],['FPGA版本','fpga_version'],['应用版本','device_app_version'],['HDSet版本','hdset_version'],['HDPlayer版本','hdplayer_version']])if(names.has(name)&&r[key])patch[name]=r[key];
   }else{
-   const equipment={device_code:r.device_code||null,upgrade_run_id:r.upgrade_run_id||null,receiver_upgrades:r.receiver_upgrades||[]};
-   const fullLog='运行ID：'+state.task_run_id+'\n异常事件：\n'+JSON.stringify(state.exceptions,null,2)+'\n设备信息：\n'+JSON.stringify(equipment,null,2)+'\n完整运行日志：\n'+r.content;
+   const equipment={device_code:r.device_code||null,upgrade_run_id:r.upgrade_run_id||null,
+    sender_model:r.sender_model||null,sender_model_source:r.sender_model_source||null,
+    receiver_inventory:r.receiver_inventory||[],receiver_upgrades:r.receiver_upgrades||[],recv_models_source:r.recv_models_source||null};
+   const display=buildDisplay(r);equipment.product_model_display=display.productModel;
+   equipment.model_source_notes=[...new Set(display.snapshot.receiver_upgrades.map(receiverLabel))];
+   if(r.recv_models_source!=='structured_per_card'){
+    const labels=new Set();for(const card of [...equipment.receiver_inventory,...equipment.receiver_upgrades]){
+     if(!card||card.device_id&&card.device_id!==r.device_code||card.run_id&&card.run_id!==r.upgrade_run_id)continue;
+     if(hardwareModel(card))labels.add(receiverLabel(card));
+     else if(card.firmware_model_source==='firmware_directory'&&model(card.firmware_model))labels.add(model(card.firmware_model)+'（接收卡型号：固件目录关联）');
+    }
+    equipment.product_model_display=[model(r.sender_model),...labels].filter(Boolean).join('＋');
+   }
+   const fullLog='运行ID：'+state.task_run_id+'\n异常事件：\n'+JSON.stringify(state.exceptions,null,2)+'\n原始任务事件：\n'+JSON.stringify(state.raw_events||[],null,2)+'\n设备信息：\n'+JSON.stringify(equipment,null,2)+'\n完整运行日志：\n'+r.content;
    const form=new FormData();form.append('file_name','task-'+state.task_run_id+'.txt');form.append('parent_type','bitable_file');form.append('parent_node',t.app);form.append('size',String(Buffer.byteLength(fullLog)));form.append('file',new Blob([fullLog]),'task-'+state.task_run_id+'.txt');
    const attachment=await api('POST','drive/v1/medias/upload_all',form);if(!attachment.file_token)throw Error('task-log-attachment-missing');
    const equipmentText=JSON.stringify(equipment);
-   patch={'运行ID':state.task_run_id,'机器码':state.machine_id,'异常记录':pauses.length>12000?pauses.slice(0,12000)+'\n（完整异常见日志附件）':pauses,'运行日志':fullLog.length>12000?fullLog.slice(0,12000)+'\n（完整内容见日志附件）':fullLog,'日志附件':[{file_token:attachment.file_token}],'设备信息':equipmentText.length>12000?JSON.stringify({device_code:r.device_code,card_count:equipment.receiver_upgrades.length,details:'日志附件'}):equipmentText, '异常次数':state.exceptions.length,'服务器接收时间':Date.parse(state.received_at)};
-   for(const [name,key]of [['APP版本','app_version'],['发送型号','sender_model'],['FPGA版本','fpga_version'],['应用版本','device_app_version'],['HDSet版本','hdset_version'],['HDPlayer版本','hdplayer_version']])if(r[key])patch[name]=r[key];
+   patch={'运行ID':state.task_run_id,'机器码':state.machine_id,'异常记录':pauses.length>12000?pauses.slice(0,12000)+'\n（完整异常见日志附件）':pauses,'运行日志':fullLog.length>12000?fullLog.slice(0,12000)+'\n（完整内容见日志附件）':fullLog,'日志附件':[{file_token:attachment.file_token}],'设备信息':equipmentText.length>12000?JSON.stringify({device_code:r.device_code,sender_model:equipment.sender_model,sender_model_source:equipment.sender_model_source,recv_models_source:equipment.recv_models_source,card_count:equipment.receiver_upgrades.length,details:'完整receiver_inventory、receiver_upgrades及来源见日志附件'}):equipmentText, '异常次数':state.exceptions.length,'服务器接收时间':Date.parse(state.received_at)};
+   for(const [name,key]of [['APP版本','app_version'],['FPGA版本','fpga_version'],['应用版本','device_app_version'],['HDSet版本','hdset_version'],['HDPlayer版本','hdplayer_version']])if(r[key])patch[name]=r[key];
+   // Never put a combined product label or a device serial in the sender column.
+   patch['发送型号']=model(r.sender_model);
   }
   // Never include any human remarks field, even if it is renamed after configuration.
   const baseline=kind==='success'?patch['自动写入基线']:undefined;
