@@ -111,7 +111,8 @@ def context_unit(db, block_id, anchor=0):
             'targetOffset': target - start, 'bounded': len(rows) >= 49}
 
 
-def search(work, query, scope='text', concepts=None, models=None, version=None, chips=None, limit=4, documents=None):
+def search(work, query, scope='text', concepts=None, models=None, version=None, chips=None, limit=4, documents=None,
+           *, context_builder=None, authorized_keys=None):
     started = time.perf_counter()
     if scope not in ('text', 'cases', 'faq', 'products', 'firmware') or not isinstance(query, str) or not 1 <= len(query) <= 240:
         raise ValueError('invalid-query')
@@ -119,13 +120,14 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
     models, chips = models or [], chips or []
     if not isinstance(models, list) or len(models) > 4 or not isinstance(chips, list) or len(chips) > 4 or any(not isinstance(x, str) or len(x)>64 for x in models+chips):
         raise ValueError('invalid-constraints')
-    authorized=None
+    authorized=None if authorized_keys is None else set(authorized_keys)
     if documents is not None:
         if not isinstance(documents,list) or not 1<=len(documents)<=4 or any(not isinstance(n,str) or not n or len(n)>240 for n in documents):
             raise ValueError('invalid-documents')
         db=engine.connect(work,True)
         try:
-            authorized={r['sha256'] for r in db.execute("SELECT sha256 FROM locations WHERE state='present' AND name IN ("+','.join('?' for _ in documents)+") AND sha256 IS NOT NULL",documents)}
+            named={r['sha256'] for r in db.execute("SELECT sha256 FROM locations WHERE state='present' AND name IN ("+','.join('?' for _ in documents)+") AND sha256 IS NOT NULL",documents)}
+            authorized=named if authorized is None else authorized.intersection(named)
         finally:db.close()
     # Reuse FTS5/BM25 and its pre-limit model/owner/version filters. No full scan.
     requested = models or [None]
@@ -146,7 +148,7 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
             anchor_hits = positions(row['text'], groups)
             # One parsed page can contain several cases; evaluate each bounded case.
             for anchor in list(dict.fromkeys(h['start'] for h in anchor_hits))[:8]:
-                unit = context_unit(db, row['blockId'], anchor)
+                unit = (context_builder or context_unit)(db, row['blockId'], anchor)
                 identity = (unit['sha256'], tuple((p['blockId'], p['charStart'], p['charEnd']) for p in unit['parts']))
                 if identity in seen:
                     continue
@@ -185,6 +187,7 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
                                               'charStart':part['charStart']+hit['start']-at})
                     at += len(part['text']) + 1
                 ranked.append({**row, 'text':text[low:high], 'scope':scope, 'readAnchor':anchor,
+                    **({'knowledgeUnit':unit['knowledgeUnit']} if 'knowledgeUnit' in unit else {}),
                     'proximity':{'conceptCount':len(groups),'matchedConcepts':window['coverage'], 'spanChars':window['span'],
                       'hits':hit_parts,'contextBoundary':unit['boundary'], 'contextBlockIds':[p['blockId'] for p in unit['parts']],
                       'excerptStart':low,'excerptEnd':high,'totalContextChars':len(text),'boundaryWindowLimited':unit['bounded']},
@@ -201,12 +204,12 @@ def search(work, query, scope='text', concepts=None, models=None, version=None, 
             'semantics':'existing-FTS5-BM25-recall;distinct-concepts-in-bounded-case-window;not-compatibility'}
 
 
-def read(work, block, anchor=0, offset=0):
+def read(work, block, anchor=0, offset=0, *, context_builder=None):
     if int(offset)<0 or int(offset)>100000:
         raise ValueError('invalid-offset')
     db=engine.connect(work,True)
     try:
-        unit=context_unit(db,int(block),int(anchor))
+        unit=(context_builder or context_unit)(db,int(block),int(anchor))
     finally:
         db.close()
     offset=int(offset);end=min(offset+6000,len(unit['text']))
@@ -216,5 +219,6 @@ def read(work, block, anchor=0, offset=0):
         low,high=max(offset,at),min(end,at+len(p['text']))
         if high>low:parts.append({**p,'text':p['text'][low-at:high-at], 'charStart':p['charStart']+low-at,'charEnd':p['charStart']+high-at})
         at+=len(p['text'])+1
-    return {'blocks':parts,'boundary':unit['boundary'],'offset':offset,'nextOffset':end if end<len(unit['text']) else None,
+    return {**({'knowledgeUnit':unit['knowledgeUnit']} if 'knowledgeUnit' in unit else {}),
+            'blocks':parts,'boundary':unit['boundary'],'offset':offset,'nextOffset':end if end<len(unit['text']) else None,
             'totalChars':len(unit['text']),'boundaryWindowLimited':unit['bounded']}
