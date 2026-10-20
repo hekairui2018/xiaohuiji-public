@@ -92,7 +92,17 @@ window.OfflineClient = Object.freeze({create(ui) {
  async function request(body){
   const ordering=mode.value==='ordering';
   if(!ordering)body={...body,mode:responseMode,conversationType,facts:facts(),originalMessage:originalMessage.value||undefined,checks:checkAction.value||checkResult.value?[{action:checkAction.value,result:checkResult.value}]:[],continueQuery:continuation.checked};
-  return json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});
+  if(!ordering)fetchOriginal('/v2/offline/suggestions?q='+encodeURIComponent(body.message.slice(0,240))).then(r=>r.ok?r.json():null).then(data=>{if(data?.suggestion&&getSid()===body.sessionId)window.dispatchEvent(new CustomEvent('v2-model-suggestion',{detail:{...data.suggestion,view:'ai'}}));}).catch(()=>{});
+  const requestId=window.createV2SessionId(),sessionId=body.sessionId;body={...body,requestId};
+  let done=false,timer,pollController;
+  const stages={understanding:'正在理解问题',searching:'正在检索资料',reading:'正在阅读原文','evidence-found':'已找到相关依据',composing:'正在整理回答',completed:'回答已完成',failed:'本次处理未完成'};
+  const poll=async()=>{if(done||getSid()!==sessionId)return;pollController=new AbortController();try{
+   const response=await fetchOriginal('/v2/offline/progress?session='+encodeURIComponent(sessionId)+'&request='+encodeURIComponent(requestId),{signal:pollController.signal});
+   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');}}}
+  }catch{}finally{if(!done)timer=setTimeout(poll,300);}};
+  if(!ordering)poll();
+  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});}
+  finally{done=true;clearTimeout(timer);pollController?.abort();}
  }
  function render(data){
   if(data.model!=='v2-offline-search'&&data.actualMode!=='expert'&&!data.error)return false;
@@ -120,10 +130,22 @@ window.OfflineClient = Object.freeze({create(ui) {
   content.append(title);
   const excerpts=[...new Set(hits.map(h=>h.text).filter(Boolean))].slice(0,2);
   for(const text of excerpts){const lower=text.toLowerCase(),term=(query.match(/[A-Za-z0-9]+|[\u4e00-\u9fff]+/g)||[]).map(t=>lower.indexOf(t.toLowerCase())).filter(i=>i>=0).sort((a,b)=>a-b)[0]||0,start=Math.max(0,term-45);const snippet=make('p');snippet.className='v2-search-snippet';snippet.append(highlight((start?'…':'')+text.slice(start,start+230)+(text.length>start+230?'…':''),query));content.append(snippet);}
-  const meta=make('div');meta.className='v2-search-meta';meta.append(document.createTextNode([first.sourceDirectory||'本地已登记资料',...(first.versions||[]),first.locator?place(first.locator):'文件名或目录命中'].filter(Boolean).join(' · ')));
+  // Present a file's location and role, not raw parser offsets / XML internals.
+  const pathRow=make('div');pathRow.className='v2-search-directory';
+  pathRow.append(make('span','来源目录：'),make('span',first.sourceDirectory||'尚未登记目录'));
+  content.append(pathRow);
+  const typeLabel=({'.pdf':'PDF','.docx':'Word','.doc':'Word','.xlsx':'Excel','.xls':'Excel','.pptx':'PPT','.txt':'文本','.mp4':'视频','.bin':'固件'}[extension]||'文件');
+  const meta=make('div');meta.className='v2-search-meta';
+  if(first.source?.cloudMappingStatus==='not-registered')meta.append(make('span','云盘链接未登记'));
+  meta.append(document.createTextNode([typeLabel,...(first.versions||[])].filter(Boolean).join(' · ')));
   if(first.localModifiedAt){const date=new Date(first.localModifiedAt);if(!Number.isNaN(date.getTime()))meta.append(make('span','本地修改：'+date.toLocaleDateString('zh-CN')));}
   if(hits.length>1)meta.append(make('span',hits.length+'处检索命中'));
-  content.append(meta);const actions=make('div');actions.className='v2-search-actions';if(first.readUrl){const button=make('button','阅读上下文');button.type='button';button.onclick=()=>read(first);actions.append(button);}link(actions,first.download,'打开原文件');content.append(actions);row.append(content);return row;
+  content.append(meta);
+  const positions=first.matchedLocations||[];
+  if(positions.length){const locations=make('details'),label=make('summary','命中位置 '+first.candidatePassages+' 处'+(first.locationsTruncated?'（部分展示）':''));locations.className='v2-search-locations';locations.append(label);
+   for(const pos of positions){const button=make('button',place(pos.locator)||'原文位置');button.type='button';button.onclick=()=>read({...first,readUrl:pos.readUrl});locations.append(button);}content.append(locations);
+  }else if(first.locator){content.append(make('small','原文位置：'+place(first.locator)));}
+  const actions=make('div');actions.className='v2-search-actions';if(first.readUrl){const button=make('button','阅读上下文');button.type='button';button.onclick=()=>read(first);actions.append(button);}if(window.ProductResources?.fileActions)actions.append(window.ProductResources.fileActions({...first,url:first.download,available:!!first.download}));else link(actions,first.download,'打开原文件');content.append(actions);row.append(content);return row;
  }
  const searchInput=document.getElementById('quickSearchInput');
  const scopeStatus=make('p');scopeStatus.className='v2-scope-status';scopeStatus.setAttribute('role','status');scopeStatus.hidden=true;
@@ -153,8 +175,15 @@ window.OfflineClient = Object.freeze({create(ui) {
   if(!q||q.length>240){out.replaceChildren(make('p',!q?'请输入文件名、目录名或正文关键词。':'检索词最多240字，请缩短后重试。'));return;}
   controller=new AbortController();out.setAttribute('aria-busy','true');
   try{const response=await json('/v2/offline/search?q='+encodeURIComponent(q)+'&mode=all&limit=50&view=list',{signal:controller.signal});if(id!==searchId)return;
-   const grouped=new Map();for(const hit of response.results||[]){const key=hit.versionId||hit.download||hit.blockId;if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(hit);}
-   const heading=make('p','找到 '+grouped.size+' 份资料 · 当前返回 '+(response.results||[]).length+' 条匹配'+((response.results||[]).length===50?'（显示前50条，可补充关键词缩小范围）':''));heading.className='v2-search-summary';out.replaceChildren(heading);
+   // Defensive deduplication for old servers; the new server already groups
+   // documents by content identity before applying its result limit.
+   const grouped=new Map();for(const hit of response.results||[]){
+    const key=hit.fileId||hit.sha256||hit.versionId||hit.download||hit.blockId;
+    if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(hit);
+   }
+   const capped=response.limitReached||(response.results||[]).length>=50;
+   const heading=make('p','本次显示 '+grouped.size+' 份相关资料'+(capped?' · 最多展示前50份，请补充关键词缩小范围':''));
+   heading.className='v2-search-summary';out.replaceChildren(heading);
    if(!response.results?.length)out.append(make('p','未找到资料，请更换关键词或切回产品速查。'));
    const list=make('div');list.className='v2-search-list';for(const hits of grouped.values())list.append(searchRow(hits,q));out.append(list);
   }catch(error){if(id!==searchId||error.name==='AbortError')return;out.replaceChildren(make('p','资料检索失败：'+error.message));const retry=make('button','重试');retry.type='button';retry.onclick=search;out.append(retry);}

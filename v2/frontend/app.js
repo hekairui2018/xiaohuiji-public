@@ -9,12 +9,12 @@ const aiInput = document.getElementById("aiInput");
 const aiSendBtn = document.getElementById("aiSendBtn");
 const aiMessages = document.getElementById("aiMessages");
 
-// V2资料搜索使用/wiki；/quick仅兼容旧链接，客服问答保持/huiai。
+// V2资料搜索使用/wiki；旧资料页面已移除，客服问答保持/huiai。
 const VIEW_PATHS = { quick: "/wiki", ai: "/huiai" };
 function viewFromPath() {
   const p = location.pathname.replace(/\/+$/, "") || "/";
   if (p === "/huiai") return "ai";
-  if (p === "/wiki" || p === "/quick") return "quick";
+  if (p === "/wiki") return "quick";
   return localStorage.getItem("xhj_view") === "ai" ? "ai" : "quick";
 }
 // 统一视图切换：改 body 标记 + 记住偏好 + 同步顶部按钮 + 用 pushState 更新地址（opts.push=false 时只切不改地址，供初始化/ popstate / 吉祥物复用）
@@ -1438,6 +1438,7 @@ async function doSearch() {
     if (requestId !== quickRequestId) return;
     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
     const hwResults = data.results || [];
+    if(!hwResults.length&&document.body.dataset.client==='offline')fetch('/v2/offline/suggestions?q='+encodeURIComponent(q.slice(0,240))).then(r=>r.ok?r.json():null).then(result=>{if(result?.suggestion&&requestId===quickRequestId)window.dispatchEvent(new CustomEvent('v2-model-suggestion',{detail:{...result.suggestion,view:'quick'}}));}).catch(()=>{});
     // “全部”分类下硬件无命中、也不是芯片固件速查时，兜底聚合软件与操作视频，避免搜 HDPlayer / 复位 显示空：
     // 明确软件名（isList=false 单软件命中，如 HDPlayer）直达软件卡；操作词（如 复位，软件不匹配）直达视频；都不中才显示硬件空态。
     if (activeCat === "all" && !hwResults.length && !data.chipFirmware) {
@@ -1611,9 +1612,19 @@ function buildVideoItem(v) {
   const det = document.createElement("details");
   det.className = "vid-item";
   const sum = document.createElement("summary");
-  sum.innerHTML = `<span class="vid-ico">▶</span><span class="vid-name"></span><span class="vid-size"></span>`;
+  sum.innerHTML = `<span class="vid-ico" aria-hidden="true"></span><span class="vid-name"></span><span class="vid-size"></span>`;
   sum.querySelector(".vid-name").textContent = v.name;
   sum.querySelector(".vid-size").textContent = v.sizeText || "";
+  const eye = sum.querySelector('.vid-ico');
+  // The icon describes what clicking will DO, not the current open state.
+  const eyeOpen = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const eyeOff = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a15 15 0 0 1-3.2 3.9"/><path d="M6.4 6.5C3.5 8.3 2 12 2 12s3.5 7 10 7a11.6 11.6 0 0 0 3.8-.6"/><path d="M10 10a3 3 0 0 0 4 4"/></svg>';
+  const updateEye = () => {
+    eye.innerHTML = det.open ? eyeOff : eyeOpen;
+    sum.title = det.open ? '收起视频预览' : '展开视频预览';
+    sum.setAttribute('aria-label', sum.title + '：' + v.name);
+  };
+  updateEye();
   const body = document.createElement("div");
   body.className = "vid-body";
   const video = document.createElement("video");
@@ -1633,7 +1644,7 @@ function buildVideoItem(v) {
     const bounds=sum.getBoundingClientRect();
     if(bounds.top<0||bounds.bottom>window.innerHeight)sum.scrollIntoView({block:'nearest'});
   });
-  det.addEventListener('toggle',()=>{if(!det.open)video.pause();});
+  det.addEventListener('toggle',()=>{if(!det.open)video.pause();updateEye();});
   const actions=document.createElement('div');actions.className='vid-actions';actions.append(dl,close);
   body.append(video, actions);
   det.append(sum, body);
@@ -1678,22 +1689,21 @@ async function renderVideoCategory(qArg) {
   searchResults.appendChild(head);
   const wrap = document.createElement("div");
   wrap.className = "vid-catalog";
-  let firstDetails = null;
-  if (groups.length === 1) wrap.classList.add("video-catalog-flat");
+  // Always retain the product category heading, including a single search category.
   groups.forEach((g) => {
     const grp = document.createElement("details");
     grp.className = "doc-cat-group video-cat-group";
     if (kw || groups.length === 1) grp.open = true; // 搜索时命中的场景大类自动展开；全量浏览默认收起
     const sum = document.createElement("summary");
     sum.innerHTML = '<span class="vid-ico">\u25B6</span><span class="dcg-label"></span><span class="dcg-count"></span>';
-    const videoLabels = {app:"手机 APP",cloud:"云平台",hdplayer:"HDPlayer",hdset:"HDSet",hdshow:"HD Show",hdsign:"HDSign"};
-    sum.querySelector(".dcg-label").textContent = videoLabels[g.label] || g.label;
+
+    sum.querySelector(".dcg-label").textContent = g.label;
     sum.querySelector(".dcg-count").textContent = "（" + g.count + "）";
     const body = document.createElement("div");
     body.className = "doc-cat-group-body";
     const sections=g.sections||[{label:g.label,videos:g.videos||[]}];
     sections.forEach(section=>{
-      const nested=sections.length>1;
+      const nested=true; // Product category → operation topic → video file.
       const container=document.createElement(nested?'details':'div');
       container.className=nested?'video-topic':'video-topic-files';
       let list=container;
@@ -1703,7 +1713,7 @@ async function renderVideoCategory(qArg) {
         list=document.createElement('div');list.className='video-topic-files';container.append(heading,list);
       }
       section.videos.forEach(v=>{
-        const det=buildVideoItem(v);list.appendChild(det);if(!firstDetails)firstDetails=det;
+        const det=buildVideoItem(v);list.appendChild(det);
       });
       body.appendChild(container);
     });
@@ -1712,11 +1722,8 @@ async function renderVideoCategory(qArg) {
   });
   searchResults.appendChild(wrap);
   searchResults.style.display = "block";
-  // 有关键词且结果不多时，自动展开第一条并定位，客户直接能看
-  if (kw && total <= 6 && firstDetails) {
-    firstDetails.open = true;
-    setTimeout(() => firstDetails.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
-  }
+  // Videos stay closed until the user explicitly clicks the eye action.
+  // Avoid unexpectedly starting/expanding previews when a search is submitted.
 }
 
 // 问答区（小灰机）明确要操作视频时的回答：内嵌可播放列表，企微仍走 reply 里的快查站深链
@@ -2100,7 +2107,7 @@ if (quickCats) {
     const p = location.pathname.replace(/\/+$/, "") || "/";
     const m = /[?&]q=([^&]*)/.exec(location.search);
     const deepQ = m ? decodeURIComponent(m[1] || "").trim() : "";
-    if (p === "/wiki" || p === "/quick") {
+    if (p === "/wiki") {
       applyView("quick", { push: false });
       setActiveCat("all"); // 初始化分类按钮态，并按屏宽设置“全部”输入提示（窄屏短版）
       const cm = /[?&]cat=([^&]*)/.exec(location.search);
@@ -2157,6 +2164,7 @@ if (quickCats) {
     { view: "quick", cls: "mascot-plane", glyph: "\u{1F916}", target: "ai", bubble: "配单、售后故障，点我问小灰机" },
     { view: "ai", cls: "mascot-bolt", svg: FLASH_SVG, target: "quick", bubble: "快速查参数、找资料，点我" },
   ];
+  const shownSuggestions=new Set();
   defs.forEach((d) => {
     const el = document.createElement("div");
     el.className = "xhj-mascot " + d.cls;
@@ -2172,22 +2180,19 @@ if (quickCats) {
       ev.stopPropagation(); bubble.classList.remove("show");
     });
     document.body.appendChild(el);
+    window.addEventListener('v2-model-suggestion',event=>{
+      const suggestion=event.detail,key=suggestion?.input+'|'+suggestion?.model;
+      if(suggestion?.view!==d.view||shownSuggestions.has(key)||document.body.dataset.view!==d.view)return;
+      if(shownSuggestions.size>=50)shownSuggestions.delete(shownSuggestions.values().next().value);shownSuggestions.add(key);
+      const text=el.querySelector('.xm-bubble-text');text.replaceChildren(document.createTextNode(suggestion.message+' '));
+      const button=document.createElement('button');button.type='button';button.textContent='填入型号';button.onclick=ev=>{ev.stopPropagation();const input=document.getElementById(d.view==='ai'?'aiInput':'quickSearchInput');if(input&&!input.disabled){input.value=suggestion.model;input.focus();bubble.classList.remove('show');}};text.append(button);bubble.classList.add('show');
+    });
 
-    // 冒泡：切到本视图（含首次进入）时打个招呼，之后周期性提醒；6.5s 自动收起
-    let isActive = false, hideTimer = null;
-    const pop = () => {
-      if (document.body.dataset.view !== d.view) return;
-      bubble.classList.add("show");
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => bubble.classList.remove("show"), 6500);
-    };
-    const isNarrow = () => window.matchMedia("(max-width:640px)").matches;
+    // Only execution-backed optional hints show bubbles; view changes update visibility.
     const syncVis = () => {
       const nowActive = document.body.dataset.view === d.view;
       el.classList.toggle("is-active", nowActive);
-      // 刚切到本视图 → 冒个泡引导；窄屏(手机)首屏要让客户先读完欢迎语，跳过首次自动冒泡
-      if (nowActive && !isActive && !isNarrow()) setTimeout(() => pop(), 1200);
-      isActive = nowActive;
+      // Keep hints passive; navigation never schedules a repeated suggestion.
     };
     syncVis();
     new MutationObserver(syncVis).observe(document.body, { attributes: true, attributeFilter: ["data-view"] });
@@ -2203,7 +2208,7 @@ if (quickCats) {
     } catch (e) { /* 位置损坏用默认 */ }
 
     // 周期冒泡（窄屏间隔拉长到 40s，减少遮挡对话）
-    setInterval(() => { if (!bubble.classList.contains("show")) setTimeout(pop, 400); }, isNarrow() ? 40000 : 22000);
+    // Optional model hints are shown once; no periodic replay.
 
     // 拖拽（pointer 事件统一鼠标/触摸）；位移小于阈值视为点击 → 互跳
     const orb = el.querySelector(".xm-orb");
@@ -2257,7 +2262,7 @@ if (quickCats) {
 
 // Only JSON catalog metadata is warmed; no document or original-file URLs are fetched.
 function preloadDocumentCatalogs() {
-  const tasks = ['spec', 'manual', 'firmware', 'software', 'video', 'other', 'pending'];
+  const tasks = ['spec', 'manual', 'firmware', 'software', 'video', ...(document.body.dataset.audience==='public'?[]:['other','pending'])];
   let next = 0;
   async function worker() {
     while (next < tasks.length) {
@@ -2306,3 +2311,12 @@ Object.assign(FrontendApp, {
 
 window.FrontendApp = FrontendApp;
 })();
+
+// Public catalogue has no authorized customer model boundary yet. Keep internal
+// search and chat controls closed while preserving approved product resources.
+if(document.body.dataset.audience==='public'){
+ const more=document.getElementById('quickMoreDocsBtn');if(more)more.hidden=true;
+ document.querySelectorAll('#quickCats [data-cat=other],#quickCats [data-cat=pending]').forEach(button=>button.hidden=true);
+ const input=document.getElementById('aiInput'),send=document.getElementById('aiSendBtn');if(input){input.disabled=true;input.placeholder='公网 AI 客服尚未开放';}if(send)send.disabled=true;
+ const hint=document.querySelector('.ai-hint');if(hint)hint.textContent='当前仅开放产品速查及已批准资料。';
+}

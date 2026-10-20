@@ -1,0 +1,31 @@
+{
+  "status": "本地资料系统待最终验收",
+  "sourceBasePublicCommit": "b67bec199e322ea31ebbb3c681aa89f9eabda295",
+  "scope": "reviewed-local-source-snapshot",
+  "lastFullNodeRun": {
+    "passed": 392,
+    "total": 396,
+    "subsequentHistoricalFailureChecks": "resolved in focused checks; full suite not rerun"
+  },
+  "focusedReconciliation": {
+    "passed": 23,
+    "total": 23
+  },
+  "focusedVideoRegression": {
+    "passed": 29,
+    "total": 29
+  },
+  "pythonIndexSuite": {
+    "passed": 52,
+    "total": 52
+  },
+  "liveBonsaiAcceptance": "not-executed-offline",
+  "publicAI": "not-complete-disabled",
+  "classificationScope": "operation-videos-only",
+  "otherDocumentClassification": "unchanged",
+  "globalSevenCategoryProposal": "withdrawn-by-user",
+  "videoFilesBefore": 322,
+  "videoFilesAfter": 322,
+  "videoAttributionPending": 38,
+  "deployed": false
+}

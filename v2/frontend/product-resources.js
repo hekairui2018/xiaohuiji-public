@@ -33,23 +33,39 @@
   const paths={file:'M8 3H5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7l-4-4H8m4 0v4h4M7 11h6M7 14h4',preview:'M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5m11 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0',download:'M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4'};
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 20 20');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.4');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('aria-hidden','true');const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',paths[kind]);svg.append(path);return svg;
  }
+ function fileActions(item,{compact=true}={}){
+  const actions=el('div');actions.className='pr-actions';
+  function link(url,text,download){if(!valid(url))return;const a=el('a',compact?undefined:text);if(compact)a.append(icon(download?'download':'preview'));a.href=url;a.rel='noopener noreferrer';a.title=text+' '+(item.originalName||item.name||'');a.setAttribute('aria-label',a.title);if(download)a.download=item.originalName||item.name||'';else a.target='_blank';actions.append(a);}
+  if(item.available!==false){const preview=previewTarget(item);if(preview.url)link(preview.url,'在线预览');else {const button=el('button',compact?undefined:'在线预览');if(compact)button.append(icon('preview'));button.type='button';button.title=preview.reason;button.setAttribute('aria-label','预览 '+(item.name||'资料')+'：'+preview.reason);button.onclick=()=>window.alert(preview.reason);actions.append(button);}link(downloadTarget(item),'下载原件',true);}
+  if(item.available===false||(!valid(item.url)&&!valid(item.downloadUrl)))actions.append(el('span',item.unavailableMessage||'原件暂不可用，请核对来源'));
+  return actions;
+ }
  function row(item,group,{compact=true}={}){
   const root=el('article');root.className='pr-resource'+(compact?' pr-resource-compact':'');if(compact){const mark=icon('file');mark.classList.add('pr-file-icon');root.append(mark);}
   const title=el('strong',item.name||item.originalName||item.clean||'未命名资料');title.className='pr-file-name';title.title=title.textContent;root.append(title);
   const meta=el('div');meta.className='pr-meta';badge(meta,group.label).classList.add('pr-category');
   if(item.documentDate)badge(meta,'原文日期 '+item.documentDate);
-  if(item.documentVersion)badge(meta,'版本 '+item.documentVersion);
+  // Firmware filename already carries its version; avoid a repeated subtitle.
+  if(item.documentVersion&&group.key!=='firmware')badge(meta,'版本 '+item.documentVersion);
+  if(group.key==='firmware'&&item.sameNameDifferentContent)badge(meta,'同名异内容 · '+String(item.sha256||'未知身份').slice(0,8),true);
   const conflict=item.versionBasis==='filename-cover-version-conflict';
   if(conflict)badge(meta,'版本冲突，需核对',true);
   if(item.documentLanguage)badge(meta,({zh:'中文','unspecified-or-en':'英文 / 未明确'}[item.documentLanguage]||item.documentLanguage));
   if(item.documentEdition)badge(meta,({standard:'普通版',neutral:'中性版'}[item.documentEdition]||item.documentEdition)).classList.add('pr-edition-'+item.documentEdition);
   root.append(meta);
-  const scope=el('p');scope.className='pr-scope';scope.textContent=Array.isArray(item.applicableModels)&&item.applicableModels.length?'原文标明型号：'+item.applicableModels.join('、')+'':'适用型号未确认';if(item.applicableModels?.length)root.append(scope);
+  const scope=el('p');scope.className='pr-scope';
+  // A browse association is not a verified compatibility claim.
+  if(group.key==='firmware'){
+   const approved=Array.isArray(item.applicableModels)?item.applicableModels:[];
+   const associated=Array.isArray(item.associatedModels)?item.associatedModels:[];
+   scope.textContent=approved.length?'原文标明型号：'+approved.join('、')+'（仍需核对硬件条件）':associated.length?'关联型号：'+associated.map(x=>x.replace(/^HD-/i,'')).join('、')+' · 适用性待核对':'适用型号待核对';
+   root.append(scope);
+  }else{
+   scope.textContent=Array.isArray(item.applicableModels)&&item.applicableModels.length?'原文标明型号：'+item.applicableModels.join('、')+'':'适用型号未确认';
+   if(item.applicableModels?.length)root.append(scope);
+  }
   if(item.scopeEvidence?.length){const details=el('details'),summary=el('summary','适用条件依据');details.className='pr-evidence';details.append(summary);for(const evidence of item.scopeEvidence){const line=el('p');line.textContent=typeof evidence==='string'?evidence:JSON.stringify(evidence);details.append(line);}root.append(details);}
-  const actions=el('div');actions.className='pr-actions';
-  function link(url,text,download){if(!valid(url))return;const a=el('a',compact?undefined:text);if(compact)a.append(icon(download?'download':'preview'));a.href=url;a.rel='noopener noreferrer';a.title=text+' '+(item.originalName||item.name||'');a.setAttribute('aria-label',a.title);if(download)a.download=item.originalName||item.name||'';else a.target='_blank';actions.append(a);}
-  if(item.available!==false){const preview=previewTarget(item);if(preview.url)link(preview.url,'在线预览');else {const button=el('button',compact?undefined:'在线预览');if(compact)button.append(icon('preview'));button.type='button';button.title=preview.reason;button.setAttribute('aria-label','预览 '+(item.name||'资料')+'：'+preview.reason);button.onclick=()=>window.alert(preview.reason);actions.append(button);}link(downloadTarget(item),'下载原件',true);}
-  if(item.available===false||(!valid(item.url)&&!valid(item.downloadUrl)))actions.append(el('span',item.unavailableMessage||'原件暂不可用，请核对来源'));
+  const actions=fileActions(item,{compact});
   root.append(actions);root.dataset.search=[item.name,item.clean,item.documentVersion,...(item.applicableModels||[])].filter(Boolean).join(' ').toLocaleLowerCase();return root;
  }
  const historyCache=new Map();
@@ -139,5 +155,5 @@
   if(!action||action.getAttribute('aria-disabled')==='true'||action.disabled)return;
   action.classList.add('file-action-used');if(action.closest('.pr-actions'))action.classList.add('pr-action-used');
  });
- window.ProductResources={groups,render,unique,row,documentRows,previewTarget,downloadTarget};
+ window.ProductResources={groups,render,unique,row,fileActions,documentRows,previewTarget,downloadTarget};
 })();

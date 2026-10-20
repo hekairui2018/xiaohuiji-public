@@ -8,7 +8,7 @@ const {createOriginalResource}=require('./original-resource.cjs');
 function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,developmentMonitor=null}={}){
  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
  app={...app,dialogue:app.customerDialogue||app.dialogue};
- const publicQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments});
+ const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app);
  const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog,productFacts:offlineKnowledge?.productFacts}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
  const orderingDialogue=createDialogueService(app,{operation:'ordering'});
  const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache({staleMs:60000});
@@ -17,10 +17,15 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  const loadDocs=async(cat,options,listOnly)=>{const body=await localMedia(await localQuick.docs(cat,options));return listOnly?list(body):body;};
  const docKey=(cat,history,offset,limit,view,listOnly)=>JSON.stringify([cat,history,offset,limit,view,listOnly]);
  const server=http.createServer(async(req,res)=>{
-  if(developmentMonitor?.handle(req,res))return;
   if(accessGuard&&!accessGuard(req,res))return;
   const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
   const route=req.url.split('?')[0];
+  // Defense in depth: a guard may mark public traffic, but cannot authorize
+  // internal dialogue, evidence, index or model routes by accident.
+  if(req.v2Public&&!(req.method==='POST'&&route==='/api/huidu/log')&&
+   !(req.method==='GET'&&require('./public-routes.cjs').publicGetRoutes.has(route))){send(403,{error:'public-route-not-enabled'});return;}
+
+  if(!req.v2Public&&developmentMonitor?.handle(req,res))return;
   if(req.v2Public&&route==='/api/huidu/log'&&req.method==='POST'){if(offlineKnowledge&&await offlineKnowledge.handle(req,res))return;res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'log-store-not-configured'}));return;}
   if(req.v2Public&&!publicCatalog){res.writeHead(503);res.end('Public resources are not configured');return;}
   if(route==='/'){res.writeHead(302,{Location:'/wiki'});res.end();return;}
@@ -55,7 +60,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
     else await catalogResponse(req,res,docKey(cat,history,offset,limit,view,listOnly),()=>loadDocs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view},listOnly));
     return;
    }
-   if(serveStatic(req,res,undefined,{localKnowledge:!req.v2Public&&!!localKnowledge,offlineKnowledge:!req.v2Public&&!!offlineKnowledge}))return;
+   if(serveStatic(req,res,undefined,{localKnowledge:!req.v2Public&&!!localKnowledge,offlineKnowledge:!req.v2Public&&!!offlineKnowledge,publicView:!!req.v2Public}))return;
   }
   if(req.method!=='POST'||!['/v2/wiki/products','/v2/quick/products','/v2/dialogue','/api/ai/chat','/v2/ordering/chat','/v2/ordering/ssm'].includes(route)){send(404,{error:'not_found'});return;}
   let size=0,chunks=[];

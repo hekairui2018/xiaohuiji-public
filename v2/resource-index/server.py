@@ -53,7 +53,7 @@ def create_server(work, port=0):
                         rows=catalog(db,work)
                     finally:db.close()
                     return self.send(200,{'resources':rows})
-                if u.path=='/search':return self.send(200,engine.query(work,first('q'),first('mode','all'),first('model') or None,int(first('limit','10')),first('version') or None))
+                if u.path=='/search':return self.send(200,engine.query(work,first('q'),first('mode','all'),first('model') or None,int(first('limit','10')),first('version') or None,group_documents=first('group_documents')=='1'))
                 if u.path=='/proximity/search':
                     import proximity
                     return self.send(200,proximity.search(work,first('q'),first('scope','text'),json.loads(first('concepts','null')),json.loads(first('models','[]')),first('version') or None,json.loads(first('chips','[]')),int(first('limit','4')),json.loads(first('documents','null'))))

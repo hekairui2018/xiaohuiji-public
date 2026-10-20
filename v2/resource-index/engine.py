@@ -408,7 +408,40 @@ def index_documents(work, limit=0, contains='', timeout=60, retry=False):
     db.close();return dict(results)
 
 
-def query(work, text, mode='all', model=None, limit=10, version=None, authorized_keys=None, include_history=False):
+def group_document_hits(hits):
+    """Return one best-scoring hit per actual content identity (browse-only).
+
+    Caller sorts hits best-first. Preserve the best original hit and enrich it
+    with the best available passage. This does NOT claim an exhaustive number
+    of matches and does not infer model/firmware compatibility.
+    """
+    grouped = {}
+    for hit in hits:
+        identity = (hit.get('sha256') or hit.get('versionId') or
+                    'location:' + str(hit.get('locationId') or hit.get('blockId')))
+        record = grouped.get(identity)
+        if record is None:
+            record = dict(hit)
+            record['candidatePassages'] = 0
+            record['matchedFileName'] = False
+            record['matchedLocations'] = []
+            grouped[identity] = record
+        if hit.get('kind') == 'file':
+            record['matchedFileName'] = True
+        if hit.get('kind') == 'passage':
+            record['candidatePassages'] += 1
+            # Keep independent original positions; never concatenate unrelated cases.
+            if len(record['matchedLocations']) < 24:
+                record['matchedLocations'].append({k:hit[k] for k in ('blockId','ordinal','locator') if k in hit})
+            record['locationsTruncated'] = record['candidatePassages'] > len(record['matchedLocations'])
+            if not record.get('text'):
+                for field in ('text', 'blockId', 'ordinal', 'locator', 'mentionedModels'):
+                    if field in hit:
+                        record[field] = hit[field]
+    return list(grouped.values())
+
+
+def query(work, text, mode='all', model=None, limit=10, version=None, authorized_keys=None, include_history=False, group_documents=False):
     started=time.perf_counter();db=connect(work,True);limit=max(1,min(int(limit),50));terms=list(dict.fromkeys(fts_tokens(text).split()))
     requested={normalize_model(model)} if model else model_tokens(text)
     # Long firmware identifiers are not treated as known product aliases.
@@ -468,6 +501,10 @@ def query(work, text, mode='all', model=None, limit=10, version=None, authorized
             tokens=set(fts_tokens(r['text']).split());matched=sum(t in tokens for t in search_terms)
             hits.append({'kind':'passage','blockId':r['id'],'sha256':r['hash'],'ordinal':r['ordinal'],'text':r['text'],'locator':json.loads(r['locator']),'score':matched*4+max(0,-r['rank']),'mentionedModels':sorted(block_models)})
     hits.sort(key=lambda h:(-h['score'],h.get('blockId',0),h.get('locationId',0)))
+    # Only the employee document-browser opts in. Other search clients retain
+    # their original fine-grained passage ranking and response shape.
+    if group_documents:
+        hits = group_document_hits(hits)
     seen=set();out=[]
     for hit in hits:
         key=(hit['kind'],hit.get('sha256') or hit.get('locationId'),hit.get('ordinal'))
@@ -483,7 +520,7 @@ def query(work, text, mode='all', model=None, limit=10, version=None, authorized
         hit['readMore']='/read?block='+str(hit['blockId']) if hit['kind']=='passage' else '/resource?id='+str(locations[0]['id'])
         out.append(hit)
         if len(out)>=limit:break
-    db.close();return {'query':text,'requestedModels':sorted(requested),'results':out,'elapsedMs':round((time.perf_counter()-started)*1000,3)}
+    db.close();return {'query':text,'requestedModels':sorted(requested),'results':out,'returnedCount':len(out),'limitReached':len(out)>=limit,'countScope':'returned-candidates-not-total','elapsedMs':round((time.perf_counter()-started)*1000,3)}
 
 
 def document_filename_identity(name):
@@ -687,7 +724,7 @@ def report(work):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--work',default=str(DEFAULT_WORK));p.add_argument('--parse-one');sub=p.add_subparsers(dest='command')
-    s=sub.add_parser('scan');s.add_argument('--root',required=True);s.add_argument('--hash-cache')
+    s=sub.add_parser('scan');s.add_argument('--root',default='G:/');s.add_argument('--hash-cache')
     s=sub.add_parser('index');s.add_argument('--limit',type=int,default=0);s.add_argument('--contains',default='');s.add_argument('--timeout',type=int,default=60);s.add_argument('--retry',action='store_true')
     s=sub.add_parser('search');s.add_argument('text');s.add_argument('--mode',choices=['all','files','text'],default='all');s.add_argument('--model');s.add_argument('--version');s.add_argument('--limit',type=int,default=10)
     s=sub.add_parser('read');s.add_argument('block',type=int)

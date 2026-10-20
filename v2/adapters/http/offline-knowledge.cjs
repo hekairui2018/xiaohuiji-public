@@ -10,10 +10,23 @@ const {fileUrl,previewPage,pdfPreviewPage}=require('./document-preview.cjs');
 const {groupVideos}=require('../../domain/knowledge/resource-categories.cjs');
 const {resourceView}=require('../../domain/knowledge/resource-view.cjs');
 const clean=s=>String(s||'').replace(/[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"']+/g,'[内部路径]').replace(/(?<!\d)1[3-9]\d{9}(?!\d)|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[联系方式]');
+// Employee-only local source directory, derived from a registered original.
+// A synchronized G: folder is a path, NOT a verified shareable cloud URL.
+function registeredSourceDirectory(locations){
+ const raw=String(locations?.[0]?.path||'').replace(/\\/g,'/');
+ if(!raw)return null;
+ if(raw.startsWith('//'))return '内部共享目录（未展示服务器地址）';
+ const drive=/^([A-Za-z]):\//.exec(raw);
+ const parts=raw.replace(/^[A-Za-z]:\//,'').split('/').filter(Boolean);
+ const folder=parts.slice(0,-1).join(' / ');
+ if(!folder)return null;
+ return clean((drive?drive[1].toUpperCase()+'盘 / ':'')+folder);
+}
 const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
 function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null}={}){
  const sessions=createOfflineSessions(sessionDirectory);
  const modelRequests=new Map(),inFlight=new Set();
+ const progress=require('./request-progress.cjs').createRequestProgress();
  const base=new URL(resourceBase);if(base.protocol!=='http:'||base.hostname!=='127.0.0.1')throw Error('offline resources require loopback');
  const cases=(knowledge?.cases()||[]).map(c=>consumeCase(c,knowledge.evidenceCaseReviews?.()||[]));
  const caseMap=new Map(cases.map(c=>[c.stableId,c]));
@@ -25,13 +38,15 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
  }
  const evidenceDocuments=knowledge?.evidenceDocuments()||[];
  const originals=new Set(evidenceDocuments.map(x=>x.document.sha256));
- const normalize=r=>({name:clean(r.name),matchKind:r.kind||null,resourceId:r.resourceId||null,versionId:r.versionId||null,resourceVersionId:r.versionId||null,fileId:r.sha256?'sha256:'+r.sha256:r.versionId||null,sha256:r.sha256||null,blockId:r.blockId||null,
-  extension:path.extname(r.name||'').toLowerCase(),sourceDirectory:clean(String(r.locations?.[0]?.path||'').replace(/\\/g,'/').split('/').slice(1,-1).slice(-3).join(' / ')),localModifiedAt:r.locations?.[0]?.mtime_ns?new Date(r.locations[0].mtime_ns/1e6).toISOString():null,
+ const normalize=r=>require('../../domain/knowledge/resource-view.cjs').resourceView({available:!!(r.locationId||r.locations?.[0]?.id),classificationBasis:'registered-index-match',name:clean(r.name),matchKind:r.kind||null,resourceId:r.resourceId||null,versionId:r.versionId||null,resourceVersionId:r.versionId||null,fileId:r.sha256?'sha256:'+r.sha256:r.versionId||null,sha256:r.sha256||null,blockId:r.blockId||null,
+  extension:path.extname(r.name||'').toLowerCase(),sourceDirectory:registeredSourceDirectory(r.locations),localModifiedAt:r.locations?.[0]?.mtime_ns?new Date(r.locations[0].mtime_ns/1e6).toISOString():null,
   evidenceId:r.sha256&&r.blockId?'blk-'+r.sha256.slice(0,16)+'-'+r.ordinal:null,
   text:clean(/\.csv$/i.test(r.name||'')?String(r.text||'').split(' | ').slice(0,3).join(' | '):r.text),
   locator:location(r.locator),versions:r.versions||[],mentionedModels:r.mentionedModels||[],scopeStatus:'原文提及或目录线索，不代表兼容性确认',
   score:r.score,download:(r.locationId||r.locations?.[0]?.id)?fileUrl(r.locationId||r.locations[0].id,r.name):null,
-  readUrl:r.blockId?'/v2/offline/read?block='+r.blockId:null});
+  candidatePassages:r.candidatePassages||0,locationsTruncated:!!r.locationsTruncated,
+  matchedLocations:(r.matchedLocations||[]).filter(m=>Number.isInteger(m.blockId)&&m.blockId>0).map(m=>({blockId:m.blockId,locator:location(m.locator),readUrl:'/v2/offline/read?block='+m.blockId})),
+  readUrl:r.blockId?'/v2/offline/read?block='+r.blockId:null},{kind:'document'});
  async function request(route){const r=await fetch(resourceBase+route,{signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('resource service unavailable');return r.json();}
  let catalogCache=null,catalogTime=0,catalogError=null,catalogPending=null,catalogSignature=null;
  async function localCatalog(){
@@ -46,9 +61,9 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
  }
  localCatalog.status=()=>({state:catalogError?(catalogCache?'stale-cache':'unavailable'):catalogCache?'ready':'not-loaded',reason:catalogError,lastSuccessfulAt:catalogTime?new Date(catalogTime).toISOString():null,cacheSeconds:30});
  const productFacts=require('../../domain/knowledge/product-table-facts.cjs').createProductTableFacts({localCatalog,request});
- async function search(q,mode='all',{limit=10,model=null,version=null}={}){
-  const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit+(model?'&model='+encodeURIComponent(model):'')+(version?'&version='+encodeURIComponent(version):''));
-  return {query:q,elapsedMs:raw.elapsedMs,requestedModels:raw.requestedModels||[],results:(raw.results||[]).map(normalize)};
+ async function search(q,mode='all',{limit=10,model=null,version=null,groupDocuments=false}={}){
+  const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit+(model?'&model='+encodeURIComponent(model):'')+(version?'&version='+encodeURIComponent(version):'')+(groupDocuments?'&group_documents=1':''));
+  return {query:q,elapsedMs:raw.elapsedMs,requestedModels:raw.requestedModels||[],results:(raw.results||[]).map(normalize),returnedCount:raw.results?.length||0,limitReached:!!raw.limitReached,countScope:'returned-candidates-not-total'};
  }
  async function resolveDocuments(documents){
   const items=documents.map(d=>{
@@ -156,6 +171,14 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    if(original){await stream(p,res);return true;}
    if(req.method==='GET'&&p==='/v2/offline/client.js'){res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'../../frontend/offline-client.js')));return true;}
    if(req.method==='GET'&&p==='/v2/offline/status')return send(200,{mode:'no-model',knowledgeVersion:knowledge?.version,caseCount:cases.length,sourceService:'local-read-only-index',catalogStatus:localCatalog.status()});
+   if(req.method==='GET'&&p==='/v2/offline/suggestions'){
+    const q=u.searchParams.get('q')||'';if(q.length>240)return send(400,{error:'invalid-query'});
+    return send(200,{suggestion:require('../../domain/knowledge/model-suggestion.cjs').suggestModels(q,knowledge?.products?.()||app?.quickBrowse?.()||[])});
+   }
+   if(req.method==='GET'&&p==='/v2/offline/progress'){
+    const current=progress.get(u.searchParams.get('session'),u.searchParams.get('request'));
+    return send(current?200:404,current||{error:'request-not-found'});
+   }
    if(req.method==='GET'&&p==='/v2/offline/capabilities')return send(200,{defaultMode:'quick',modes:['quick','expert'],expert:expert?await expert.status():{available:false,reason:'not-configured',model:null},ordering:'deterministic-rules-only'});
    if(req.method==='GET'&&p==='/v2/offline/file'){
     const id=u.searchParams.get('id');if(!/^\d+$/.test(id||''))return send(400,{error:'invalid-resource'});await stream('/resource?id='+id,res,req.headers.range,u.searchParams.get('download')==='1');return true;
@@ -187,9 +210,11 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     if(!Number.isInteger(limit)||limit<1||limit>50)return send(400,{error:'invalid-search-filter'});
     if(p.endsWith('/cases'))return send(200,await caseSearchWithDocuments(q,u.searchParams.get('model')));
     if(u.searchParams.get('view')==='list'&&mode==='all'){
-     const started=Date.now(),half=Math.ceil(limit/2),[files,text]=await Promise.all([search(q,'files',{limit:half}),search(q,'text',{limit:half})]);
-     const results=[];for(let i=0;i<half;i++)for(const source of [files,text])if(source.results[i]&&results.length<limit)results.push(source.results[i]);
-     return send(200,{query:q,elapsedMs:Date.now()-started,requestedModels:[...new Set([...files.requestedModels,...text.requestedModels])],results,view:'list',retrieval:'filename-and-body-separate-recall',limit});
+     // The file-oriented browser has a dedicated opt-in. Group before applying
+     // the 50-result limit, not after 50 raw body passages have been returned.
+     // AI/expert/case retrieval still use the unchanged fine-grained endpoint.
+     const data=await search(q,'all',{limit,groupDocuments:true});
+     return send(200,{...data,view:'list',retrieval:'document-grouped-before-limit',limit});
     }
     return send(200,await search(q,mode,{limit}));
    }
@@ -201,7 +226,8 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
     if(inFlight.has(input.sessionId))return send(409,{status:'busy',error:'session-request-active',reply:'当前会话仍在处理，请等待完成。'});
     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
-    inFlight.add(state.id);sessions.begin(state.id);
+    let onProgress;try{onProgress=progress.begin(state.id,input.requestId);}catch{return send(409,{error:'progress-request-reused'});}
+    let progressCompleted=false;inFlight.add(state.id);sessions.begin(state.id);
     try{
     if(requestedMode==='expert'){
      state=sessions.expertState(state.id);
@@ -210,6 +236,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
      const expertEvidence=require('./expert-evidence.cjs').createExpertEvidence({request,searchCases,caseMap,clean,location,defaultModels:route.models||[]});
      const calculateOrdering=require('./expert-ordering.cjs').createExpertOrdering({app,userMessages:state.messages.filter(m=>m.role==='user').map(m=>m.content)});
      const execute=async(name,args)=>{
+      onProgress(name==='read_document'?'reading':'searching');
       if(name==='calculate_ordering')return calculateOrdering(args);
       if(name==='read_document'){
        const context=await expertEvidence.read(args);if(context)return context;
@@ -240,17 +267,18 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
      };
     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+    progressCompleted=output.status!=='unavailable';onProgress(progressCompleted?'completed':'failed');
     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const started=Date.now();
-    const data=await quickRetrieval.answer(query,{state,facts:state.facts});
+    const data=await quickRetrieval.answer(query,{state,facts:state.facts,onProgress});
     state=sessions.recordResult(state.id,{kind,query,intent:data.intent,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
     const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',kind,...data,elapsedMs:Date.now()-started,sessionState:state};
     try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,intent:data.intent,retrievalTrace:data.retrievalTrace||[],resultCount:data.results.length,elapsedMs:output.elapsedMs});}catch{}
-    state=sessions.recordAnswer(state.id,output);return send(200,{...output,sessionState:state});
-    }finally{inFlight.delete(state.id);sessions.end(state.id);}
+    state=sessions.recordAnswer(state.id,output);progressCompleted=true;onProgress('completed');return send(200,{...output,sessionState:state});
+    }finally{onProgress(progressCompleted?'completed':'failed');inFlight.delete(state.id);sessions.end(state.id);}
    }
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}

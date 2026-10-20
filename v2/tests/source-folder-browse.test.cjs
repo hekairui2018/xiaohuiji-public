@@ -28,5 +28,5 @@ test('Flat source groups directly contain unique files and preserve model associ
 });
 test('Operating-video folders determine browse class; promotional and training videos stay out of the operation list',()=>{
  const videos=[{name:'参数.mp4'},{name:'功能.mp4'},{name:'入门.mp4'},{name:'LCD 操作.mp4'}],resources=[{name:'参数.mp4',folders:['产品资料','操作视频','LED']},{name:'功能.mp4',folders:['产品资料','产品宣传视频']},{name:'入门.mp4',folders:['培训资料']},{name:'LCD 操作.mp4',folders:['产品资料','操作视频','LCD']}];
- const result=operationVideos(videos,resources);assert.equal(result.selected.length,2);assert.equal(result.withheld.length,2);const groups=groupVideos(result.selected,resources);assert.ok(groups.some(g=>g.key==='lcd'));assert.ok(groups.some(g=>g.label==='LED'));assert.ok(groups.every(g=>Array.isArray(g.videos)&&!g.groups));
+ const result=operationVideos(videos,resources);assert.equal(result.selected.length,2);assert.equal(result.withheld.length,2);const groups=groupVideos(result.selected,resources);assert.ok(groups.some(g=>g.key==='lcd'));assert.ok(groups.some(g=>g.key==='other'));assert.ok(!groups.some(g=>g.label==='LED'));assert.equal(groups.find(g=>g.key==='other').videos[0].categoryBasis[0],'insufficient-product-evidence');assert.ok(groups.every(g=>Array.isArray(g.videos)&&!g.groups));
 });

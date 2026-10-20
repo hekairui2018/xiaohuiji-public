@@ -28,7 +28,7 @@ const numericFormat=text=>text.replace(/(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(
 function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require('./local-model-transport.cjs').localModelTransport,timeoutMs=0,onDiagnostic=()=>{}}={}){
  const base=new URL(baseUrl);if(base.protocol!=='http:'||!['127.0.0.1','localhost'].includes(base.hostname)||base.username||base.password||base.pathname!=='/'||base.search||base.hash)throw Error('Expert model requires local origin');let busy=false;
  async function status(){try{const r=await transport(new URL('/v1/models',base),{signal:AbortSignal.timeout(2000),redirect:'error'}),j=await r.json(),model=j.data?.[0]?.id;return r.ok&&typeof model==='string'?{available:true,model,reason:null}:{available:false,model:null,reason:'model-identity-unavailable'};}catch{return {available:false,model:null,reason:'model-offline'};}}
- async function answer({message,sessionState={},execute,route,signal}){
+ async function answer({message,sessionState={},execute,route,signal,onProgress=()=>{}}){
   if(busy)return {status:'busy',error:'expert-busy',actualMode:'expert',reply:'专家模式忙，请稍后重试。',results:[]};busy=true;
   const context=require('./expert-context.cjs').createExpertContext({base,transport});
   const started=Date.now(),evidence=new Map(),trace=[],usage=[],modelCalls=[];let identity;
@@ -48,12 +48,13 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
      if(args.documents&&(!Array.isArray(args.documents)||!args.documents.length||args.documents.length>4||args.documents.some(n=>![...evidence.values()].some(e=>e.name===n))))throw Error('expert-invalid-tool');
      canonical=JSON.stringify([name,args.kind,args.query.normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase(),args.concepts||[],args.models||[],args.chips||[],args.version||'',args.documents||[]]);
     }else if(name==='calculate_ordering'&&Array.isArray(args.userQuotes))canonical=JSON.stringify([name,args.userQuotes]);else if(name==='read_document'&&Number.isInteger(args.blockId)&&args.blockId>0)canonical=JSON.stringify([name,args.blockId,args.offset||0]);else throw Error('expert-invalid-tool');
+    onProgress(name==='read_document'?'reading':'searching');
     const at=Date.now(),cached=cache.has(canonical);
     if(cached){const repeats=(repeatedCalls.get(canonical)||0)+1;repeatedCalls.set(canonical,repeats);if(repeats>=2){trace.push({name,arguments:args,purpose,cached:true,error:'expert-repeated-tool',elapsedMs:Date.now()-at});throw Error('expert-repeated-tool');}}else toolExecutions++;
     let result;try{result=cached?structuredClone(cache.get(canonical)):await execute(name,args);}catch(error){trace.push({name,arguments:args,purpose,cached:false,error:error.message,elapsedMs:Date.now()-at});throw error;}
     if(!cached)cache.set(canonical,structuredClone(result));
     const items=(result.evidence||[]).slice(0,6).filter(e=>e.evidenceId&&typeof e.text==='string').map(e=>({...e,text:e.text.slice(0,e.readPerformed||e.sourceKind==='validated-ordering-calculation'?6000:1600)}));
-    for(const e of items)evidence.set(e.evidenceId,e);
+    for(const e of items)evidence.set(e.evidenceId,e);if(items.length)onProgress('evidence-found');
     try{onDiagnostic({event:'tool-result',name,arguments:args,cached,evidence:items,notice:result.notice||null});}catch{}
     trace.push({name,arguments:args,evidenceIds:items.map(e=>e.evidenceId),purpose,cached,notice:result.notice||null,evidenceLocations:items.map(e=>({evidenceId:e.evidenceId,name:e.name,locator:e.locator,sourceKind:e.sourceKind,proximity:e.proximity,readPerformed:e.readPerformed||false,nextOffset:e.nextOffset??null,contextParts:e.contextParts})),elapsedMs:Date.now()-at});
     const signature=JSON.stringify(items.map(e=>[e.evidenceId,e.text,e.readPerformed,e.nextOffset]).sort((a,b)=>a[0].localeCompare(b[0]))),noNewEvidence=seenEvidence.has(signature);seenEvidence.add(signature);
@@ -67,6 +68,7 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
     input.preparedEvidence=await runTool('search_evidence',{action:'search',query:route.query||message,kind:'resources'},'simple-resource-candidate');messages[1].content=JSON.stringify(input);phase='answer';
    }
    for(let i=0;;i++){
+    onProgress(phase==='answer'?'composing':'understanding');
     signal?.throwIfAborted();const remaining=timeoutMs>0?timeoutMs-(Date.now()-started):null;if(remaining!==null&&remaining<=0)throw Error('expert-timeout');
     const answerSchema=structuredClone(schema.oneOf[2]);if(simpleProduct){answerSchema.properties.claims.maxItems=1;answerSchema.properties.generalAdvice.maxItems=0;}
     const citable=[...evidence.values()].filter(e=>(!e.readAvailable||e.readPerformed)&&(e.sourceKind!=='validated-ordering-calculation'||e.verificationStatus==='geometry-and-static-rule-checked')).map(e=>e.evidenceId);

@@ -5,7 +5,18 @@ const root=path.resolve(__dirname,'../..'),file='v2/data/evidence/knowledge-sour
 const manifest={parentVersion:'knowledge-94ddd89b754efade',versionId:'knowledge-fc9f11a1e72de750',baseVersion:'knowledge-9109bc3cd2171530',associationCounts:{products:27,documents:22,claims:85,cases:45,firmware:22,software:3,officialDocuments:19,engineeringDocuments:0,trainingDocuments:3,projectDocuments:0,unknownFirmware:22,aiSummary:0}},base=JSON.parse(fs.readFileSync(path.join(root,'v2/data/knowledge-next',manifest.parentVersion,'index.json'))),after=JSON.parse(fs.readFileSync(path.join(root,'v2/data/knowledge-next',manifest.versionId,'index.json')));
 const {enrich}=require('../tools/enrich-existing-knowledge.cjs'),{coverage}=require('../tools/report-knowledge-evidence.cjs'),{loadKnowledge}=require('../adapters/data/load-knowledge.cjs'),{auditKnowledge}=require('../acceptance/knowledge.cjs');
 test('Expanded evidence is deterministic, additive and preserves parameters, case procedures, original versions and active knowledge',()=>{
- const result=enrich(base,evidence,reference);assert.deepEqual(result.next,after);assert.deepEqual(result.counts,manifest.associationCounts);
+ // The immutable stage-14 snapshot predates explicit role provenance. Only
+ // these two newly-created documents gain the deterministic additive field.
+ const expected=structuredClone(after);
+ for(const name of ['HD-A4L Specification V1.3.pdf','HD-VP620规格书 v2.1.pdf']){
+  const docs=expected.products.flatMap(p=>p.documents).filter(d=>d.name===name);
+  assert.equal(docs.length,1);assert.equal(docs[0].kind,'spec');
+  assert.equal(docs[0].classificationBasis,undefined);docs[0].classificationBasis='filename-role-hint';
+ }
+ const result=enrich(base,evidence,reference);assert.deepEqual(result.next,expected);assert.deepEqual(result.counts,manifest.associationCounts);
+ assert.deepEqual(enrich(base,evidence,reference).next,expected);
+ assert.deepEqual(enrich(result.next,evidence,reference).next,result.next);
+ assert.ok(Object.values(enrich(result.next,evidence,reference).counts).every(n=>n===0));
  assert.deepEqual(enrich(after,evidence,reference).next,after);assert.ok(Object.values(enrich(after,evidence,reference).counts).every(n=>n===0));
  assert.equal(result.counts.products,27);assert.equal(result.counts.documents,22);assert.equal(result.counts.cases,45);
  for(const [i,p]of after.products.entries()){assert.deepEqual(p.parameters,base.products[i].parameters);assert.deepEqual(p.aliases,base.products[i].aliases);assert.deepEqual(p.claims.map(c=>c.text),base.products[i].claims.map(c=>c.text));}

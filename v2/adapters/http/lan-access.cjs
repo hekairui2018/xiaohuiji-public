@@ -13,7 +13,7 @@ function createLanGuard({address,cidr,port,publicOrigin=null}){
  const allowed=subnet(cidr),hosts=new Set(['127.0.0.1:'+port,'localhost:'+port,address+':'+port]);
  const external=publicOrigin?new URL(publicOrigin):null;
  if(external&&(!['http:','https:'].includes(external.protocol)||external.pathname!=='/'||external.search||external.hash||external.username||external.password))throw Error('Invalid public origin');
- const publicRoutes=new Set(['/','/wiki','/index.html','/app.js','/styles.css','/v2-components.js','/v2-site-compat.js','/img/mascot-iron.png','/api/search','/api/software','/api/videos','/api/docs']);
+ const publicRoutes=require('./public-routes.cjs').publicGetRoutes;
  return (req,res)=>{
   const ip=String(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
   const reject=()=>{res.writeHead(403,{'Content-Type':'application/json'});res.end('{"error":"lan_access_denied"}');return false;};

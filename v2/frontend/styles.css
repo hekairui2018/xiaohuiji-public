@@ -1438,3 +1438,58 @@ body[data-view="ai"] .v2-toolbar #v2NewQuery{margin-left:0}
 .video-topic-files{display:flex;flex-direction:column;gap:6px}
 .video-topic>.video-topic-files{padding:8px}
 .video-cat-group>summary:hover{background:#eff7f1}
+
+/* Video preview is an action icon, never a rotating category disclosure arrow. */
+.vid-item:not(.doc-cat-item)>summary .vid-ico,
+.vid-item:not(.doc-cat-item)[open]>summary .vid-ico {
+  width:18px;
+  height:18px;
+  transform:none;
+  font-size:0;
+}
+.vid-item:not(.doc-cat-item)>summary .vid-ico svg{display:block;width:18px;height:18px}
+/* First level remains visually stronger; second level stays restrained. */
+.video-cat-group>summary{font-weight:600;background:var(--surface-muted)}
+.video-topic{border-left:2px solid var(--border)}
+
+/* Phase 2: compact employee document hits; existing V2 palette stays intact. */
+.v2-search-row{min-width:0}
+.v2-search-row-content{min-width:0}
+.v2-search-directory{display:flex;flex-wrap:wrap;gap:5px 9px;margin:6px 0;
+ font-size:12px;color:var(--text-muted);overflow-wrap:anywhere;word-break:break-word}
+.v2-search-directory span:first-child{font-weight:600;flex:0 0 auto}
+.v2-search-directory span:last-child{min-width:0;flex:1 1 240px}
+
+/* File evidence positions reuse the existing compact blue/green action palette. */
+.v2-search-locations{margin:6px 0;font-size:12px;overflow-wrap:anywhere}
+.v2-search-locations>summary{cursor:pointer;color:var(--text-muted)}
+.v2-search-locations>button{padding:3px 7px;margin:4px 4px 0 0;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--accent);cursor:pointer;max-width:100%;overflow-wrap:anywhere}
+.v2-search-locations>button:hover,.v2-search-locations>button:focus-visible{background:var(--surface-muted)}
+.xm-bubble-text button{border:0;background:transparent;color:var(--accent);text-decoration:underline;cursor:pointer;font:inherit}
+
+/* Employee file results share product-resource actions and the existing palette. */
+.v2-search-list{display:flex;flex-direction:column;gap:10px}
+.v2-search-row{display:grid;grid-template-columns:32px minmax(0,1fr);gap:11px;padding:13px;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow-wrap:anywhere}
+.v2-search-row .v2-file-icon{display:flex;align-items:center;justify-content:center;height:35px;border:1px solid var(--file-border);border-radius:6px;font-size:11px;font-weight:600}
+.v2-search-title{font:inherit;font-size:14px;font-weight:600;line-height:1.6;color:var(--file-text);border:0;background:transparent;padding:0;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.v2-search-title:hover{color:var(--file-action)}
+.v2-search-title:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.v2-search-snippet{margin:5px 0;font-size:13px;line-height:1.7;color:var(--text);white-space:pre-wrap}
+.v2-search-row mark{background:#f1f6d8;color:inherit;border-radius:2px}
+.v2-search-meta{display:flex;gap:5px 12px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);margin:5px 0}
+.v2-search-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.v2-search-actions>button{font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer}
+.v2-search-actions .pr-actions{margin:0}
+.v2-search-summary{font-size:13px;color:var(--text-muted);margin:12px 0}
+@media(max-width:480px){.v2-search-row{padding:10px;grid-template-columns:25px minmax(0,1fr);gap:8px}.v2-search-title{font-size:13px}}
+
+.v2-search-actions .pr-actions a,.v2-search-actions .pr-actions button{display:inline-flex;align-items:center;justify-content:center;min-width:30px;min-height:30px;padding:5px}
+.v2-search-actions .pr-actions svg{width:18px;height:18px;flex:none}
+
+/* Operation video hierarchy follows the existing document catalogue density. */
+.vid-catalog .video-cat-group>.doc-cat-group-body{display:flex;flex-direction:column;gap:8px;padding:10px 12px}
+.vid-catalog .video-topic{border:1px solid var(--border);border-radius:7px;border-left:2px solid #dbe9e0}
+.vid-catalog .video-topic>summary{padding:7px 10px;font-size:13px;font-weight:500;color:var(--text-muted)}
+.vid-catalog .video-topic>.video-topic-files{padding:7px;gap:5px}
+.vid-catalog .video-topic .vid-item>summary{padding:8px 10px;font-size:13px}
+@media(max-width:480px){.vid-catalog .video-cat-group>.doc-cat-group-body{padding:8px}.vid-catalog .video-topic>.video-topic-files{padding:5px}.vid-catalog .video-topic .vid-item>summary{padding:8px;font-size:12.5px}}

@@ -1,8 +1,6 @@
 /* Browse-only taxonomy: no compatibility inference or changes to source files. */
 (function(root){
 'use strict';
-const LABELS={software:'电脑软件教程',app:'手机 APP 教程',cloud:'云平台教程',display:'调屏与接收卡',processor:'视频处理器',mono:'单双色控制卡',player:'LED 播放盒与控制卡',lcd:'LCD 商显与安卓主板',calibration:'逐点校正',general:'LED 通用操作',other:'通用操作 · 适用范围待核对',support:'电脑环境与辅助工具'};
-const ORDER=Object.keys(LABELS);
 function classify(video,source={}){
  const name=video.name||'',key=source.key||'',label=source.label||'';
  // Explicit computer environment content must never inherit an LED product folder.
@@ -46,15 +44,21 @@ function topic(name){
  return '主题待核对';
 }
 
+// Server browse categories are authoritative. Keep their labels and order.
+// Operation topics may only be used as optional second-level sections supplied
+// by the server. Do not re-classify videos from filename patterns in the UI.
 function organize(groups){
- const output=new Map();
- for(const source of groups||[])for(const original of source.videos||[]){
-  const [key,section]=classify(original,source);
-  if(!output.has(key))output.set(key,{key,label:LABELS[key],videos:[],sections:[]});
-  const g=output.get(key);g.videos.push(original);
-  let sub=g.sections.find(s=>s.label===section);if(!sub){sub={label:section,videos:[]};g.sections.push(sub);}sub.videos.push(original);
+ const out=[];
+ for(const source of groups||[]){
+  const videos=Array.isArray(source.videos)?source.videos:[];
+  if(!videos.length)continue;
+  const sections=Array.isArray(source.sections)&&source.sections.length
+   ?source.sections.filter(s=>Array.isArray(s.videos)&&s.videos.length)
+   :[{label:source.label||'操作视频',videos}];
+  out.push({...source,key:source.key||'other',label:source.label||'其他',videos,
+    sections,count:videos.length});
  }
- return ORDER.filter(k=>output.has(k)).map(k=>{const g=output.get(k);g.count=g.videos.length;g.sections.sort((a,b)=>a.label.localeCompare(b.label,'zh-Hans-CN'));return g;});
+ return out;
 }
 // Software cards show introductory walkthroughs, not every video in a shared folder.
 function softwareVideos(software){
