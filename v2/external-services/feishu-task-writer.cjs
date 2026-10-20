@@ -1,8 +1,8 @@
 'use strict';
 // Explicit two-table adapter. Reads schema, never creates/renames/reorders fields or permissions.
-const {model,buildDisplay,displayPatch}=require('../../backend/log-display.cjs');
+const {model,buildDisplay,buildV2Display,displayPatch}=require('../../backend/log-display.cjs');
 const {hash}=require('./task-log-store.cjs');
-const {receiverLabel,hardwareModel,cardIdentity,cardResult}=require('../../backend/receiver-evidence.cjs');
+const {receiverLabel,hardwareModel}=require('../../backend/receiver-evidence.cjs');
 const DOMAIN='https://open.feishu.cn/open-apis/';
 function createFeishuTaskWriter({cfg,getTenantToken,fetchImpl=fetch}){
  const targets={success:{app:cfg.FEISHU_APP_TOKEN,table:cfg.FEISHU_TABLE_ID},failure:{app:cfg.FEISHU_FAILURE_APP_TOKEN,table:cfg.FEISHU_FAILURE_TABLE_ID}};
@@ -34,16 +34,7 @@ function createFeishuTaskWriter({cfg,getTenantToken,fetchImpl=fetch}){
   if(!names.has('自动写入基线'))current['自动写入基线']=receipt.prepared_baseline||receipt.baseline||'';
   const pauses=state.exceptions.map(x=>x.node+'：'+x.message).join('\n');let patch;
   if(kind==='success'){
-   const display=buildDisplay(r),counts={upgraded:0,checked:0,reported:0,failed:0,pending:0},seen=new Set();
-   const conflicts=new Map();for(const card of display.snapshot.receiver_upgrades){const k=JSON.stringify([card.port,card.card_id]),signatures=conflicts.get(k)||new Set();signatures.add(hash(card));conflicts.set(k,signatures);}
-   for(const card of display.snapshot.receiver_upgrades){
-    if(!cardIdentity(card,r))continue;const identity=JSON.stringify([card.port,card.card_id]);if(seen.has(identity))continue;seen.add(identity);
-    if(conflicts.get(identity).size>1){counts.pending++;continue;}
-    const result=cardResult(card);
-    if(result.upgraded)counts.upgraded++;else if(result.matched)counts.checked++;else if(card.status==='failed'||result.report&&card.write_reported_status==='failed')counts.failed++;else if(result.report&&!result.reportConflict)counts.reported++;else counts.pending++;
-   }
-   display.versionInfo+='\n接收卡结果：'+[counts.upgraded?'升后实读确认（'+counts.upgraded+'张）':'',counts.checked?'已检查无需升级（'+counts.checked+'张）':'',counts.reported?'HDSet报告写入成功；升后版本未实读（'+counts.reported+'张）':'',counts.failed?'升级或写入报告失败（'+counts.failed+'张）':'',counts.pending?'已采集，结果待确认（'+counts.pending+'张）':''].filter(Boolean).join('；');
-   if(state.readback_success_qualified===false)display.versionInfo+='\n采集记录，不代表全部接收卡实读成功或客户问题已解决';
+   const display=buildV2Display(r);
    patch=displayPatch(display,{existing:!!row,currentFields:current});
    patch['非人工暂停记录']=state.exceptions.length?'共'+state.exceptions.length+'次\n'+state.exceptions.slice(-20).map(x=>x.node+'：'+x.message.slice(0,280)).join('\n')+'\n完整异常见内部异常表':'无';
    // Dates only on creation. The existing human/business columns are never bulk replaced.

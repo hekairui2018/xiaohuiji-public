@@ -108,6 +108,57 @@ function buildDisplay(input){
  const unknown=inventoryRows.filter(r=>!hardwareModel(r)).map(r=>'接收卡（'+receiverLabel(r)+'）'+(Number.isSafeInteger(r.count)&&r.count>0?'×'+r.count:''));if(!unknown.length&&rec.receiver_upgrades.some(r=>!hardwareModel(r)))unknown.push('接收卡（型号未确认）');
  return {productModel:[sender,...[...inventory].map(([m,c])=>{const row=[...rec.receiver_upgrades,...inventoryRows].find(r=>hardwareModel(r)===m);return (row?receiverLabel(row):m)+(c===null?'':'×'+c);}),...unknown].filter(Boolean).join('＋'),versionInfo:lines.join('\n'),siteEnvironment,warnings:[...new Set(warnings)],snapshot:rec};
 }
+// V2 leadership projection: concise business cells; evidence stays in snapshot/TXT.
+function buildV2Display(input){
+ const display=buildDisplay(input),rec=display.snapshot;
+ const records=new Map(),unlinked=[];
+ for(const card of rec.receiver_upgrades){
+  if(!cardIdentity(card,rec)){unlinked.push(card);continue;}
+  const key=JSON.stringify([card.run_id,card.device_id,card.port,card.card_id]);
+  if(!records.has(key))records.set(key,[]);
+  if(!records.get(key).some(r=>JSON.stringify(r)===JSON.stringify(card)))records.get(key).push(card);
+ }
+ const totals=new Map(),ports=new Map(),versions=new Map();
+ const add=(map,key,n)=>map.set(key,map.has(key)&&map.get(key)!==null&&n!==null?map.get(key)+n:map.has(key)?null:n);
+ function addVersion(label,before,after,state,count){
+  const key=JSON.stringify([label,before,after,state]);
+  if(!versions.has(key))versions.set(key,{label,before,after,state,count:0});
+  const row=versions.get(key);row.count=count===null||row.count===null?null:row.count+count;
+ }
+ for(const copies of records.values()){
+  const card=copies[0],conflict=copies.length>1;
+  const models=new Set(copies.map(hardwareModel));
+  const label=models.size===1&&hardwareModel(card)||'接收卡型号待确认';
+  add(totals,label,1);
+  if(!ports.has(card.port))ports.set(card.port,new Map());add(ports.get(card.port),label,1);
+  const before=new Set(copies.map(r=>r.before_version)).size===1?(card.before_version||'原版本未采集'):'原版本待确认';
+  const result=cardResult(card);let after='升级后待确认',state='';
+  if(conflict)state='记录冲突';
+  else if(result.matched){after='';state='无需升级';}
+  else if(result.readback){after=card.after_version;state=card.status==='failed'?'升级失败':card.status==='succeeded'?'':'结果待确认';}
+  else if(result.report&&!result.reportConflict){after=card.write_reported_version||'升级后待确认';state=card.write_reported_status==='succeeded'?'报告写入成功，未回读':'报告写入失败，未回读';}
+  else if(card.status==='failed')state='升级失败';
+  addVersion(label,before,after,state,1);
+ }
+ // Explicit inventory is a fallback only; it never augments already counted card identities.
+ if(!records.size){
+  for(const card of rec.receiver_inventory||[]){const label=hardwareModel(card)||'接收卡型号待确认';totals.set(label,totals.has(label)?null:Number.isSafeInteger(card.count)&&card.count>0?card.count:null);}
+ }
+ for(const card of unlinked){
+  const label=hardwareModel(card)||'接收卡型号待确认';
+  if(!totals.has(label))totals.set(label,null);
+  addVersion(label,card.before_version||'原版本未采集','升级后待确认','',null);
+ }
+ for(const [label,count]of totals)if(![...versions.values()].some(r=>r.label===label))addVersion(label,'原版本未采集','升级后待确认','',count);
+ const sender=model(rec.sender_model)||(!rec.recv_models_source?split(rec.product_models).filter(m=>!/^R\d/i.test(m))[0]:'');
+ const quantity=(label,count)=>label+(count===null?'':'×'+count);
+ const header=[...(rec.device_code?['发送设备：'+rec.device_code]:[]),'发送端应用：'+(rec.device_app_version||'未采集'),'发送端FPGA：'+(rec.fpga_version||'未采集')];
+ for(const row of versions.values())header.push(row.label+'：'+row.before+(row.after?' → '+row.after:'')+(row.count===null?'，数量未采集':' ×'+row.count)+(row.state?'，'+row.state:''));
+ const portLines=[...ports].sort(([a],[b])=>a-b).map(([port,models])=>'网口'+port+'：'+[...models].map(([label,count])=>quantity(label,count)).join('、'));
+ const chip=rec.selected_chip?'驱动芯片：'+rec.selected_chip:'';
+ const environment=[...portLines,chip,rec.hdset_version?'HDSet：'+rec.hdset_version:'',rec.hdplayer_version?'HDPlayer：'+rec.hdplayer_version:''].filter(Boolean).join('\n');
+ return {...display,productModel:[sender,...[...totals].map(([label,count])=>quantity(label,count))].filter(Boolean).join('＋'),versionInfo:header.join('\n'),siteEnvironment:environment};
+}
 const cell=v=>Array.isArray(v)?v.map(x=>typeof x==='string'?x:x?.text||'').join(''):typeof v==='string'?v:'';
 // Compare each current cell with its persisted last automatic value; a manual change/clear
 // permanently protects that field. Legacy values without a baseline are never assumed automatic.
@@ -127,4 +178,4 @@ function displayPatch(display,{existing=false,currentFields={}}={}){
  return fields;
 }
 function recordDetails(rec){return Object.fromEntries(['machine_id','device_code','devKey','receiver_upload_id','app_version','device_app_version','fpga_version','hdset_version','hdplayer_version','selected_chip','chips','product_models','recv_models','recv_models_source','recv_versions','version_info','site_env','sender_model','sender_model_source','upgrade_run_id','receiver_inventory','receiver_upgrades','site_display_snapshot'].filter(k=>rec[k]!==undefined).map(k=>[k,rec[k]]));}
-module.exports={model,snapshot,mergeSnapshot,buildDisplay,displayPatch,recordDetails};
+module.exports={model,snapshot,mergeSnapshot,buildDisplay,buildV2Display,displayPatch,recordDetails};

@@ -73,3 +73,32 @@ module.exports={event,next,card,base};
 test('Optional new evidence fields reject malformed values instead of silently dropping candidates',()=>{
  const f=storeFixture();try{for(const changes of [{model_candidates:'R712'},{model_candidates:Array(257).fill('R712')},{write_reported_finished:'true'},{model_evidence_table:5}])assert.throws(()=>f.store.receive(event({receiver_upgrades:[{...card,...changes}]})),/invalid-task-event/);}finally{f.close();}
 });
+
+test('V2 three business cells show model totals, version transition counts and port inventories',()=>{
+ const {buildV2Display}=require('../../backend/log-display.cjs');
+ const rows=[];
+ for(const [port,name,n,before,after]of [[1,'R712',5,'25.1','25.9'],[2,'R712',3,'25.2','25.9'],[2,'R708',4,'26.1','26.9']])for(let i=0;i<n;i++)rows.push({...card,port,card_id:String(port===2&&name==='R708'?i+4:i+1),model:name,model_candidates:[name],before_version:before,after_version:after,after_confirmed:true,after_version_source:'hdset_upgrade_readback',status:'succeeded',target_version:after});
+ const d=buildV2Display(event({receiver_upgrades:[...rows,rows[0]],site_env:'旧型号对照表：firmware-directory',hdset_version:'4.0'}));
+ assert.equal(d.productModel,'A6L＋R712×8＋R708×4');
+ assert(d.versionInfo.includes('R712：25.1 → 25.9 ×5'));
+ assert(d.versionInfo.includes('R712：25.2 → 25.9 ×3'));
+ assert(d.versionInfo.includes('R708：26.1 → 26.9 ×4'));
+ assert(d.siteEnvironment.includes('网口1：R712×5'));
+ assert(d.siteEnvironment.includes('网口2：R712×3、R708×4'));
+ assert(d.siteEnvironment.includes('HDSet：4.0'));
+ for(const cell of [d.productModel,d.versionInfo,d.siteEnvironment])assert(!/[（）()]|对照表|尾缀|依据版本|目录关联/.test(cell));
+ assert.equal(d.snapshot.receiver_upgrades.length,13);
+});
+test('V2 projection keeps report/readback/failed/unknown groups distinct and never substitutes target version',()=>{
+ const {buildV2Display}=require('../../backend/log-display.cjs');
+ const reported=buildV2Display(event());assert.match(reported.versionInfo,/R712：25\.13\.99\.30 → 25\.26\.65\.30 ×1，报告写入成功，未回读/);
+ const unknown=buildV2Display(event({receiver_upgrades:[{...card,write_reported_version:undefined,write_reported_finished:false}]}));assert(!unknown.versionInfo.includes(card.target_version));assert.match(unknown.versionInfo,/升级后待确认/);
+ const mixed=buildV2Display(event({receiver_upgrades:[{...card},{...card,card_id:'2',after_confirmed:true,after_version:card.write_reported_version,after_version_source:'hdset_upgrade_readback',status:'succeeded'},{...card,card_id:'3',status:'failed',write_reported_status:'failed'}]}));
+ assert.equal(mixed.versionInfo.split('\n').filter(l=>l.startsWith('R712：')).length,3);
+ const candidates=buildV2Display(event({receiver_upgrades:[{...card,model_source:'hdset_version_suffix_candidates',model:undefined,model_candidates:['R5S Plus','R500 Green']}]}));assert.equal(candidates.productModel,'A6L＋接收卡型号待确认×1');assert(!candidates.siteEnvironment.includes('R5S'));assert.deepEqual(candidates.snapshot.receiver_upgrades[0].model_candidates,['R5S Plus','R500 Green']);
+});
+test('V2 conflicting card observations count once and cannot form a confirmed transition or borrow other run',()=>{
+ const {buildV2Display}=require('../../backend/log-display.cjs');
+ const d=buildV2Display(event({receiver_upgrades:[{...card},{...card,before_version:'1.2'},{...card,port:2,run_id:'foreign-run'}]}));assert.equal(d.productModel,'A6L＋R712×1');assert.match(d.versionInfo,/记录冲突/);assert(!d.versionInfo.includes('→ '+card.target_version));assert(!d.siteEnvironment.includes('网口2'));
+ const missing=buildV2Display(event({receiver_inventory:[],receiver_upgrades:[{...card,port:undefined}]}));assert(!missing.siteEnvironment.includes('网口'));assert(!missing.productModel.includes('×'));assert(!missing.versionInfo.includes('报告写入成功'));
+});
