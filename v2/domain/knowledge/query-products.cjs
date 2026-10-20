@@ -1,8 +1,9 @@
 'use strict';
 const {consumeProduct}=require('./consume-product.cjs');
 function queryProducts(query,dataset,knowledge){
- const official=dataset.findProducts(query.modelId),internal=knowledge?.findProducts(query.modelId)||[];
- const records=internal.length?internal.map(p=>({...((official.length===1)?official[0]:{}),...consumeProduct(p,knowledge,query),selectionRecords:official})):official;
+ // With document knowledge installed, product facts must come from those sources.
+ // The selection dataset remains available to the ordering engine, not as a facts fallback.
+ const records=knowledge?(knowledge.findProducts(query.modelId)||[]).map(p=>consumeProduct(p,knowledge,query)):dataset.findProducts(query.modelId);
  if(!records.length)return {status:'not_found',records:[],datasetVersion:dataset.version};
  // A missing revision is not evidence that this static catalog knows a hardware revision.
  if(query.revisionId)return {status:'needs_input',records:[],reason:'revision-not-established-in-source',datasetVersion:dataset.version};

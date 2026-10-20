@@ -1,6 +1,7 @@
 'use strict';
-function createOrderingSessions(app,{ttlMs=1800000,maxSessions=200,now=Date.now}={}){
+function createOrderingSessions(app,{ttlMs=300000,maxSessions=200,now=Date.now}={}){
  const cache=new Map(),key=id=>typeof id==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(id)?id:null;
+ const expiry=setInterval(()=>{for(const [id,row]of cache)if(now()-row.at>ttlMs)cache.delete(id);},30000);expiry.unref?.();
  return {
   continue(id,text){const k=key(id),old=cache.get(k);if(!old||now()-old.at>ttlMs){cache.delete(k);return null;}
    if(/参数|规格书|固件|说明书|软件|视频|是什么|怎么用/.test(text))return null;

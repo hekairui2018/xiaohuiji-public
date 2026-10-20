@@ -31,7 +31,7 @@ function projectTableFacts(rows){
  f.outputs=[/^\d+路$/.test(fields['网口级联']||'')?'级联网口：'+fields['网口级联']:'',supported(fields['HDMI 输出'])?'HDMI输出：'+fields['HDMI 输出']:''].filter(Boolean).join('；');
  f.interfaces=['有线网口','USB','板载Wi-Fi 2.4G','板载Wi-Fi 5G'].filter(k=>fields[k]&&!/^不支持$/.test(fields[k])).map(k=>k+'：'+fields[k]).join('；');
  f.highlights=['存储','运行内存','视频','转码要求','U盘直播视频和图片'].filter(k=>fields[k]&&!/^不支持$/.test(fields[k])).map(k=>k+'：'+fields[k]).join('；');
- return {features:f,sources:rows.map(r=>r.source),conflicts};
+ return {features:f,fields,sources:rows.map(r=>r.source),conflicts};
 }
 function createProductTableFacts({localCatalog,request}){
  let catalog=null,pending=null,retryAt=0;

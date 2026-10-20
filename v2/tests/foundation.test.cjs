@@ -25,7 +25,7 @@ test('Exact model identities keep suffixes, plus sign, and unknown labels apart'
  assert.equal(dataset.findProducts('A30+')[0].model,'A30+');assert.equal(dataset.findProducts('VP620A')[0].model,'VP620A');
 });
 test('Static device inventory does not imply automatic selection or supply status',()=>{
- const result=app.quickLookup({modelId:'A3'});assert.equal(result.status,'found');assert.equal(result.records[0].status,4);
+ const result=app.quickLookup({modelId:'A3'});assert.equal(result.status,'found');assert.equal(dataset.findProducts('A3')[0].status,4);assert.equal(result.records[0].status,undefined);assert.equal(result.records[0].selectionRecords,undefined);
  assert.ok(!Object.hasOwn(result,'plan'));assert.ok(!Object.hasOwn(result,'recommendedController'));
 });
 test('Read model is immutable; callers cannot change retained facts',()=>{

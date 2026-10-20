@@ -13,7 +13,7 @@ const clean=s=>String(s||'').replace(/[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"
 const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
 function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null}={}){
  const sessions=createOfflineSessions(sessionDirectory);
- const modelRequests=new Map();
+ const modelRequests=new Map(),inFlight=new Set();
  const base=new URL(resourceBase);if(base.protocol!=='http:'||base.hostname!=='127.0.0.1')throw Error('offline resources require loopback');
  const cases=(knowledge?.cases()||[]).map(c=>consumeCase(c,knowledge.evidenceCaseReviews?.()||[]));
  const caseMap=new Map(cases.map(c=>[c.stableId,c]));
@@ -199,7 +199,10 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
     const requestedMode=input.mode||req.headers['x-v2-mode']||'quick';if(!['quick','expert'].includes(requestedMode))return send(400,{error:'invalid-mode'});
     if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
+    if(inFlight.has(input.sessionId))return send(409,{status:'busy',error:'session-request-active',reply:'当前会话仍在处理，请等待完成。'});
     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
+    inFlight.add(state.id);sessions.begin(state.id);
+    try{
     if(requestedMode==='expert'){
      state=sessions.expertState(state.id);
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
@@ -237,7 +240,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
      };
     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller)modelRequests.delete(state.id);}
+    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
@@ -247,6 +250,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',kind,...data,elapsedMs:Date.now()-started,sessionState:state};
     try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,intent:data.intent,retrievalTrace:data.retrievalTrace||[],resultCount:data.results.length,elapsedMs:output.elapsedMs});}catch{}
     state=sessions.recordAnswer(state.id,output);return send(200,{...output,sessionState:state});
+    }finally{inFlight.delete(state.id);sessions.end(state.id);}
    }
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}

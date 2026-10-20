@@ -22,7 +22,7 @@ test('Seven distinct retrieval goals remain available beyond the former 4-tool/5
 test('Identical cached requests cannot loop forever or cause repeated underlying retrieval',async()=>{
  const search={action:'search',query:'相同问题',kind:'text'};let tools=0;
  const r=await createEvidenceExpert({transport:local(Array(5).fill(search))}).answer({message:'核对现场',execute:async()=>{tools++;return {evidence:[]};}});
- assert.equal(r.error,'expert-repeated-tool');assert.equal(tools,1);assert.equal(r.modelCallCount,4);
+ assert.equal(r.error,'expert-repeated-tool');assert.equal(tools,1);assert.equal(r.modelCallCount,3);
 });
 test('Capacity pressure evicts old exchanges only, preserving current evidence and explicit conditions',async()=>{
  const c=createExpertContext({base:new URL('http://localhost'),transport:async(url,init)=>({ok:true,json:async()=>url.pathname==='/props'?{default_generation_settings:{n_ctx:16000}}:{tokens:Array(JSON.parse(init.body).content.length).fill(1)}})});

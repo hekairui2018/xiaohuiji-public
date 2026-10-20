@@ -40,14 +40,14 @@ class Conversation:
   if not isinstance(question,str) or not 1<=len(question)<=1500:raise ValueError('question-length')
   if not isinstance(session,str) or not re.fullmatch(r'[A-Za-z0-9_-]{4,70}',session):raise ValueError('session-id')
   if arm not in ['hybrid','bare']:raise ValueError('arm')
-  if profile not in [None,'simple']:raise ValueError('profile')
+  if profile not in [None,'simple','dispatch']:raise ValueError('profile')
   if direct_mode not in [None,'files','text']:raise ValueError('direct-mode')
   if filters is not None and (not isinstance(filters,dict) or set(filters)-{'model','version','limit'}):raise ValueError('filters')
   params=(question,session,arm,direct_mode,filters or {},run_id or str(time.time_ns()),profile)
   # Independent search must stay usable while the single inference lane is busy.
   if direct_mode is not None and arm=='hybrid':return self._chat(*params)
   queued=time.perf_counter();slot=False
-  if profile=='simple':
+  if profile in ['simple','dispatch']:
    slot=SIMPLE_SLOTS.acquire(blocking=False)
    if not slot:return {'error':'local-five-session-capacity-retry-later'}
    acquired=LOCK.acquire(timeout=120)
@@ -73,7 +73,10 @@ class Conversation:
    save(WORK/'traces'/(run_id+'.json'),trace);return trace
   contract=SIMPLE_CONTRACT if profile=='simple' else EVIDENCE_CONTRACT
   messages=[{'role':'system','content':SYSTEM+('\n'+TOOL_INSTRUCTIONS+'\n'+contract if arm=='hybrid' else '')}]+history+[{'role':'user','content':question}];evidence={};first_answer=None;delivered=set()
-  for round_no in range(4):
+  if profile=='dispatch' and arm=='hybrid':
+   from decision_protocol import dispatch
+   evidence,first_answer=dispatch(question,history,trace,self.tools,infer,run_id,SYSTEM+'\n'+TOOL_INSTRUCTIONS)
+  for round_no in range(0 if profile=='dispatch' and arm=='hybrid' else 4):
    force_final=round_no==3 or len(trace['tools'])>=5
    if force_final:messages.append({'role':'user','content':'本轮只读工具预算已结束。不要再发工具调用，直接根据已有证据简短回答；如果没有适用证据，请明确说不足并追问。'})
    result=infer(run_id+'-r'+str(round_no),messages,DEFINITIONS if arm=='hybrid' and not force_final else None,'required' if round_no==0 and arm=='hybrid' and profile!='simple' else 'auto')

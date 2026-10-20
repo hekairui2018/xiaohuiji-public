@@ -11,7 +11,7 @@ PAGE='''<!doctype html><meta charset="utf-8"><title>小灰机 · 本地三组对
 let session=crypto.randomUUID();document.querySelector('#new').onclick=()=>{session=crypto.randomUUID();document.querySelector('#out').textContent='已新建独立会话'};document.querySelector('#go').onclick=async()=>{const mode=document.querySelector('#mode').value,q=document.querySelector('#q').value;document.querySelector('#status').textContent='处理中…';try{let url=mode==='direct'?'/tool':'/chat',body=mode==='direct'?{name:'search_resources',arguments:{query:q}}:{question:q,session,arm:mode,runId:crypto.randomUUID()};const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),r=await response.json();document.querySelector('#out').textContent=r.answer||JSON.stringify(r,null,2);document.querySelector('#status').textContent=r.seconds!==undefined?r.seconds+' 秒':'只读检索完成';const links=document.querySelector('#links');links.replaceChildren();for(const row of r.results||[]){if(row.download){const a=document.createElement('a');a.textContent=row.sourceName;a.href=row.download;links.append(a,document.createElement('br'))}}}catch(e){document.querySelector('#status').textContent='请求未完成：'+e.message}};</script>'''
 
 def server(port=4512,default_profile=None):
- if default_profile not in [None,'simple']:raise ValueError('profile')
+ if default_profile not in [None,'simple','dispatch']:raise ValueError('profile')
  app=Conversation()
  class Handler(BaseHTTPRequestHandler):
   def log_message(self,*args):pass
@@ -55,7 +55,7 @@ def server(port=4512,default_profile=None):
  return ThreadingHTTPServer(('127.0.0.1',port),Handler)
 
 if __name__=='__main__':
- p=argparse.ArgumentParser();p.add_argument('--port',type=int,default=4512);p.add_argument('--work');p.add_argument('--profile',choices=['simple']);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--port',type=int,default=4512);p.add_argument('--work');p.add_argument('--profile',choices=['simple','dispatch']);a=p.parse_args()
  if a.work:
   from evidence_experiment import configure
   configure(a.work)

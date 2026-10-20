@@ -9,6 +9,7 @@ const ORDERING_ENGINE_BROWSER_DATA = ORDERING_ENGINE_COMMONJS
   : (ORDERING_ENGINE_GLOBAL.HuiduOrderingData || {});
 const fs = ORDERING_ENGINE_COMMONJS ? require("fs") : null;
 const path = ORDERING_ENGINE_COMMONJS ? require("path") : null;
+const orderingData = ORDERING_ENGINE_COMMONJS ? require("./ordering-data.cjs") : null;
 const hardwareEvidence = ORDERING_ENGINE_COMMONJS
   ? require("./hardware-evidence.cjs")
   : { applyHardwareEvidenceGuard: (text) => text };
@@ -111,7 +112,7 @@ function loadModulePresets() {
       : [];
   }
   const data = JSON.parse(fs.readFileSync(LOAD_INDEX_PATH, "utf8"));
-  return (data.rows || []).map((row, index) => {
+  const legacyRows = (data.rows || []).map((row, index) => {
     const pitchMatch = String(row.模组型号 || "").match(/[PQ]\s*(\d+(?:\.\d+)?)/i);
     const pixels = parsePair(row.分辨率);
     const mm = parsePair(row.模组尺寸);
@@ -139,6 +140,7 @@ function loadModulePresets() {
       sourcePath: String(row.资料路径 || data.sourcePath || "")
     };
   }).filter(Boolean);
+  return orderingData.modulePresets(legacyRows);
 }
 
 function loadVerifiedModulePresets() {
@@ -191,7 +193,7 @@ function loadDeviceCatalog() {
     return ORDERING_ENGINE_BROWSER_DATA.deviceCatalog || { schemaVersion: "", sources: [], devices: [] };
   }
   try {
-    return JSON.parse(fs.readFileSync(DEVICE_CATALOG_PATH, "utf8"));
+    return orderingData.loadCatalog();
   } catch {
     return { schemaVersion: "", sources: [], devices: [] };
   }
@@ -1399,7 +1401,12 @@ function choosePreset(input) {
     if (gaps.length) input.verifiedProfileGaps.push({ key: row.key, pixels: [row.w, row.h], gaps });
     return gaps.length === 0;
   });
-  if (input.presetKey) rows = rows.filter((row) => row.key === input.presetKey);
+  if (input.presetKey) rows = rows.filter((row) => row.key === input.presetKey || (row.legacyKeys || []).includes(input.presetKey));
+  // The official table states colors explicitly. Do not mix full-color and HUB12 modules.
+  rows = rows.filter(row => !row.colorComponents || (input.colorMode === "full"
+    ? Boolean(row.colorComponents.R && row.colorComponents.G && row.colorComponents.B)
+    : input.colorMode === "dual" ? Boolean(row.colorComponents.R && row.colorComponents.G && !row.colorComponents.B)
+      : Boolean(row.colorComponents.R && !row.colorComponents.G && !row.colorComponents.B)));
   if (input.iface) rows = rows.filter((row) => row.iface === input.iface);
   if (input.outdoor) { const outdoorRows = rows.filter((row) => /户外/.test(row.label)); if (outdoorRows.length) rows = outdoorRows; }
   // 室内/户外为软偏好：多规格时缩小范围；若会把候选清空（如同点间距仅一条且标注环境相反），回退保留，交给像素/尺寸硬匹配

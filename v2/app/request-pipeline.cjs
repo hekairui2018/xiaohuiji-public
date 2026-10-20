@@ -10,12 +10,14 @@ const {extractKnownModels}=require('../domain/identity/extract-models.cjs');
 function createPipeline({dataset,router,knowledge}){
  const acceptance=createAcceptance({dataset,knowledge});
  const lookup={findProducts:id=>[...dataset.findProducts(id),...(knowledge?.findProducts(id)||[])]};
+ // Product cards consume document knowledge; selection-tool data stays in ordering.
+ const consumeQuickProduct=p=>knowledge&&p.claims?consumeProduct(p,knowledge):p;
  return Object.freeze({
   understandInput(input,operation){return parseInput(input,lookup,{operation});},
   quickLookup(query){const check=validate(quickSchema,query);return check.valid?queryProducts(query,dataset,knowledge):{status:'invalid_request',errors:check.errors};},
-  quickSearch(text){const ids=extractKnownModels(text,lookup),raw=ids.length?ids.flatMap(id=>knowledge?.findProducts(id).length?knowledge.findProducts(id):dataset.findProducts(id)):knowledge?knowledge.search(text):dataset.findProducts(text);const records=raw.map(p=>knowledge&&p.claims?consumeProduct(p,knowledge):p);return {status:'found',records,knowledgeVersion:knowledge?.version||null};},
+  quickSearch(text){const ids=extractKnownModels(text,lookup),raw=ids.length?ids.flatMap(id=>knowledge?.findProducts(id).length?knowledge.findProducts(id):dataset.findProducts(id)):knowledge?knowledge.search(text):dataset.findProducts(text);const records=raw.map(consumeQuickProduct);return {status:'found',records,knowledgeVersion:knowledge?.version||null};},
   quickResources(){return knowledge?.assets()||{};},
-  quickBrowse(){return knowledge?knowledge.products().map(p=>consumeProduct(p,knowledge)):dataset.devices();},
+  quickBrowse(){return knowledge?knowledge.products().map(consumeQuickProduct):dataset.devices();},
   async dialogue(input){
    const understood=parseInput(input,lookup);if(!understood.demand)return understood;
    const check=validate(demandSchema,understood.demand);if(!check.valid)return {status:'invalid_request',errors:check.errors};

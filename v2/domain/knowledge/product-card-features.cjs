@@ -46,6 +46,7 @@ function productCardFeatures(product){
  // Retain provenance separately; the original document actions remain available on the card.
  const publicRef=r=>({name:r.originalName||null,page:r.page||null,locator:r.locator||null,url:r.url||null,sha256:r.originalSha256||r.sha256||null,verificationStatus:r.verificationStatus||'indexed-not-content-verified'});
  features.evidence={parameterEvidence:Object.fromEntries(Object.entries(product.parameterEvidence||{}).map(([field,refs])=>[field,refs.map(publicRef)])),claims:claims.map(c=>({claimId:c.claimId,field:c.field,verificationStatus:c.verificationStatus||'indexed-not-content-verified',sourceReferences:(c.sourceReferences||[c.sourceReference].filter(Boolean)).map(publicRef)}))};
+ // Selection-tool literals are not product-parameter evidence.
  return features;
 }
 module.exports={productCardFeatures};

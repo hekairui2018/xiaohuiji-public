@@ -5,7 +5,7 @@ const {createQuickService}=require('./quick-service.cjs');
 const {createDialogueService}=require('./dialogue-service.cjs');
 const {serveStatic}=require('./static-service.cjs');
 const {createOriginalResource}=require('./original-resource.cjs');
-function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null}={}){
+function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,developmentMonitor=null}={}){
  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
  app={...app,dialogue:app.customerDialogue||app.dialogue};
  const publicQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments});
@@ -17,6 +17,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  const loadDocs=async(cat,options,listOnly)=>{const body=await localMedia(await localQuick.docs(cat,options));return listOnly?list(body):body;};
  const docKey=(cat,history,offset,limit,view,listOnly)=>JSON.stringify([cat,history,offset,limit,view,listOnly]);
  const server=http.createServer(async(req,res)=>{
+  if(developmentMonitor?.handle(req,res))return;
   if(accessGuard&&!accessGuard(req,res))return;
   const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
   const route=req.url.split('?')[0];

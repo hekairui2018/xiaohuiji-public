@@ -28,24 +28,28 @@ async function startOffline(options={}){
   await new Promise(r=>setTimeout(r,100));
  }
  if(!ready){child.kill();throw Error('Local index did not become ready');}
- const expert=require('../model-adapter/evidence-expert.cjs').createEvidenceExpert({baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
+ // Opt-in observer shares the existing expert and tool executor; it adds no separate question flow.
+ const capture=options['bonsai-monitor']===true?require('../dev-monitor/capture.cjs').createCapture({enabled:true}):null;
+ const createExpert=capture?settings=>require('../dev-monitor/expert.cjs').createMonitoredExpert({capture,...settings}):require('../model-adapter/evidence-expert.cjs').createEvidenceExpert;
+ const developmentMonitor=capture?require('../dev-monitor/http.cjs').createMonitorHttp(capture):null;
+ const expert=createExpert({baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
   fs.appendFileSync(path.join(dataDirectory,'expert-model-calls.private.jsonl'),JSON.stringify({at:new Date().toISOString(),...entry})+'\n');
  }});
  const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert});
  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
  const accessGuard=lan?require('../adapters/http/lan-access.cjs').createLanGuard({...lan,port,publicOrigin:options['public-origin']||null}):null;
- const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog});
+ const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,developmentMonitor});
  const preparationStarted=Date.now();
  try{await server.prepareCatalogs();console.log(JSON.stringify({event:'catalog-prepared',elapsedMs:Date.now()-preparationStarted}));await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});}catch(e){child.kill();logs.close();throw e;}
  const runtime={instance:'v2-offline',host,lan,port,resourcePort,publicOrigin:options['public-origin']||null,publicScope:publicCatalog?'product-quick-and-approved-cloud-documents':null,pid:process.pid,indexPid:child.pid,knowledgeVersion:knowledge.version,startedAt:new Date().toISOString()};
  fs.writeFileSync(path.join(dataDirectory,'runtime.json'),JSON.stringify(runtime,null,2));
  server.on('request',(req,res)=>{if(!req.url.startsWith('/api/')||req.url.startsWith('/api/health')||req.url.startsWith('/api/huidu/log'))return;const start=Date.now();res.once('finish',()=>{try{logs.activity({sessionId:'v2-runtime',...require('../adapters/http/access-entry.cjs').accessEntry(req),route:req.url.split('?')[0],method:req.method,status:res.statusCode,elapsedMs:Date.now()-start});}catch{console.error('V2 runtime log could not be retained locally');}});});
- const close=()=>new Promise(resolve=>{logs.close();server.closeAllConnections();server.close(()=>{child.kill();resolve();});});
+ const close=()=>new Promise(resolve=>{logs.close();server.closeAllConnections();server.close(()=>{capture?.clear();child.kill();resolve();});});
  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>close().then(()=>process.exit(0)));
  child.on('exit',()=>{if(server.listening)console.error('Resource process stopped: product lookup and ordering remain available, original search is temporarily unavailable.');});
  console.log(JSON.stringify({instance:'v2-offline',url:'http://'+(lan?.address||'127.0.0.1')+':'+port,wiki:'/wiki',consultation:'/huiai',knowledgeVersion:knowledge.version,modelCalls:0,resourcePort,pid:process.pid,indexPid:child.pid}));
  return {server,close};
 }
-if(require.main===module){const {values}=parseArgs({options:{...Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config','lan-address','expert-model-url','public-origin','public-allowlist','oss-config'].map(k=>[k,{type:'string'}])),lan:{type:'boolean',default:false}}});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
+if(require.main===module){const {values}=parseArgs({options:{...Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config','lan-address','expert-model-url','public-origin','public-allowlist','oss-config'].map(k=>[k,{type:'string'}])),lan:{type:'boolean',default:false},'bonsai-monitor':{type:'boolean',default:false}}});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
 module.exports={startOffline};

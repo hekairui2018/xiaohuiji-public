@@ -23,7 +23,7 @@ window.LocalKnowledgeClient = Object.freeze({create(ui) {
  function render(data){
   if(data.model!=='bonsai-local-tools'&&!data.error)return false;
   window.__localLastReply=data;const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';bubble.append(make('div',data.reply||'本地服务暂不可用。'));
-  for(const f of data.localFiles||[]){const a=make('a','查看原件：'+f.name);a.href=f.url;a.target='_blank';bubble.append(a,make('br'));}
+  for(const f of data.localFiles||[]){const a=make('a','查看原件：'+f.name);a.className='v2-file-link';a.href=f.url;a.target='_blank';bubble.append(a,make('br'));}
   for(const s of data.localSources||[]){const d=make('details');d.className='local-evidence';d.append(make('summary',s.sourceName+' · '+s.evidenceId+' · '+JSON.stringify(s.locator)),make('pre',s.text));const b=make('button','继续阅读原文');b.type='button';const more=make('pre');b.onclick=()=>readSource(s,more);d.append(b,more);bubble.append(d);}
   const debug=make('details');debug.append(make('summary','本地调用轨迹'),make('pre',JSON.stringify(data.localTrace||{error:data.error},null,2)));bubble.append(debug);row.append(bubble);document.getElementById('aiMessages').append(row);return true;
  };

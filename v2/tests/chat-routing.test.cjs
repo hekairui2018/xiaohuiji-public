@@ -25,12 +25,12 @@ test('Social and ambiguous quick inputs perform zero index calls; faults never f
 });
 function fake(outputs){const calls=[];return {calls,transport:async(url,init)=>{if(url.pathname==='/props')return {ok:true,json:async()=>({default_generation_settings:{n_ctx:131072}})};if(url.pathname==='/tokenize')return {ok:false,json:async()=>({})};if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'synthetic-bonsai'}]})};calls.push(JSON.parse(init.body));const item=outputs.shift();return {ok:true,status:200,json:async()=>({choices:[{message:{content:typeof item==='string'?item:JSON.stringify(item)},finish_reason:'stop'}],usage:{completion_tokens:10}})};}};}
 test('Strata receives its supported schema envelope with expanded visible output budgets and the same citation constraints',async()=>{
- const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'answer',claims:[{text:'历史记录',evidenceIds:['source']}],generalAdvice:[],question:''}]);
+ const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'finish'},{action:'answer',claims:[{text:'历史记录',evidenceIds:['source']}],generalAdvice:[],question:''}]);
  const transport=f.transport;f.transport=(url,init)=>url.pathname==='/v1/models'?Promise.resolve({ok:true,json:async()=>({data:[{id:'qwen3.8-flash-next-coder-iq1_m'}]})}):transport(url,init);
  const r=await createEvidenceExpert(f).answer({message:'C16L闪烁',route:{intent:'technical'},execute:async()=>({evidence:[{evidenceId:'source',name:'案例',text:'历史记录'}]})});
- assert.equal(r.status,'answer');assert.equal(f.calls.length,2);
- for(const call of f.calls){assert.equal(call.response_format.type,'json_schema');assert.equal(call.response_format.json_schema.strict,true);assert.equal(call.max_tokens,8192);assert.equal(call.chat_template_kwargs.enable_thinking,false);}
- const branches=f.calls[1].response_format.json_schema.schema.oneOf;assert.ok(branches.some(s=>s.properties.action.const==='search'));assert.deepEqual(branches.find(s=>s.properties.action.const==='answer').properties.claims.items.properties.evidenceIds.items.enum,['source']);
+ assert.equal(r.status,'answer');assert.equal(f.calls.length,3);
+ for(const call of f.calls){assert.equal(call.response_format.type,'json_schema');assert.equal(call.response_format.json_schema.strict,true);assert.equal(call.max_tokens,call===f.calls.at(-1)?8192:512);assert.equal(call.chat_template_kwargs.enable_thinking,false);}
+ const branches=f.calls[2].response_format.json_schema.schema.oneOf;assert.ok(branches.some(s=>s.properties.action.const==='search'));assert.deepEqual(branches.find(s=>s.properties.action.const==='answer').properties.claims.items.properties.evidenceIds.items.enum,['source']);
 });
 test('Read choices enumerate only evidence-backed blocks; no original is offered when no block exists',async()=>{
  const f=fake([{action:'search',query:'原文',kind:'text'},{action:'read',blockId:7},{action:'answer',claims:[],generalAdvice:['核对现场条件。'],question:''}]);
@@ -38,10 +38,18 @@ test('Read choices enumerate only evidence-backed blocks; no original is offered
  assert.ok(!f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='read'));
  assert.deepEqual(f.calls[1].response_format.schema.oneOf.find(s=>s.properties.action.const==='read').properties.blockId.enum,[7]);
 });
-test('Upstream structured length errors count as model calls and use only the existing one off recovery',async()=>{
- const calls=[];const expert=createEvidenceExpert({transport:async(url,init)=>{if(url.pathname==='/props')return {ok:true,json:async()=>({default_generation_settings:{n_ctx:131072}})};if(url.pathname==='/tokenize')return {ok:false,json:async()=>({})};if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'qwen3.8-flash-next-coder-iq1_m'}]})};calls.push(JSON.parse(init.body));if(calls.length===2)return {ok:false,status:502,json:async()=>({error:{code:'structured_output_failed',message:'structured output was incomplete (finish_reason=length)'}})};return {ok:true,status:200,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls.length===1?{action:'analyze',reason:'需要对照现场条件'}:{action:'answer',claims:[],generalAdvice:['先核对现场条件，不认定故障原因。'],question:''})}}]})};}});
- const r=await expert.answer({message:'技术问题',route:{intent:'technical'}});assert.equal(r.status,'answer');assert.equal(r.modelCallCount,3);assert.equal(r.modelCalls[1].httpStatus,502);assert.equal(r.modelCalls[1].finishReason,'length');assert.equal(r.modelCalls[1].recovery,'retry-once-without-thinking');assert.equal(calls[2].chat_template_kwargs.enable_thinking,false);assert.equal(calls[2].max_tokens,8192);
+test('Decision JSON length recovery increases only the decision budget without executing partial tools',async()=>{
+ const calls=[];let tools=0;
+ const expert=createEvidenceExpert({transport:async(url,init)=>{
+  if(url.pathname==='/props')return {ok:true,json:async()=>({default_generation_settings:{n_ctx:131072}})};
+  if(url.pathname==='/tokenize')return {ok:false,json:async()=>({})};
+  if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'synthetic'}]})};
+  calls.push(JSON.parse(init.body));if(calls.length===1)return {ok:false,status:502,json:async()=>({error:{code:'structured_output_failed',message:'finish_reason=length'}})};
+  return {ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls.length===2?{action:'finish'}:{action:'answer',claims:[],generalAdvice:['核对条件。'],question:''})}}]})};
+ }});const r=await expert.answer({message:'技术问题',execute:async()=>{tools++;return {};}});
+ assert.equal(r.status,'answer');assert.equal(tools,0);assert.deepEqual(calls.map(c=>c.max_tokens),[512,2048,8192]);assert.ok(calls.every(c=>c.chat_template_kwargs.enable_thinking===false));assert.equal(r.modelCalls[0].recovery,'decision-json-budget');
 });
+
 test('Expert social replies genuinely call the model, use plain text and never invoke retrieval',async()=>{
  const f=fake(['你好，需要我协助查什么资料？']);const r=await createEvidenceExpert(f).answer({message:'你好',route:{intent:'social'},execute:()=>{throw Error('must not search');}});assert.equal(r.status,'answer');assert.equal(f.calls.length,1);assert.equal(f.calls[0].response_format,undefined);assert.equal(r.toolTrace.length,0);
 });
@@ -62,7 +70,7 @@ test('A real citation cannot justify a fabricated numeric specification or compa
  }
 });
 test('A supplied model identifier in a caution is not mistaken for an invented numeric specification',async()=>{
- const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'answer',claims:[{text:'该经验不能直接认定HD-C16L的当前原因。',evidenceIds:['source']}],generalAdvice:[],question:''}]);
+ const f=fake([{action:'search',query:'C16L闪烁',kind:'cases'},{action:'finish'},{action:'answer',claims:[{text:'该经验不能直接认定HD-C16L的当前原因。',evidenceIds:['source']}],generalAdvice:[],question:''}]);
  const r=await createEvidenceExpert(f).answer({message:'C16L闪烁',route:{intent:'aftersales',models:['HD-C16L']},execute:async()=>({evidence:[{evidenceId:'source',name:'历史经验',text:'排线检查的历史记录'}]})});assert.equal(r.status,'answer');
 });
 test('A copied known citation hash is rendered as a source name and does not count as an invented parameter',async()=>{
@@ -78,18 +86,41 @@ test('Compatibility denials pass while affirmative claims in later clauses still
   assert.equal(r.status,allowed?'answer':'unavailable',text);if(!allowed)assert.equal(r.error,'expert-unconfirmed-compatibility');
  }
 });
-test('Only model-requested low analysis can consume a thought budget; recovery stays bounded',async()=>{
- const calls=[];let count=0;const expert=createEvidenceExpert({transport:async(url,init)=>{
-  if(url.pathname==='/props')return {ok:true,json:async()=>({default_generation_settings:{n_ctx:131072}})};if(url.pathname==='/tokenize')return {ok:false,json:async()=>({})};if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'synthetic'}]})};calls.push(JSON.parse(init.body));count++;
-  return {ok:true,json:async()=>({choices:[count===1?{finish_reason:'stop',message:{content:JSON.stringify({action:'analyze',reason:'对照两种可能的排查分支'})}}:count===2?{finish_reason:'length',message:{content:'',reasoning_content:'synthetic thought'}}:{finish_reason:'stop',message:{content:JSON.stringify({action:'answer',claims:[],generalAdvice:['先核对条件，不认定原因。'],question:''})}}],usage:{completion_tokens:count===2?900:40}})};
- }});const r=await expert.answer({message:'复杂LED问题',route:{intent:'technical'}});
- assert.equal(r.status,'answer');assert.equal(calls.length,3);assert.equal(calls[0].chat_template_kwargs.enable_thinking,false);assert.equal(calls[1].chat_template_kwargs.reasoning_effort,'low');assert.equal(calls[1].chat_template_kwargs.enable_thinking,true);assert.equal(calls[2].chat_template_kwargs.enable_thinking,false);assert.equal(r.modelCalls[1].recovery,'retry-once-without-thinking');
+test('A legacy analyze action transitions to final answer without enabling Thinking',async()=>{
+ const f=fake([{action:'analyze',reason:'对照分支'},{action:'answer',claims:[],generalAdvice:['核对现场。'],question:''}]);
+ const r=await createEvidenceExpert(f).answer({message:'复杂LED问题'});
+ assert.equal(r.status,'answer');assert.deepEqual(f.calls.map(c=>c.max_tokens),[512,8192]);assert.ok(f.calls.every(c=>!c.chat_template_kwargs.enable_thinking));
+});
+test('A complete original read skips finish confirmation but still permits necessary supplementary evidence',async()=>{
+ const f=fake([{action:'search',query:'故障',kind:'cases'},{action:'read',blockId:7},{action:'search',query:'版本边界',kind:'text',reason:'核对原文未覆盖的版本条件'},{action:'answer',claims:[{text:'原文检查记录',evidenceIds:['source']}],generalAdvice:[],question:''}]);
+ const r=await createEvidenceExpert(f).answer({message:'故障及版本条件',execute:async name=>({evidence:[{evidenceId:'source',blockId:7,text:'原文检查记录',readPerformed:name==='read_document'}]})});
+ assert.equal(r.status,'answer');assert.equal(r.modelCallCount,4);assert.equal(f.calls[2].max_tokens,8192);
+ assert.ok(f.calls[2].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));
+ assert.equal(r.modelCalls[2].action.action,'search');
+});
+test('A retrieval model filter is not proof that a generic manual specifies this model',async()=>{
+ const f=fake([{action:'answer',claims:[{text:'HD-A5L每口655360点。',evidenceIds:['manual']}],generalAdvice:[],question:''}]);
+ const r=await createEvidenceExpert(f).answer({message:'A5L带载',route:{models:['HD-A5L'],simpleResource:true},execute:async()=>({evidence:[{evidenceId:'manual',name:'软件通用手册',text:'每个网口最大带载655360点',readPerformed:true,scope:{requestedModels:['HD-A5L'],mentionedModels:[]}}]})});
+ assert.equal(r.error,'expert-model-scope-unverified');assert.equal(r.status,'unavailable');
+});
+test('A product pixel limit cannot bypass citation and applicability checks through general advice',async()=>{
+ const f=fake([{action:'answer',claims:[],generalAdvice:['A5L单网口按655360点处理。'],question:''}]);
+ const r=await createEvidenceExpert(f).answer({message:'A5L带载',route:{models:['HD-A5L']}});
+ assert.equal(r.error,'expert-ungrounded-product-claim');assert.equal(r.status,'unavailable');
+});
+test('An explicit single-model capacity question reuses product retrieval without a model planning round',async()=>{
+ const f=fake([{action:'answer',claims:[{text:'HD-A5L控制范围130万像素。',evidenceIds:['product']}],generalAdvice:[],question:''}]);let tools=0;
+ const r=await createEvidenceExpert(f).answer({message:'A5L带载多少',route:{models:['HD-A5L']},execute:async(name,args)=>{
+  tools++;assert.equal(name,'search_evidence');assert.equal(args.kind,'products');assert.equal(f.calls.length,0);
+  return {evidence:[{evidenceId:'product',name:'HD-A5L产品索引',modelIds:['HD-A5L'],text:'HD-A5L控制范围130万像素。'}]};
+ }});
+ assert.equal(r.status,'answer');assert.equal(tools,1);assert.equal(r.modelCallCount,1);assert.equal(f.calls[0].max_tokens,8192);assert.equal(r.claims[0].evidenceIds[0],'product');
 });
 test('Only explicit simple resources can preload evidence; candidate preparation does not remove search',async()=>{
  const f=fake([{action:'answer',claims:[{text:'历史记录提供排线检查经验，不能直接认定当前原因。',evidenceIds:['source']}],generalAdvice:['已换过排线仍固定异常，下一步记录对应接口接触情况，逐项验证。'],question:'接收卡与芯片型号是什么？'}]);let retrieves=0;
  const r=await createEvidenceExpert(f).answer({message:'C16L局部异常，换过排线无变化',route:{intent:'resources',simpleResource:true,models:['HD-C16L']},sessionState:{facts:{knownNormal:['其他区域正常']}},execute:async(name,args)=>{assert.equal(f.calls.length,0);assert.equal(name,'search_evidence');assert.equal(args.kind,'resources');retrieves++;return {evidence:[{evidenceId:'source',name:'现场案例索引',locator:{paragraph:12},text:'排线检查的历史经验'}]};}});
- assert.equal(r.status,'answer');assert.equal(retrieves,1);assert.equal(f.calls.length,1);assert.equal(f.calls[0].chat_template_kwargs.enable_thinking,false);const input=JSON.parse(f.calls[0].messages[1].content);assert.equal(input.preparedEvidence.evidence.length,1);assert.deepEqual(input.facts.knownNormal,['其他区域正常']);assert.match(r.reply,/段 12/);assert.equal(r.modelCalls[0].purpose,'autonomous-answer-or-tool');
- assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));const outputSchema=f.calls[0].response_format.schema.oneOf.find(s=>s.properties.action.const==='answer');assert.equal(outputSchema.properties.generalAdvice.maxItems,6);assert.deepEqual(outputSchema.properties.claims.items.properties.evidenceIds.items.enum,['source']);
+ assert.equal(r.status,'answer');assert.equal(retrieves,1);assert.equal(f.calls.length,1);assert.equal(f.calls[0].chat_template_kwargs.enable_thinking,false);const input=JSON.parse(f.calls[0].messages[1].content);assert.equal(input.preparedEvidence.evidence.length,1);assert.deepEqual(input.facts.knownNormal,['其他区域正常']);assert.match(r.reply,/段 12/);assert.equal(r.modelCalls[0].purpose,'final-answer');
+ assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='answer'));assert.equal(f.calls[0].max_tokens,8192);
 });
 test('Additional original reading is allowed only when needed; valid fenced JSON never causes regeneration',async()=>{
  const f=fake([{action:'read',blockId:7},'```json\n'+JSON.stringify({action:'answer',claims:[{text:'原文检查记录',evidenceIds:['block-8']}],generalAdvice:[],question:''})+'\n```']);const seen=[];

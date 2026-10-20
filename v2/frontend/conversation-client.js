@@ -5,7 +5,7 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
  const requestedScope=new URLSearchParams(location.search).get('mode');
  const scope=['ordering','cases'].includes(requestedScope)?requestedScope:'all';
  const STORE='xhj_v2_conversations_v1',ACTIVE='xhj_v2_active_conversation_'+scope;
- const id=()=> 'w-'+crypto.randomUUID();
+ const id=()=> window.createV2SessionId();
  let items=[];
  try{const value=JSON.parse(localStorage.getItem(STORE)||'[]');if(Array.isArray(value))items=value.filter(x=>x&&typeof x.id==='string'&&Array.isArray(x.turns)).slice(0,20);}catch{}
  let activeId;try{activeId=sessionStorage.getItem(ACTIVE);}catch{}

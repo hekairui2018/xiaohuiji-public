@@ -1,8 +1,9 @@
 'use strict';
 // Ephemeral adapter state, no production data writes. Domain remains stateless.
-function createDiagnosticSessions({maxSessions=200,ttlMs=1800000,now=Date.now,understandInput}={}){
+function createDiagnosticSessions({maxSessions=200,ttlMs=300000,now=Date.now,understandInput}={}){
  const sessions=new Map();
  function key(id){return typeof id==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(id)?id:null;}
+ const expiry=setInterval(()=>{for(const [id,row]of sessions)if(now()-row.at>ttlMs)sessions.delete(id);},30000);expiry.unref?.();
  return {
   clear(id){sessions.delete(key(id));},
   continue(id,text){const k=key(id),saved=sessions.get(k);if(!saved||now()-saved.at>ttlMs){sessions.delete(k);return null;}

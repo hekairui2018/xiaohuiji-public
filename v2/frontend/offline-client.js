@@ -44,7 +44,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  }
  const toolbar=make('div');toolbar.className='v2-toolbar';const mode=make('select');mode.id='v2WorkMode';
  for(const [value,label]of [['all','资料与操作检索'],['cases','历史售后案例'],['ordering','工程配单']]){const o=make('option',label);o.value=value;mode.append(o);}
- const reset=make('button','新查询');reset.type='button';reset.id='v2NewQuery';reset.onclick=()=>{ui.setSessionId("w-"+crypto.randomUUID());state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;document.getElementById('aiMessages').replaceChildren();document.getElementById('aiInput').value='';document.getElementById('aiInput').focus();};
+ const reset=make('button','新查询');reset.type='button';reset.id='v2NewQuery';reset.onclick=()=>{ui.setSessionId(window.createV2SessionId());state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;document.getElementById('aiMessages').replaceChildren();document.getElementById('aiInput').value='';document.getElementById('aiInput').focus();};
  mode.setAttribute('aria-label','查询方式');
  // Preserve explicit request scope internally; no query-purpose selector in the UI.
  mode.hidden=true;document.querySelector('.ai-section').append(mode);
@@ -63,7 +63,8 @@ window.OfflineClient = Object.freeze({create(ui) {
  expert.onclick=()=>{if(modelAvailable&&!queryBusy&&mode.value!=='ordering'){modeChosen=true;responseMode='expert';updateResponseMode();}};
  async function refreshModel(){
   try{const capability=await json('/v2/offline/capabilities');modelAvailable=capability.expert?.available===true;
-   pending.textContent=modelAvailable?'Qwen3.8 已连接':'Qwen3.8 未连接';pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
+   pending.textContent=modelAvailable?(capability.expert?.trial?'0.8B检索试用 · 16K · 最近5轮':'本地模型已连接'):'本地模型未连接';pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
+   expert.textContent=capability.expert?.trial?'0.8B 检索试用':'专家模式';
    if(modelAvailable&&!modeChosen)responseMode='expert';
   }catch{modelAvailable=false;pending.textContent='本地模型连接失败';}
   updateResponseMode();
@@ -78,7 +79,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  const continuation=make('input');continuation.type='checkbox';continuation.id='v2ContinueQuery';const cl=make('label','将本轮文字作为上一轮的补充检索');cl.className='v2-continuation';cl.prepend(continuation);conditions.append(cl);document.getElementById('aiMessages').before(conditions);
  const feedback=make('p');feedback.className='v2-feedback';feedback.setAttribute('role','status');document.querySelector('.ai-input-row').before(feedback);
  const facts=()=>Object.fromEntries(Object.entries(factInputs).map(([key,input])=>[key,input.value.split(/[;；、]/).map(s=>s.trim()).filter(Boolean)]));
- const modeChange=()=>{help.hidden=mode.value!=='ordering';conditions.hidden=mode.value!=='cases';document.getElementById('aiInput').placeholder=mode.value==='ordering'?'输入完整工程需求，或标准需求JSON':mode.value==='cases'?'输入故障现象、准确型号或版本':'输入型号、文件名、软件功能或正文关键词';};mode.onchange=()=>{ui.setSessionId("w-"+crypto.randomUUID());state.history=[];continuation.checked=false;modeChange();};const requestedMode=new URLSearchParams(location.search).get('mode');if(['ordering','cases'].includes(requestedMode))mode.value=requestedMode;modeChange();
+ const modeChange=()=>{help.hidden=mode.value!=='ordering';conditions.hidden=mode.value!=='cases';document.getElementById('aiInput').placeholder=mode.value==='ordering'?'输入完整工程需求，或标准需求JSON':mode.value==='cases'?'输入故障现象、准确型号或版本':'输入型号、文件名、软件功能或正文关键词';};mode.onchange=()=>{ui.setSessionId(window.createV2SessionId());state.history=[];continuation.checked=false;modeChange();};const requestedMode=new URLSearchParams(location.search).get('mode');if(['ordering','cases'].includes(requestedMode))mode.value=requestedMode;modeChange();
  if(mode.value==='ordering'){document.querySelector('.ai-hint').textContent='填写完整屏体需求；配单结果由现有规则校验后展示。';document.querySelector('#aiMessages .ai-msg-bubble').textContent='请提供点间距、模组像素、排列及接收卡等已知条件，缺失条件会继续询问。';}else if(mode.value==='cases'){document.querySelector('.ai-hint').textContent='检索历史案例，结合型号、版本和现场条件核对。';document.querySelector('#aiMessages .ai-msg-bubble').textContent='输入故障现象和准确型号，可补充现场条件对照历史记录。历史措施不代表当前故障已经解决。';}
  const undo=make('button','撤销新查询');undo.type='button';undo.hidden=true;undo.className='v2-undo';toolbar.append(undo);
  let savedQuery=null,undoTimer;
