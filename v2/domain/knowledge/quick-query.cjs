@@ -1,8 +1,22 @@
 'use strict';
-const {extractKnownModels}=require('../identity/extract-models.cjs');
+const {extractKnownModels,numericModelCandidates,isTechnicalToken}=require('../identity/extract-models.cjs');
+const {chatIntent}=require('../parser/chat-intent.cjs');
 // Controlled retrieval vocabulary; these are lexical clues, never diagnoses.
+const {phenomenonWords}=require('../parser/intent-frames.cjs');
 const concepts=[
- {id:'load',type:'attribute',words:['带载','控制范围','像素','load','control range']},
+ {id:'program-send',type:'topic',words:['发送节目','节目发送','发送不了','发不出去']},
+ {id:'password',type:'topic',words:['密码','口令','password']},
+ {id:'power-schedule',type:'topic',words:['定时开关机','开关机时间','定时开关屏']},
+ {id:'brightness',type:'topic',words:['亮度','色度']},
+ {id:'battery',type:'attribute',words:['电池']},
+ {id:'program-cycle',type:'topic',words:['循环播放','播放一次','节目单']},
+ {id:'usb',type:'topic',words:['U盘','USB','优盘']},
+ {id:'white-screen',type:'symptom',words:['白屏']},
+ {id:'no-output',type:'symptom',words:['没有输出','无输出']},
+ {id:'ghost',type:'symptom',words:phenomenonWords},
+ {id:'grayscale',type:'attribute',words:['灰阶','灰度等级','灰度级','grayscale','gray level','gray scale','grey scale']},
+ {id:'size',type:'attribute',words:['尺寸','分辨率','大小']},
+ {id:'load',type:'attribute',words:['带载','控制范围','像素','load','control range','代载']},
  {id:'width',type:'attribute',words:['宽高','长宽高','宽度','高度','最宽','最高','长宽','水平','垂直','width','height','horizontal','vertical']},
  {id:'ports',type:'attribute',words:['接口','网口','HDMI','HUB75','USB','端口','interface','port']},
  {id:'function',type:'attribute',words:['功能','支持','音频','4G','播放','function','support']},
@@ -18,32 +32,72 @@ const concepts=[
  {id:'cable',type:'topic',words:['排线','网线','接线','接触','cable']},
  {id:'local',type:'scope',words:['局部','右边','左边','几排','部分区域','local']}
 ];
-const categories=[['manual',/说明书|手册|manual/i],['spec',/规格书|技术规格|datasheet|specification/i],['firmware',/固件|firmware|\.bin\b/i],['software',/软件|安装包|客户端|HDSet|HDPlayer|HDShow|HDSign/i],['video',/视频|教程|演示/i]];
 const norm=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/wi[\s-]?fi/g,'wifi');
 function parseQuickQuery(message,lookup,state={}){
- const original=String(message).trim(),social=original.replace(/[\s，。！？!?,.～~]/g,'').toLowerCase();
- if(/^(?:你好|您好|嗨|哈喽|hello|hi|谢谢|多谢|感谢|thanks|你是谁|你能做什么|你有什么功能)(?:呀|啊|哦|了)?$/.test(social))return {original,query:original,social:true,models:[],concepts:[],categories:[]};
+ const original=String(message).trim();
+ const previousOrdering=(state.retrievalHistory||[]).findLast(r=>r.quickContext)?.quickContext.ordering;
+ const orderingContext=/重新配单|另一块屏|另外.{0,5}配/.test(original)?null:previousOrdering;
+ const initial=chatIntent(original,lookup,{orderingContext});
+ if(initial.intent==='social')return {original,query:original,intent:'social',social:true,models:[],concepts:[],categories:[],orderingContext,decision:initial.decision};
  const followup=/^(?:还是这样|还是一样|仍然如此|没有改善|没用|换了也没用|依旧如此)[。！!？?\s]*$/.test(original);
  const prior=(state.messages||[]).filter((m,i,a)=>m.role==='user'&&!(i===a.length-1&&m.content===original)).slice(-3);
- const context=followup?prior.findLast(m=>! /^(?:还是这样|还是一样|没用)/.test(m.content))?.content:null;
+ let context=followup?prior.findLast(m=>! /^(?:还是这样|还是一样|没用)/.test(m.content))?.content:null;
+ const numeric=/^\d+$/.test(original),numericCandidates=numeric?numericModelCandidates(original,lookup.products?.()||[]):[];
+ const chipRecord=lookup.chipLookup?.(original),chipCandidates=chipRecord?.items||[];
+ const ambiguous=numeric&&(numericCandidates.length+new Set(chipCandidates.flatMap(c=>c.models)).size>1);
+ const currentSoftware=lookup.softwareItems?.(original)||[];
+ const previous=(state.retrievalHistory||[]).findLast(r=>r.quickContext)?.quickContext;
+ if(followup&&previous?.query)context=previous.query;
+ if(initial.intent==='product'&&previous?.intent==='resources'&&previous.chips?.length&&!previous.models?.length&&/固件|升级包/.test(previous.query||''))context=[...previous.chips,previous.query].join(' ');
+ const entityCorrection=initial.models.length&&/说错|不是.{0,20}[，,].{0,4}是|型号改为/.test(original)&&['technical','product'].includes(initial.intent)&&['parameters','resources','operation','compatibility','software-function'].includes(previous?.intent);
+ if(entityCorrection)context=previous.query.replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*/gi,' ');
+ const continuation=/这个|刚才|上一款|它|支持|功能|怎么|如何|升级|带载|参数|接口|固件|说明书|规格书|发送|还是|没有改善|没用|设置|操作/.test(original);
+ const newTopicObject=!initial.decision.reference&&initial.decision.objects.some(o=>['interface','module'].includes(o.type)||o.type==='software'&&previous?.models?.length);
+ if(!context&&!newTopicObject&&continuation&&!initial.models.length&&!initial.unknownModels?.length&&!numeric&&!chipCandidates.length&&!currentSoftware.length){
+  const last=previous||prior.map(m=>({models:extractKnownModels(m.content,lookup),query:m.content})).findLast(r=>r.models.length);
+  if(last&&(last.models?.length||last.software?.length||last.chips?.length))context=[...(last.models||[]),...(last.software||[]),...(last.chips||[])].join(' ');
+ }
  const query=context?context+'；本次反馈：'+original:original;
  const deniedFault=/(?:不要|不是|并非|无需|不需要|不用)(?:做)?(?:故障排查|故障诊断|故障|售后排查)/.test(query);
- const active=query.replace(/(?:不要|不是|并非|无需|不需要|不用)(?:做)?(?:故障排查|故障诊断|故障|售后排查)/g,'');
- const models=extractKnownModels(active,lookup),normalized=norm(active);
+ let active=query.replace(/(?:不要|不是|并非|无需|不需要|不用)(?:做)?(?:故障排查|故障诊断|故障|售后排查)/g,'');
+ active=active.replace(/(?:不是|说错了?)[ ]*(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*(?=[，,])/gi,'').replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*说错了?[，,]/gi,'');
+ const scope=initial.decision.focusText&&initial.decision.focusText!==original?initial.decision.focusText:active;
+ const models=(scope!==active?[...initial.models]:extractKnownModels(active,lookup)),normalized=norm(scope);
+ if(!ambiguous&&numericCandidates.length===1&&!chipCandidates.length)models.push(numericCandidates[0].modelId);
  const found=concepts.filter(c=>c.words.some(w=>normalized.includes(norm(w))));
- const cats=categories.filter(([,re])=>re.test(active)).map(([key])=>key);
- const compatibility=/通用|兼容|互刷|混用|跨型号/.test(active);
+ const routed=context?chatIntent(active,lookup,{orderingContext}):initial;
+ const cats=routed.decision.categories;
+ const compatibility=routed.intent==='compatibility';
  // Numbers attached to model identities remain intact. Explicit labelled versions
  // are constraints; an unlabelled number is not interpreted as a hardware version.
  const versions=[...active.matchAll(/(?:硬件(?:版本)?|固件(?:版本)?|版本)[：:\s]*V?(\d+(?:[._]\d+)+)/gi)].map(m=>({kind:/硬件/.test(m[0])?'hardware':/固件/.test(m[0])?'firmware':'version',value:m[1]}));
  const chips=[...active.matchAll(/\b(?:ICND?|SM|FM|LS|DP|MBI|TC|RUL|RUC)\d{3,5}[A-Z0-9]*\b/gi)].map(m=>m[0].toUpperCase());
- const unknownModels=(active.match(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi)||[]).filter(t=>!extractKnownModels(t,lookup).length&&!/^(?:P|V|ICND?|SM|FM|LS|DP|MBI|TC|HUB)\d/i.test(t)&&!lookup.isSoftware?.(t));
+ const unknownModels=(active.match(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi)||[]).filter(t=>!isTechnicalToken(t,active)&&!extractKnownModels(t,lookup).length&&!/^(?:P|V|ICND?|SM|FM|LS|DP|MBI|TC|HUB)\d/i.test(t)&&!lookup.isSoftware?.(t)&&!/^(?:HDMI|DP|SDI|USB|HUB)\d/i.test(t));
  let free=active.replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*/gi,' ');
  for(const c of found)for(const w of c.words)free=free.split(w).join(' ');
  free=free.replace(/请问|请|帮我|我只要|不要|只要|想要|查询|资料|说明书|规格书|固件|技术|问题|多少|最大|可以|怎么|如何|什么|有没有|完全|对应|没有|的|了|吗|我|是|这|个|公司|屏幕|显示屏|LED|控制卡|接收卡|发送卡|正常|但|并|和|还|一直|本次反馈/gi,' ');
- const literals=[...new Set(free.match(/[a-z]{3,}|[\u3400-\u9fff]{2,}/gi)||[])].slice(0,5);
+ const literals=[...new Set(free.match(/[a-z]{3,}|\d{3,}|[\u3400-\u9fff]{2,}/gi)||[])].slice(0,5);
  const discoveryTarget=found.some(c=>c.id==='wifi')&&found.some(c=>c.id==='discovery')?/(?:搜不到|搜索不到|找不到|发现不了|无法找到)[^。；\n]{0,4}设备/.test(active)?'device':'ssid':null;
- return {original,query,contextUsed:!!context,contextQuery:context||null,models,unknownModels,categories:cats,concepts:found.map(c=>c.id),attributes:found.filter(c=>c.type==='attribute').map(c=>c.id),symptoms:deniedFault?[]:found.filter(c=>c.type==='symptom').map(c=>c.id),discoveryTarget,deniedFault,compatibility,versions,chips,literals,social:false};
+ const route=routed,attributes=route.intent==='parameters'?found.filter(c=>c.type==='attribute').map(c=>c.id):[],symptoms=route.intent==='aftersales'&&!deniedFault?found.filter(c=>c.type==='symptom').map(c=>c.id):[];
+ // A symptom modifying an attribute (e.g. gray-level + abnormal) keeps
+ // that attribute as a retrieval signal without turning every attribute into a fault.
+ if(route.intent==='aftersales'&&!deniedFault)for(const relation of route.decision.requestRelations||route.decision.relations||[]){
+  if(relation.role==='negated'||relation.predicate.type!=='symptom'||relation.target?.type!=='attribute')continue;
+  for(const c of concepts)if(c.type==='attribute'&&c.words.some(w=>norm(relation.target.text).includes(norm(w)))&&!symptoms.includes(c.id))symptoms.push(c.id);
+ }
+ if(route.decision.answerNeed==='parameter-overview'&&!attributes.length)attributes.push('load','ports','size','grayscale');
+ const operation=route.intent==='operation',selectSoftware=operation&&/(?:用|使用).{0,4}(?:什么|哪个|那个|哪款)软件|调试软件/.test(active),upgrade=operation&&/升级|烧录/.test(active),sendProgram=operation&&/发送.*节目|节目.*发送/.test(active);
+ const software=[...new Set(route.software||[])];
+ const intent=ambiguous?'ambiguous':numeric&&numericCandidates.length===1&&!chipCandidates.length?'product':chipCandidates.length&&['technical','clarify'].includes(route.intent)||chips.length&&['technical','clarify'].includes(route.intent)?'chip':route.intent;
+ const decision={...route.decision,intent,original,contextUsed:!!context||route.decision.contextUsed};
+ if(intent==='chip'&&route.intent!=='chip')Object.assign(decision,{action:'identify-chip',reasons:[{rule:'registered-chip-identity',text:original,start:0}]});
+ if(numeric&&intent==='product')Object.assign(decision,{action:'identify-product',reasons:[{rule:'registered-numeric-model-core',text:original,start:0}]});
+ if(ambiguous)Object.assign(decision,{action:'clarify-identity',missing:['identity-choice']});
+ decision.reasons=decision.reasons.map(r=>original.includes(r.text)?r:{rule:'context-inherited-action',text:original,start:0,contextSource:previous?.query||context});
+ if(!ambiguous&&chipCandidates.length===1)chips.push(...chipCandidates[0].models);
+ decision.objects=[...new Map([...decision.objects,...models.map(id=>({type:"product",id})),...chips.map(id=>({type:"chip",id})),...software.map(id=>({type:"software",id}))].map(o=>[o.type+":"+(o.id||o.text),o])).values()];
+ const resourceConstraints={language:/只要中文|中文版|中文资料|中文规格|中文手册/.test(original)?'zh':/英文/.test(original)?'en':null,extension:/PDF(?:格式)?/i.test(original)?'pdf':null,subject:/\bSDK\b|\bAPI\b/i.test(original)?'sdk-api':null};
+ return {original,query,intent,decision,resourceConstraints,orderingContext,demand:route.demand,contextUsed:decision.contextUsed,contextQuery:context||null,models:[...new Set(models)],unknownModels,categories:cats,concepts:found.map(c=>c.id),attributes:intent==='parameters'?attributes:[],symptoms,discoveryTarget,deniedFault,compatibility,versions,chips:[...new Set(chips)],literals,social:false,software,numeric,numericCandidates,chipCandidates:chipCandidates.map(c=>({models:c.models,sourceReference:c.sourceReference})),ambiguous,operation:operation?{upgrade,sendProgram,selectSoftware,terms:selectSoftware?['软件']:upgrade?['升级','接收卡']:sendProgram?['节目更新']:found.some(c=>['password','power-schedule','brightness','usb'].includes(c.id))?found.filter(c=>['password','power-schedule','brightness','usb'].includes(c.id)).map(c=>c.words[0]):literals.filter(w=>!software.some(s=>norm(s)===norm(w)))}:null};
 }
 function matchesConcept(id,text){const c=concepts.find(c=>c.id===id),s=norm(text);return !!c&&c.words.some(w=>s.includes(norm(w)));}
 module.exports={parseQuickQuery,matchesConcept,concepts,norm};

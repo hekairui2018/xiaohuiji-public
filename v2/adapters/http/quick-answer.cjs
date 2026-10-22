@@ -4,6 +4,22 @@ const {extractKnownModels}=require('../../domain/identity/extract-models.cjs');
 const {modelId}=require('../../domain/identity/model-id.cjs');
 const {createQuickService}=require('./quick-service.cjs');
 const {createDialogueService}=require('./dialogue-service.cjs');
+function aftersalesGuidance(query,software=[]){
+ if(software.length&&/打不开|闪退|崩溃|无响应|安装失败/.test(query))return software.join('、')+'是软件本身无法启动，还是软件能打开但某个操作失败？请补充软件版本、电脑系统和报错信息，确认前不套用其他软件或设备故障的处理方法。';
+ return /wi-?fi|ssid/i.test(query)&&/搜不到|找不到|搜索不到/.test(query)?'通用检查方向：先确认设备是否支持并开启 Wi-Fi、实际 SSID、附近是否能发现，以及近期是否改过网络配置。':'请补充异常范围（整屏、单箱体或局部）、接收卡/驱动芯片完整型号、软件及固件版本、近期改动和已做检查。先核对案例前提，暂不直接套用历史参数或升级文件。';
+}
+// Quote a complete relevant task section, not the surrounding chapter/TOC or
+// an arbitrary fixed character slice. No steps or compatibility facts invented.
+function operationExcerpt(text,operation){
+ const startPattern=operation.sendProgram?/^(?:第[^\n]{1,8}章\s*)?节目更新\s*$/m:operation.upgrade?/^(?:\d+(?:\.\d+)*[.、]?\s*)?固件升级\s*$/m:null;
+ const match=startPattern?.exec(text);
+ if(match){let section=text.slice(match.index),next=operation.sendProgram?/^\s*3[.、]\s*/m.exec(section):/^\s*\d+\.\d+\s*(?!固件升级)[^\n]+/m.exec(section.slice(match[0].length));
+  if(next)section=section.slice(0,next.index+(operation.sendProgram?0:match[0].length));
+  if(section.trim().length<=1800&&!/\.{6}/.test(section))return {text:section.trim(),sectionFocused:true};
+ }
+ if(text.length>1800||/\.{6}/.test(text)||!/(?:点击|选择|打开|勾选|进入|按下|单击)/.test(text))return null;
+ return {text:text.trim(),sectionFocused:false};
+}
 // Coverage uses query tokens, not an arbitrary cross-engine BM25 score cutoff.
 function relevantEvidence(query,rows,lookup,models=[]){
  const normalized=s=>String(s||'').normalize('NFKC').toLowerCase();
@@ -18,7 +34,7 @@ function relevantEvidence(query,rows,lookup,models=[]){
  });
 }
 function createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia=async x=>x}){
- const lookup={findProducts:id=>knowledge?.findProducts?.(id)||app?.quickSearch(id).records||[],isSoftware:text=>!!app?.resourceMedia?.softwareItems(text).length};
+ const lookup={softwareItems:text=>app?.resourceMedia?.softwareItems(text)||[],findProducts:id=>knowledge?.findProducts?.(id)||app?.quickSearch(id).records||[],isSoftware:text=>!!app?.resourceMedia?.softwareItems(text).length};
  const quick=app&&createQuickService(app,{localCatalog,resolveDocuments}),dialogue=app&&createDialogueService({...app,dialogue:app.customerDialogue||app.dialogue});
  const classify=text=>chatIntent(text,lookup);
  const unique=rows=>{const seen=new Set();return rows.filter(r=>{const k=r.sha256||r.download||r.id||r.name;if(seen.has(k))return false;seen.add(k);return true;}).slice(0,4);};
@@ -31,12 +47,12 @@ function createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolv
   if(route.unknownModels?.length)return {...base,status:'clarify',reply:'尚未确认型号 '+route.unknownModels.join('、')+'。请核对完整型号，不能按相近型号提供参数或固件。'};
   if(route.hardwareRequested||(['resources','product'].includes(route.intent)&&facts.hardwareVersions?.length))return {...base,status:'clarify',reply:'当前查询包含硬件版本条件，但现有资料未建立该版本的适用关联，不能按相近型号或文件版本代替。请补充设备丝印和已确认的原文件依据。'};
   if(route.intent==='compatibility')return {...base,status:'clarify',reply:'不能仅凭型号相似判断固件通用。'+route.models.join('、')+'需要分别核对硬件版本、芯片、扫描方式及原固件文件；当前没有足够依据确认兼容，请勿互刷。'};
+  if(route.intent==='ordering'&&route.progressive&&app){const data=await tracked('ordering-dialogue',()=>require('./ordering-session.cjs').progressiveOrdering({...app,dialogue:app.customerDialogue||app.dialogue},route.query,route.orderingContext));return {...base,...data};}
   if(route.intent==='ordering'&&dialogue){const result=await tracked('ordering-dialogue',()=>dialogue({message:route.query,sessionId}));return {...base,reply:result.result?.reason==='no-engineering-input'?'请补充屏幕宽高或分辨率、模组像素和扫描方式、使用场景及同步/异步需求。仅凭点间距和颜色不能可靠选择控制卡。':result.reply,status:result.status,result:result.result};}
   if(route.intent==='aftersales'){
    const data=await tracked('case-search',()=>searchCases(route.query,null,{...facts,...(route.models.length?{modelIds:route.models}:{})}));
    const flow=dialogue?await tracked('aftersales-dialogue',()=>dialogue({message:route.query,sessionId})):null;
-   const wifi=/wi-?fi|ssid/i.test(route.query)&&/搜不到|找不到|搜索不到/.test(route.query);
-   const advice=wifi?'通用检查方向：显示正常不能证明无线广播正常。先确认设备是否支持并开启 Wi-Fi、实际 SSID、手机附近能否发现，以及是否刚改过网络配置。':'通用检查方向：先确认异常范围与触发时间；在断电并记录原配置后，逐项检查对应区域的供电、排线和连接。避免同时更改多项参数。';
+   const advice=aftersalesGuidance(route.query);
    return {...base,kind:'cases',reply:[advice,flow?.result?.diagnosis?.state&&flow.result.diagnosis.checks?.length?flow.reply:null,data.results.length?'以下是条件待核对的历史案例，不代表已确认当前原因。':'没有找到与当前条件明确关联的公司案例。请补充准确型号、异常区域、近期操作和已做检查。'].filter(Boolean).join('\n\n'),results:data.results.slice(0,3),result:flow?.result};
   }
   if(quick&&['resources','product'].includes(route.intent)){
@@ -54,4 +70,4 @@ function createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolv
  }
  return {classify,expertClassify:(text,state)=>expertIntent(text,lookup,state),answer:retrieve,filter:(query,rows,models)=>relevantEvidence(query,rows,lookup,models)};
 }
-module.exports={createQuickAnswer};
+module.exports={createQuickAnswer,aftersalesGuidance,operationExcerpt,relevantEvidence};

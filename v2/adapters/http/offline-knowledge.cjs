@@ -9,7 +9,8 @@ const {modelId}=require('../../domain/identity/model-id.cjs');
 const {fileUrl,previewPage,pdfPreviewPage}=require('./document-preview.cjs');
 const {groupVideos}=require('../../domain/knowledge/resource-categories.cjs');
 const {resourceView}=require('../../domain/knowledge/resource-view.cjs');
-const clean=s=>String(s||'').replace(/[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"']+/g,'[内部路径]').replace(/(?<!\d)1[3-9]\d{9}(?!\d)|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[联系方式]');
+const {accessInfo,resourceCopies}=require('../../domain/knowledge/resource-access.cjs');
+const clean=s=>String(s||'').replace(/(?<![A-Za-z])[A-Za-z]:[\\/][^\r\n|<>"']+|\\\\[^\r\n|<>"']+/g,'[内部路径]').replace(/(?<!\d)1[3-9]\d{9}(?!\d)|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g,'[联系方式]');
 // Employee-only local source directory, derived from a registered original.
 // A synchronized G: folder is a path, NOT a verified shareable cloud URL.
 function registeredSourceDirectory(locations){
@@ -23,7 +24,7 @@ function registeredSourceDirectory(locations){
  return clean((drive?drive[1].toUpperCase()+'盘 / ':'')+folder);
 }
 const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
-function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null}={}){
+function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo}={}){
  const sessions=createOfflineSessions(sessionDirectory);
  const modelRequests=new Map(),inFlight=new Set();
  const progress=require('./request-progress.cjs').createRequestProgress();
@@ -47,7 +48,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   candidatePassages:r.candidatePassages||0,locationsTruncated:!!r.locationsTruncated,
   matchedLocations:(r.matchedLocations||[]).filter(m=>Number.isInteger(m.blockId)&&m.blockId>0).map(m=>({blockId:m.blockId,locator:location(m.locator),readUrl:'/v2/offline/read?block='+m.blockId})),
   readUrl:r.blockId?'/v2/offline/read?block='+r.blockId:null},{kind:'document'});
- async function request(route){const r=await fetch(resourceBase+route,{signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('resource service unavailable');return r.json();}
+ async function request(route){const r=await fetch(resourceBase+route,{signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('resource service unavailable');const body=await r.json();return route.startsWith('/proximity/search?')?authorizeResources(body):body;}
  let catalogCache=null,catalogTime=0,catalogError=null,catalogPending=null,catalogSignature=null;
  async function localCatalog(){
   if(catalogCache&&Date.now()-catalogTime<=30000)return catalogCache;
@@ -60,10 +61,54 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   return catalogPending;
  }
  localCatalog.status=()=>({state:catalogError?(catalogCache?'stale-cache':'unavailable'):catalogCache?'ready':'not-loaded',reason:catalogError,lastSuccessfulAt:catalogTime?new Date(catalogTime).toISOString():null,cacheSeconds:30});
+ const videoFile=x=>/\.(mp4|webm|mov)$/i.test(x?.name||x?.file||'');
+ const resourceFile=x=>/\.[a-z0-9]{2,5}$/i.test(x?.name||x?.file||'');
+ async function permittedResource(item,req){
+  if(!resourceFile(item))return true;
+  const resources=await localCatalog(),copies=resourceCopies(item,resources),nature=accessInfo(item,resourceCopies(item,resources));
+  // Public traffic can never gain internal access, including from a client header.
+  return !nature.accessRestricted||(!req?.v2Public&&!!req&&await authorizeRestrictedResource(req,{...item,...nature,sources:copies}));
+ }
+ async function permittedResourceId(id,req){
+  const info=await request('/resource-info?id='+encodeURIComponent(id));
+  if(typeof info.isVideo!=='boolean'||!Array.isArray(info.resources))throw Error('resource-access-metadata-unavailable');
+  for(const source of info.resources||[]){
+   const nature=accessInfo(source,info.resources);
+   if(nature.accessRestricted&&(req?.v2Public||!await authorizeRestrictedResource(req,{...source,...nature,sources:info.resources})))return false;
+  }
+  return (info.resources||[]).length>0;
+ }
+ async function authorizeResources(value,req=null){
+  if(!/\.[a-z0-9]{2,5}(?:[\"?]|$)/i.test(JSON.stringify(value)))return value;
+  const resources=await localCatalog();
+  async function visit(x){
+   if(Array.isArray(x))return (await Promise.all(x.map(visit))).filter(v=>v!==null);
+   if(!x||typeof x!=='object')return x;
+   if(resourceFile(x)){
+    if(!await permittedResource(x,req))return null;
+    const copies=resourceCopies(x,resources),nature=accessInfo(x,copies);
+    return videoFile(x)?{...x,...nature,videoAccessChecked:copies.length>0}:x;
+   }
+   const out={};for(const [k,v]of Object.entries(x))out[k]=await visit(v);
+   return out;
+  }
+  const body=await visit(value);
+  if(body?.video){const groups=(body.video.groups||body.video.topicGroups||[]).map(g=>({...g,count:g.videos.length,sections:(g.sections||[]).map(s=>({...s})).filter(s=>s.videos.length)})).filter(g=>g.count);body.video.groups=groups;body.video.topicGroups=groups;body.video.total=groups.reduce((n,g)=>n+g.count,0);}
+  const documentCount=b=>(b?.docs?.groups||[]).reduce((n,g)=>n+(g.products?g.products.reduce((m,p)=>m+p.items.length,0):(g.items||[]).length),0);
+  if(body?.docs&&(['other','pending'].includes(body.cat)||documentCount(body)!==documentCount(value))){
+   const docs=body.docs;docs.groups=docs.groups.map(g=>{const products=(g.products||[]).map(p=>({...p,count:p.items.length})).filter(p=>p.count);return {...g,products,count:products.length,fileCount:products.reduce((n,p)=>n+p.count,0)};}).filter(g=>g.fileCount);
+   const items=docs.groups.flatMap(g=>g.products.flatMap(p=>p.items)),key=x=>x.fileId||x.sha256||x.resourceVersionId||x.url;docs.items=items;docs.total=items.length;docs.uniqueFileCount=new Set(items.map(key)).size;docs.uniqueAvailableFileCount=new Set(items.filter(x=>x.available).map(key)).size;
+   if(docs.materialGrouping)docs.materialCounts=docs.groups.map(g=>({key:g.materialProperty,label:g.label,count:g.fileCount}));docs.modelCount=docs.groups.reduce((n,g)=>n+g.count,0);
+   docs.unavailableReferenceCount=docs.unavailableRecords?.length||0;
+   if(docs.pagination)docs.pagination={...docs.pagination,total:items.length,returned:items.length,nextOffset:null};
+  }
+  return body;
+ }
  const productFacts=require('../../domain/knowledge/product-table-facts.cjs').createProductTableFacts({localCatalog,request});
  async function search(q,mode='all',{limit=10,model=null,version=null,groupDocuments=false}={}){
   const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit+(model?'&model='+encodeURIComponent(model):'')+(version?'&version='+encodeURIComponent(version):'')+(groupDocuments?'&group_documents=1':''));
-  return {query:q,elapsedMs:raw.elapsedMs,requestedModels:raw.requestedModels||[],results:(raw.results||[]).map(normalize),returnedCount:raw.results?.length||0,limitReached:!!raw.limitReached,countScope:'returned-candidates-not-total'};
+  const results=(await authorizeResources({results:(raw.results||[]).map(normalize)})).results;
+  return {query:q,elapsedMs:raw.elapsedMs,requestedModels:raw.requestedModels||[],results,returnedCount:results.length,limitReached:!!raw.limitReached,countScope:'returned-candidates-not-total'};
  }
  async function resolveDocuments(documents){
   const items=documents.map(d=>{
@@ -98,17 +143,17 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   catch{result.rawEvidence=[];result.rawEvidenceUnavailable=true;}
   return result;
  }
- async function localizeMedia(value,{metadataOnly=false}={}){
+ async function localizeMedia(value,{metadataOnly=false,requestContext=null}={}){
   const body=JSON.parse(JSON.stringify(value)),targets=[],resources=body.video?(await localCatalog()).filter(r=>r.sourceDrive==='G:'&&r.availabilityState==='present'):[];
   if(body.video){const seen=new Set((body.video.groups||[]).flatMap(g=>g.videos||[]).map(v=>v.name)),extra=[];for(const r of resources)if(/\.(mp4|webm)$/i.test(r.name)&&(/[\u4e00-\u9fff]/.test(r.name)||require('../../domain/knowledge/video-purpose.cjs').videoPurpose({name:r.name},[r]).purpose==='operation')&&(!body.query||r.name.toLowerCase().includes(String(body.query).toLowerCase()))&&!seen.has(r.name)){seen.add(r.name);extra.push({name:r.name,url:'/v2/offline/file?id='+r.locationId,sizeBytes:r.sizeBytes,sizeText:Math.round(r.sizeBytes/1048576)+' MB',sourceMode:'local',kind:'local-original'});}if(extra.length){const group={key:'local-originals',label:'新增本地视频',count:extra.length,videos:extra};body.video.groups.push(group);if(body.video.topicGroups)body.video.topicGroups.push(group);body.video.total+=extra.length;}}
   if(body.video){const registered=body.video.groups.flatMap(g=>g.videos).filter(v=>resources.some(r=>r.name===v.name&&(!v.sha256||r.sha256===v.sha256)));body.video.hiddenNonLocalCount=body.video.groups.reduce((n,g)=>n+g.videos.length,0)-registered.length;body.video.groups=[{key:'registered-local',videos:registered}];body.video.sourcePolicy='registered-present-G-drive-only';}
   if(body.video){const selection=require('../../domain/knowledge/video-purpose.cjs').operationVideos(body.video.groups.flatMap(g=>g.videos),resources);body.video.groups=[{key:'operations',label:'操作视频',videos:selection.selected,count:selection.selected.length}];body.video.topicGroups=[];body.video.total=selection.selected.length;body.video.excludedNonOperationCount=selection.withheld.length;body.video.purposePolicy='operation-videos; source-folders-primary';}
-  if(metadataOnly&&body.video){const groups=groupVideos(body.video.groups.flatMap(g=>g.videos),resources);return {cat:'video',metadataOnly:true,countStatus:'registered-candidates-not-availability-verified',total:groups.reduce((n,g)=>n+g.count,0),groups:groups.map(g=>({key:g.key,label:g.label,count:g.count}))};}
+  if(metadataOnly&&body.video){const permitted=[];for(const v of body.video.groups.flatMap(g=>g.videos))if(await permittedResource(v,requestContext))permitted.push(v);const groups=groupVideos(permitted,resources);return {cat:'video',metadataOnly:true,countStatus:'registered-candidates-not-availability-verified',total:groups.reduce((n,g)=>n+g.count,0),groups:groups.map(g=>({key:g.key,label:g.label,count:g.count}))};}
   function visit(x){if(Array.isArray(x)){x.forEach(visit);return;}if(!x||typeof x!=='object')return;
    if(/\.(bin|mp4|webm|mov)$/i.test(x.name||x.file||'')&&(x.url||x.publicUrl))targets.push(x);
    for(const v of Object.values(x))if(typeof v==='object')visit(v);
   }visit(body);
-  if(!targets.length)return body;
+  if(!targets.length)return authorizeResources(body,requestContext);
   const expectedHash=x=>x.sha256||(x.sourceReferences||[]).find(r=>r.originalSha256)?.originalSha256||null,identity=x=>(x.name||x.file)+'|'+(expectedHash(x)||'unconfirmed');
   const unique=[...new Map(targets.map(x=>[identity(x),x])).values()];
   let results=[];for(let offset=0;offset<unique.length;offset+=256){const batch=unique.slice(offset,offset+256);try{const r=await fetch(resourceBase+'/resolve-assets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:batch.map(x=>({name:x.name||x.file,sha256:expectedHash(x)}))}),signal:AbortSignal.timeout(30000)});if(!r.ok)throw Error('asset-resolution-failed');results.push(...(await r.json()).results);}catch{results.push(...batch.map(()=>null));}}
@@ -116,7 +161,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   for(const x of targets){const r=byName.get(identity(x));if(r?.available){const url='/v2/offline/file?id='+r.locationId;for(const key of ['url','publicUrl'])if(x[key])x[key]=url;x.sourceMode='local';x.localAvailable=true;x.available=true;x.localSizeBytes=r.sizeBytes;x.resourceId=r.resourceId||null;x.resourceVersionId=r.versionId||null;x.versionId=r.versionId||null;x.fileId=r.sha256?'sha256:'+r.sha256:r.versionId||null;if(r.sha256)x.sha256=r.sha256;if(/\.(mp4|webm|mov)$/i.test(x.name||x.file)){x.sizeBytes=r.sizeBytes;x.sizeText=Math.round(r.sizeBytes/1048576)+' MB';}}else{const cloud=/^https?:/.test(x.url||x.publicUrl||'');x.sourceMode=cloud?'cloud-fallback':'unavailable';x.available=cloud;x.localAvailable=false;x.localUnavailableReason=r?.reason||'local-resource-service-unavailable';x.unavailableReason=cloud?null:x.localUnavailableReason;x.unavailableMessage=cloud?null:'本地原件尚未确认，暂不可下载';if(!cloud&&x.downloadUrl)x.downloadUrl=null;if(x.clean)x.clean+=cloud?'（云端备用）':'（本地原件待核对）';if(!cloud){if(x.url)x.url=null;if(x.publicUrl)x.publicUrl=null;}}}
   if(body.video){const allowedIds=new Set(resources.map(r=>String(r.locationId)));const groups=groupVideos(body.video.groups.flatMap(g=>g.videos).filter(v=>v.localAvailable&&/^\/v2\/offline\/file\?id=\d+$/.test(v.url||'')&&allowedIds.has(new URL(v.url,'http://local').searchParams.get('id'))),resources);for(const g of groups)g.videos=g.videos.map(v=>resourceView({...v,classificationBasis:v.categoryBasis?.join(';')||null,associationStatus:'source-category-not-compatibility'},{kind:'video'}));body.video.groups=groups;body.video.topicGroups=groups;body.video.total=groups.reduce((n,g)=>n+g.count,0);body.video.grouping='product-category-and-original-operation';}
   if(body.docs&&body.docs.pagination?.limit===null){const available=body.docs.items.filter(i=>i.available&&i.url);body.docs.uniqueAvailableFileCount=new Set(available.map(i=>i.fileId||i.sha256||i.name)).size;}
-  return body;
+  return authorizeResources(body,requestContext);
  }
  async function stream(route,res,range,download=false){
   const controller=new AbortController(),closed=()=>controller.abort();res.once('close',closed);
@@ -137,7 +182,20 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   }finally{res.off('close',closed);}
  }
  const answers=require('./quick-answer.cjs').createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia});
- const quickRetrieval=require('./quick-retrieval.cjs').createQuickRetrieval({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia,originalDocuments:evidenceDocuments});
+ const faqLookup=require('./registered-faq.cjs').createRegisteredFaq({
+  findFiles:async()=>{const out=[];for(const term of ['FQA','FAQ'])out.push(...(await search(term,'files',{limit:32})).results);return out;},
+  readPage:(id,offset)=>request('/preview-document?'+new URLSearchParams({id,offset})),
+  authorize:id=>permittedResourceId(id,null),normalize,clean
+ });
+ const quickRetrieval=require('./quick-retrieval.cjs').createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localCatalog,resolveDocuments,localizeMedia,originalDocuments:evidenceDocuments,businessAnswer:answers.answer,filterEvidence:async rows=>(await authorizeResources({results:rows})).results,
+  async searchContext({query,concepts,documents,models,chips,version}){
+   const params=new URLSearchParams({q:query,scope:'text',concepts:JSON.stringify(concepts),documents:JSON.stringify(documents),models:JSON.stringify(models),chips:JSON.stringify(chips),limit:'4'});if(version)params.set('version',version);
+   const raw=await request('/proximity/search?'+params);return (raw.results||[]).map(r=>({...normalize(r),readAnchor:r.readAnchor,proximity:r.proximity}));
+  },
+  async readContext(candidate){
+   const raw=await request('/proximity/read?'+new URLSearchParams({block:candidate.blockId,anchor:candidate.readAnchor||0}));
+   return {text:(raw.blocks||[]).map(b=>clean(b.text)).join('\n'),contextBoundary:raw.boundary,contextParts:(raw.blocks||[]).map(b=>({locator:location(b.locator),blockId:b.blockId})),contextComplete:raw.nextOffset===null};
+  }});
  async function handle(req,res){
   const u=new URL(req.url,'http://localhost'),p=u.pathname;
   const chat=p==='/api/ai/chat';
@@ -168,7 +226,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    if(req.method==='GET'&&p==='/v2/offline/session'){return send(200,sessions.get(u.searchParams.get('id')));}
    if(req.method==='GET'&&p==='/v2/offline/log-status')return send(200,logs?.status()||{configured:false});
    if(legacy){const d=documentLinks.get(p),raw=await request('/search?q='+encodeURIComponent(d.name)+'&mode=files&limit=10');const file=(raw.results||[]).find(r=>r.kind==='file'&&Number.isInteger(r.locationId)&&r.name===d.name&&(!d.sha256||r.sha256===d.sha256));if(!file)return send(404,{error:'original-not-located',message:'索引中尚未定位此版本原件，请使用资料搜索核对版本。'});const target=fileUrl(file.locationId,d.name);if(target.includes('/preview?')){res.writeHead(302,{Location:target});res.end();return true;}await stream('/resource?id='+file.locationId,res);return true;}
-   if(original){await stream(p,res);return true;}
+   if(original){const file=(await localCatalog()).find(r=>r.sha256===p.split('/').pop());if(file&&!await permittedResource(file,req))return send(403,{error:'resource-access-denied'});await stream(p,res);return true;}
    if(req.method==='GET'&&p==='/v2/offline/client.js'){res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'../../frontend/offline-client.js')));return true;}
    if(req.method==='GET'&&p==='/v2/offline/status')return send(200,{mode:'no-model',knowledgeVersion:knowledge?.version,caseCount:cases.length,sourceService:'local-read-only-index',catalogStatus:localCatalog.status()});
    if(req.method==='GET'&&p==='/v2/offline/suggestions'){
@@ -181,12 +239,13 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    }
    if(req.method==='GET'&&p==='/v2/offline/capabilities')return send(200,{defaultMode:'quick',modes:['quick','expert'],expert:expert?await expert.status():{available:false,reason:'not-configured',model:null},ordering:'deterministic-rules-only'});
    if(req.method==='GET'&&p==='/v2/offline/file'){
-    const id=u.searchParams.get('id');if(!/^\d+$/.test(id||''))return send(400,{error:'invalid-resource'});await stream('/resource?id='+id,res,req.headers.range,u.searchParams.get('download')==='1');return true;
+    const id=u.searchParams.get('id');if(!/^\d+$/.test(id||''))return send(400,{error:'invalid-resource'});if(!await permittedResourceId(id,req))return send(403,{error:'resource-access-denied'});await stream('/resource?id='+id,res,req.headers.range,u.searchParams.get('download')==='1');return true;
    }
    if(req.method==='GET'&&p==='/v2/offline/preview'){
     const id=u.searchParams.get('id'),offset=u.searchParams.get('offset')||'0';
     if(!/^\d+$/.test(id||'')||!/^\d{1,6}$/.test(offset))return send(400,{error:'invalid-resource'});
     const record=(await localCatalog()).find(r=>String(r.locationId)===id&&r.availabilityState==='present');
+    if(!await permittedResourceId(id,req))return send(403,{error:'resource-access-denied'});
     if(record&&/\.pdf$/i.test(record.name)){
      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'; frame-ancestors 'self'",'Cache-Control':'no-store'});
      res.end(pdfPreviewPage(record.name,id));return true;
@@ -197,7 +256,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    }
    if(req.method==='GET'&&p==='/v2/offline/read'){
     const id=u.searchParams.get('block');if(!/^\d+$/.test(id||''))return send(400,{error:'invalid-block'});
-    const raw=await request('/read?block='+id);const csv=(raw.locations||[]).some(l=>/\.csv$/i.test(l.path));
+    const raw=await request('/read?block='+id);const origin=raw.locations?.[0];if(origin&&!await permittedResource({name:origin.name||path.win32.basename(origin.path||''),sha256:raw.sha256},req))return send(403,{error:'resource-access-denied'});const csv=(raw.locations||[]).some(l=>/\.csv$/i.test(l.path));
     return send(200,{sha256:raw.sha256,blocks:(raw.blocks||[]).map(b=>({blockId:b.id,locator:location(b.locator),text:clean(csv?b.text.split(' | ').slice(0,3).join(' | '):b.text)}))});
    }
    if(req.method==='GET'&&p==='/v2/offline/case'){
@@ -274,15 +333,17 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const started=Date.now();
     const data=await quickRetrieval.answer(query,{state,facts:state.facts,onProgress});
-    state=sessions.recordResult(state.id,{kind,query,intent:data.intent,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
-    const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',kind,...data,elapsedMs:Date.now()-started,sessionState:state};
-    try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,intent:data.intent,retrievalTrace:data.retrievalTrace||[],resultCount:data.results.length,elapsedMs:output.elapsedMs});}catch{}
+    state=sessions.recordResult(state.id,{kind,query,intent:data.intent,quickContext:data.quickContext,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
+    const {routeLog,quickContext,queryPlan,retrievalTrace,candidateCount,retrievalPolicy,sourceFailures,...customerData}=data;
+    const customerResults=(customerData.results||[]).map(({rankingSignals,...evidence})=>evidence);
+    const output={status:'answer',requestedMode:'quick',actualMode:'quick',modelStatus:'not-used',model:'v2-offline-search',kind,...customerData,results:customerResults,elapsedMs:Date.now()-started,sessionState:state};
+    try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'quick',message:input.message,intent:data.intent,quickRoute:routeLog,retrievalTrace:data.retrievalTrace||[],resultCount:data.results.length,elapsedMs:output.elapsedMs});}catch{}
     state=sessions.recordAnswer(state.id,output);progressCompleted=true;onProgress('completed');return send(200,{...output,sessionState:state});
     }finally{onProgress(progressCompleted?'completed':'failed');inFlight.delete(state.id);sessions.end(state.id);}
    }
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}
  }
- return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts};
+ return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts,authorizeResources,authorizeVideoMedia:authorizeResources};
 }
 module.exports={createOfflineKnowledge};

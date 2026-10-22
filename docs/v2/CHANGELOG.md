@@ -1,3 +1,7 @@
+## 2026-10-22: experimental quick routing source checkpoint
+
+Unified action/entity handling, progressive ordering integration, registered FAQ row retention and necessary access/grouping dependencies. 217 targeted controlled-data checks passed; customer answer acceptance remains incomplete. See reports/2026-10-22-quick-routing-candidate-review.md. Source sync only, no deployment; private datasets and question bank excluded.
+
 # 第七阶段
 
 2026-10-17：当前交付为[无模型可用版](offline-usable.md)。资料、历史案例与原文、结构化条件/会话、本地OCR、配单及隔离飞书日志接通，实际本机页面可用。没有修改一代、active或原件；未做正式客户部署。飞书实表仍待V2独立配置。见[功能验证](stages/offline-usable-result.json)。下文历史研究记录不代表当前默认入口。
