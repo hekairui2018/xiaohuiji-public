@@ -44,7 +44,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  }
  const toolbar=make('div');toolbar.className='v2-toolbar';const mode=make('select');mode.id='v2WorkMode';
  for(const [value,label]of [['all','资料与操作检索'],['cases','历史售后案例'],['ordering','工程配单']]){const o=make('option',label);o.value=value;mode.append(o);}
- const reset=make('button','新查询');reset.type='button';reset.id='v2NewQuery';reset.onclick=()=>{ui.setSessionId(window.createV2SessionId());state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;document.getElementById('aiMessages').replaceChildren();document.getElementById('aiInput').value='';document.getElementById('aiInput').focus();};
+ const reset=make('button','新查询');reset.type='button';reset.id='v2NewQuery';reset.onclick=()=>{ui.setSessionId(window.createV2SessionId());state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;document.getElementById('aiMessages').replaceChildren();document.getElementById('aiInput').value='';ui.resizeInput?.();ui.scrollChatToBottom?.();document.getElementById('aiInput').focus({preventScroll:true});};
  mode.setAttribute('aria-label','查询方式');
  // Preserve explicit request scope internally; no query-purpose selector in the UI.
  mode.hidden=true;document.querySelector('.ai-section').append(mode);
@@ -55,6 +55,10 @@ window.OfflineClient = Object.freeze({create(ui) {
  let responseMode='quick',modelAvailable=false,queryBusy=false,modeChosen=false,conversationType='normal';
  function updateResponseMode(){
   const ordering=mode.value==='ordering';
+  const imageEnabled=!ordering&&responseMode==='expert'&&modelAvailable;
+  const imageButton=document.getElementById('aiImgBtn'),imageFile=document.getElementById('aiImgFile');
+  imageButton.hidden=!imageEnabled;imageButton.disabled=!imageEnabled||queryBusy;imageFile.disabled=!imageEnabled||queryBusy;
+  if(!imageEnabled&&!queryBusy)clearOcrImage();
   fast.setAttribute('aria-pressed',String(ordering||responseMode==='quick'));expert.setAttribute('aria-pressed',String(!ordering&&responseMode==='expert'));
   fast.disabled=queryBusy;expert.disabled=queryBusy||ordering||!modelAvailable;
   expert.title=ordering?'工程配单使用现有规则':modelAvailable?'使用本地大模型结合原文资料回答':'本地模型未连接，请检查模型服务';
@@ -86,7 +90,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  function forgetUndo(){savedQuery=null;clearTimeout(undoTimer);undo.hidden=true;}
  reset.addEventListener('click',()=>{const messages=document.getElementById('aiMessages');if(!messages.children.length&&!document.getElementById('aiInput').value&&!Object.values(factInputs).some(i=>i.value)&&!originalMessage.value&&!checkAction.value&&!checkResult.value)return;
  savedQuery={sid:getSid(),nodes:[...messages.childNodes],history:state.history.slice(),triage:state.triage,numeric:state.numeric,reply:window.__v2LastReply,input:document.getElementById('aiInput').value,fields:Object.values(factInputs).map(i=>i.value),action:checkAction.value,result:checkResult.value,original:originalMessage.value,continue:continuation.checked};clearTimeout(undoTimer);undo.hidden=false;undoTimer=setTimeout(forgetUndo,10000);},true);
- undo.onclick=()=>{if(!savedQuery)return;const s=savedQuery;ui.setSessionId(s.sid);document.getElementById('aiMessages').replaceChildren(...s.nodes);state.history=s.history;state.triage=s.triage;state.numeric=s.numeric;window.__v2LastReply=s.reply;document.getElementById('aiInput').value=s.input;Object.values(factInputs).forEach((i,n)=>i.value=s.fields[n]);checkAction.value=s.action;checkResult.value=s.result;originalMessage.value=s.original;continuation.checked=s.continue;forgetUndo();document.getElementById('aiInput').focus();};
+ undo.onclick=()=>{if(!savedQuery)return;const s=savedQuery;ui.setSessionId(s.sid);document.getElementById('aiMessages').replaceChildren(...s.nodes);state.history=s.history;state.triage=s.triage;state.numeric=s.numeric;window.__v2LastReply=s.reply;document.getElementById('aiInput').value=s.input;Object.values(factInputs).forEach((i,n)=>i.value=s.fields[n]);checkAction.value=s.action;checkResult.value=s.result;originalMessage.value=s.original;continuation.checked=s.continue;forgetUndo();ui.resizeInput?.();ui.scrollChatToBottom?.();document.getElementById('aiInput').focus({preventScroll:true});};
  mode.addEventListener('change',forgetUndo);
  reset.addEventListener('click',()=>{for(const input of Object.values(factInputs))input.value='';checkAction.value='';checkResult.value='';originalMessage.value='';continuation.checked=false;feedback.textContent='';clearOcrImage();});
  async function request(body){
@@ -107,9 +111,10 @@ window.OfflineClient = Object.freeze({create(ui) {
  function render(data){
   if(data.model!=='v2-offline-search'&&data.actualMode!=='expert'&&!data.error)return false;
   const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';bubble.append(make('p',data.reply||'请求未完成，请稍后重试。'));
+  if(data.result?.plan&&(data.result.bom||data.result.previewBom)&&typeof renderV2Ordering==='function')bubble.append(renderV2Ordering(data.result));
   for(const r of data.results||[])bubble.append(card(r,data.kind==='cases'));
   if(data.rawEvidence?.length){bubble.append(make('h4','相关原始资料（不等于已核验案例）'));for(const r of data.rawEvidence)bubble.append(card(r));}
-  row.append(bubble);const messages=document.getElementById('aiMessages');messages.append(row);messages.scrollTop=messages.scrollHeight;window.__v2LastReply=data;return true;
+  row.append(bubble);const messages=document.getElementById('aiMessages');ui.appendChatMessage(row);window.__v2LastReply=data;return true;
  };
  const moreButton=document.getElementById('quickMoreDocsBtn');
  function highlight(text,query){
@@ -193,6 +198,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  searchInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&!products){e.preventDefault();e.stopImmediatePropagation();search();}},true);
  return {request,render,legacy:false,mode,reset,setMode:modeChange,setConversationType(value){conversationType=value;},releaseGuest(sessionId){fetchOriginal('/v2/offline/session/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId}),keepalive:true}).catch(()=>{});},
   validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return false;}return true;},
+  allowImages:()=>responseMode==='expert'&&modelAvailable&&mode.value!=='ordering',
   beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;queryBusy=busy;updateResponseMode();},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':responseMode==='expert'?'正在阅读资料并思考…':'检索资料…',
   acceptOcr(result){if(result.text.length<=240)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
  };

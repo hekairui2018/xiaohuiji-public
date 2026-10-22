@@ -34,7 +34,7 @@ function decideClause(text,{models=[],software=[],orderingContext=null,relations
  const parameter=/数量|(?:参数|带载|灰阶|尺寸|接口|网口|分辨率|宽高)[？?\s]*$|多少|多大|多宽|多高|几路|几个|几口|几块|几张|几级|几种|参数|规格参数|电池|代载|接口规格|缩放|尺寸是|什么尺寸|什么分辨率|有什么接口|哪些接口|最大(?:带载|宽|高)|带载是|带得动|支持|功能|用途|能干啥|有什么用/i.exec(positive)||(attributeQuestion?[attributeQuestion.predicate.text]:fastSemantics&&(capabilityInquiry||/(?:最薄|最厚)|(?:是|为).{1,30}[吗么?？]$/.test(positive))&&!document&&!find?[query]:null);
  if(fastSemantics&&capabilityInquiry&&!requestOperation&&!/(?:怎么|如何|步骤|教我)/.test(positive))how=null;
  if(fastSemantics&&document&&/操作手册|操作视频|调试说明书|使用教程/.test(document.input)&&!/(?:怎么|如何|步骤|教我)/.test(positive))how=null;
- const propertyInquiry=fastSemantics&&/(?:多长|叫什么|是啥|是什么|名称|全称|需不需要|是否需要|必须需要)/.test(positive)&&!/怎么|如何|步骤|步奏|注意|方式|方法/.test(positive);
+ const propertyInquiry=fastSemantics&&/(?:多长|叫什么|是啥|是什么|名称|全称|需不需要|是否需要|必须(?:需要|配)?)/.test(positive)&&!/怎么|如何|步骤|步奏|注意|方式|方法/.test(positive);
  const productSelection=fastSemantics&&!models.length&&/(?:哪款|哪种|哪些|什么|哪个).{0,8}(?:设备|产品|控制卡|接收卡|发送卡|播放盒)|(?:用|选).{0,5}(?:什么|哪款|哪个)(?:产品|设备)|有.{1,25}(?:控制板|控制卡|处理器|播放盒)[吗么?？]/.test(positive);
  const supportingLookup=parameter&&!/说明书|说名书|说明数|手册|规格书|教程|安装包|下载/.test(positive);
  const service=fastSemantics&&/(?:销售|代理|技术支持|技术).{0,12}(?:电话|联系|上班|工作时间)|(?:电话|联系).{0,12}(?:销售|代理)|多少钱|报价|价格|报修|维修.{0,6}(?:电话|联系)|保修期|售后.{0,6}(?:电话|联系)|(?:人工(?:服务|客服)?|转人工|销售|技术支持)$|(?:想|打算|需要)购买/.exec(positive);
@@ -73,7 +73,7 @@ function decideClause(text,{models=[],software=[],orderingContext=null,relations
  if(intent==='parameters'&&!models.length&&!software.length)missing.push(objects.some(o=>o.type==='module')?'module-specification':'query-object');
  if(intent==='operation'&&!models.length&&!software.length)missing.push('operation-object');
  const parameterOverview=intent==='parameters'&&parameter&&parameter[0]==='参数'&&!topics.length;
- const answerNeed=parameterOverview?'parameter-overview':intent==='software-function'&&(/是什么|什么功能|哪些功能|功能介绍|软件功能|有什么用|干什么|用途|能干啥/.test(positive)||software.some(name=>query.toLowerCase()===name.toLowerCase()))?'software-overview':intent==='software-function'?'specific-software-capability':intent==='parameters'&&(capabilityInquiry||propertyInquiry&&/需要/.test(positive))&&!/多少|多大|几级|几个|几路|几口/.test(positive)?'capability-confirmation':intent;
+ const answerNeed=parameterOverview?'parameter-overview':intent==='software-function'&&(/是什么|什么功能|哪些功能|功能介绍|软件功能|有什么用|干什么|用途|能干啥/.test(positive)||software.some(name=>query.toLowerCase()===name.toLowerCase()))?'software-overview':intent==='software-function'?'specific-software-capability':intent==='parameters'&&(capabilityInquiry||propertyInquiry&&/需要|必须/.test(positive))&&!/多少|多大|几级|几个|几路|几口/.test(positive)?'capability-confirmation':intent;
  return {intent,action,orderingKind:accessorySelection?'accessory':productSelection&&!explicitOrder&&!geometry?'catalog-selection':null,alternatives,objects,topics,answerNeed,reference:deictic?{text:deictic[0],resolved:intent==='compatibility'?false:models.length+software.length>0}:null,missing,reasons,original,categories,contextUsed:!!continuation,social:intent==='social'?/谢|thanks/.test(social)?'thanks':/谁|什么|功能/.test(social)?'capabilities':'greeting':null};
 }
 function decideAction(text,options={}){

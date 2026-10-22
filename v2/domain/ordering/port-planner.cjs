@@ -2,6 +2,7 @@
 // Rectangular module/cell planning; geometric data only, no device or AI decisions.
 const PORT_POINTS=655360;
 function planPorts(columns,rows,module,receiver,controller,providedCells){
+ if(!providedCells)return require('./official-plan.cjs').officialPorts(columns,rows,module,receiver,controller);
  const cells=providedCells||[];let id=1;
  if(!providedCells)for(let row=0;row<rows;row+=receiver.height)for(let col=0;col<columns;col+=receiver.width){
   const w=Math.min(receiver.width,columns-col),h=Math.min(receiver.height,rows-row);

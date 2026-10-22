@@ -9,6 +9,6 @@ function outputPlan(plan){
  for(const p of plan.ports)for(const c of p.cells){const x=c.col*plan.module.resolution[0],y=c.row*plan.module.resolution[1];shapes.push(`<rect x="${x}" y="${y}" width="${c.pixelWidth}" height="${c.pixelHeight}" fill="${colors[(p.id-1)%colors.length]}" stroke="white"/><text x="${x+3}" y="${y+16}" font-size="12" fill="white">R${c.id}/P${p.id}</text>`);}
  for(const c of plan.builtInRegions||[]){const x=c.col*plan.module.resolution[0],y=c.row*plan.module.resolution[1];shapes.push(`<rect x="${x}" y="${y}" width="${c.pixelWidth}" height="${c.pixelHeight}" fill="#475569" stroke="white"/><text x="${x+3}" y="${y+16}" font-size="12" fill="white">${plan.controller.model}/HUB</text>`);}
  const topologySvg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${plan.screen.pixelWidth} ${plan.screen.pixelHeight}">${shapes.join('')}</svg>`;
- return {bom,topology,topologySvg};
+ return {bom,topology,topologySvg,hdsetSvg:plan.ports.length?require('./hdset-preview.cjs').hdsetPreview(plan).svg:null};
 }
 module.exports={outputPlan};

@@ -7,10 +7,14 @@ function serveStatic(req,res,root=path.resolve(__dirname,'../../frontend'),{loca
  if(route==='/v2-site-compat.js'){res.writeHead(200,{'Content-Type':types['.js'],'X-Content-Type-Options':'nosniff'});fs.createReadStream(path.join(root,'site-compat.js')).pipe(res);return true;}
  if(['/wiki','/huiai','/'].includes(route))route='/index.html';
  const file=path.resolve(root,'.'+route);if(!file.startsWith(path.resolve(root)+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()||!types[path.extname(file)])return false;
- res.writeHead(200,{'Content-Type':types[path.extname(file)],'X-Content-Type-Options':'nosniff'});
+ res.writeHead(200,{'Content-Type':types[path.extname(file)],'X-Content-Type-Options':'nosniff',...(publicView&&route==='/index.html'?{'Cache-Control':'no-store'}:{})});
  if(route==='/index.html'){
-  let html=fs.readFileSync(file,'utf8').replace(/<body(?: data-client="rules")?/, '<body'+(publicView?' data-audience="public"':'')+' data-client="'+(offlineKnowledge?'offline':localKnowledge?'local':'rules')+'"');
-  if(publicView)html=html.replace(/\s*<script src="(?:offline-client|local-knowledge|conversation-client)\.js[^"\n]*"><\/script>/g,'');
+  let html=fs.readFileSync(file,'utf8').replace(/<body(?: data-client="rules")?/, '<body'+(publicView?' data-audience="public"':'')+' data-client="'+(publicView?'public':offlineKnowledge?'offline':localKnowledge?'local':'rules')+'"');
+  if(publicView){
+   html=html.replace(/\s*<script src="(?:offline-client|local-knowledge|conversation-client|source-directory-browser)\.js[^"\n]*"><\/script>/g,'');
+   html=html.replace(/\s*<button\b[^>]*\bid="quickMoreDocsBtn"[^>]*>[\s\S]*?<\/button>/g,'')
+    .replace(/\s*<button\b[^>]*\bdata-cat="(?:other|pending)"[^>]*>[\s\S]*?<\/button>/g,'');
+  }
   res.end(html);
  }
  else fs.createReadStream(file).pipe(res);return true;

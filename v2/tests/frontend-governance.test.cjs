@@ -3,8 +3,9 @@ const test=require('node:test'),assert=require('node:assert/strict'),vm=require(
 const source=fs.readFileSync(path.join(__dirname,'../frontend/chat-controller.js'),'utf8');
 function fixture(request,fetchImpl){
  const context={window:{},fetch:fetchImpl};vm.runInNewContext(source,context);
- const turns=[],ui={input:{value:'R708',disabled:false,focus(){}},sendButton:{disabled:false},state:{history:[]},getSessionId:()=>ui.sid,sid:'session-one',addUserMessage:(...args)=>turns.push(['user',...args]),addAssistantMessage:data=>turns.push(['assistant',data]),addLoading(){},removeLoading(){},setImageState(value){ui.image=value;},assistantTextOf:data=>data.reply,prepareLegacyMessage:()=>true,isSelftestEnv:()=>false};
- const controller=context.window.ChatController.create(ui,{legacy:false,request});return {ui,turns,controller};
+ const listeners=new Map();
+ const turns=[],ui={input:{value:'R708',disabled:false,focus(){},addEventListener(type,listener){listeners.set(type,listener);}},sendButton:{disabled:false},state:{history:[]},getSessionId:()=>ui.sid,sid:'session-one',addUserMessage:(...args)=>turns.push(['user',...args]),addAssistantMessage:data=>turns.push(['assistant',data]),addLoading(){},removeLoading(){},setImageState(value){ui.image=value;},assistantTextOf:data=>data.reply,prepareLegacyMessage:()=>true,isSelftestEnv:()=>false};
+ const controller=context.window.ChatController.create(ui,{legacy:false,request});return {ui,turns,controller,listeners};
 }
 test('one send lifecycle rejects duplicate sends and keeps channel payload explicit',async()=>{
  let release;const calls=[];const f=fixture(body=>{calls.push(body);return new Promise(r=>release=r);});const pending=f.controller.send();await f.controller.send('duplicate');assert.equal(calls.length,1);assert.equal(f.ui.sendButton.disabled,true);assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),{message:'R708',sessionId:'session-one'});release({reply:'answer'});await pending;assert.equal(f.ui.sendButton.disabled,false);assert.equal(f.ui.state.history.length,2);assert.equal(f.turns.length,2);
@@ -21,4 +22,19 @@ test('late OCR result does not query or append an answer into the next session',
 test('production entry modules do not replace native fetch or message/send functions',()=>{
  const forbidden=/window\.(?:fetch|sendMessage|sendImageMessage|addAssistantMessage|addUserMessage|assistantTextOf)\s*=/;
  for(const file of ['app.js','site-compat.js','offline-client.js','local-knowledge.js','conversation-client.js'])assert.ok(!forbidden.test(fs.readFileSync(path.join(__dirname,'../frontend',file),'utf8')),file+' reintroduces runtime overrides');
+});
+test('textarea Enter sends once while Shift, composition, IME 229 and held keys do not send',async()=>{
+ let calls=0,release;const f=fixture(()=>{calls++;return new Promise(resolve=>release=resolve);});
+ const key=f.listeners.get('keydown'),event=(extra={})=>({key:'Enter',preventDefault(){this.prevented=true;},...extra});
+ key(event({shiftKey:true}));key(event({isComposing:true}));key(event({keyCode:229}));
+ f.listeners.get('compositionstart')();key(event());f.listeners.get('compositionend')();key(event({repeat:true}));assert.equal(calls,0);
+ const enter=event();key(enter);key(event());assert.equal(enter.prevented,true);assert.equal(calls,1);
+ release({reply:'synthetic'});await new Promise(resolve=>setImmediate(resolve));assert.equal(f.ui.input.value,'');assert.equal(f.ui.sendButton.disabled,false);
+});
+
+test('multiline failure restores original draft and refreshes height after clearing and restoring',async()=>{
+ const f=fixture(async()=>{throw Error('synthetic failure');});const text='第一行\n第二行\n第三行';let resized=0;
+ f.ui.input.value=text;f.ui.resizeInput=()=>{resized++;};await f.controller.send();
+ assert.equal(f.ui.input.value,text);assert.equal(f.ui.sendButton.disabled,false);assert(resized>=3);
+ assert.equal(f.turns.filter(t=>t[0]==='user').length,1);assert.match(f.turns.at(-1)[1].reply,/输入已保留/);
 });

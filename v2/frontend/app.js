@@ -8,6 +8,38 @@ const FrontendApp = { events: new EventTarget(), channel: null };
 const aiInput = document.getElementById("aiInput");
 const aiSendBtn = document.getElementById("aiSendBtn");
 const aiMessages = document.getElementById("aiMessages");
+// Chat scrolling and composer sizing share one presentation-only owner.
+const nearChatBottom=()=>aiMessages.scrollHeight-aiMessages.clientHeight-aiMessages.scrollTop<=40;
+let followChat=true,chatScrollFrame=0;
+function followChatUpdates(){
+  cancelAnimationFrame(chatScrollFrame);
+  chatScrollFrame=requestAnimationFrame(()=>{if(followChat)aiMessages.scrollTop=aiMessages.scrollHeight;});
+}
+aiMessages.addEventListener('scroll',()=>{followChat=nearChatBottom();},{passive:true});
+aiMessages.addEventListener('wheel',event=>{if(event.deltaY<0)followChat=false;},{passive:true});
+function appendChatMessage(node){
+  followChat=nearChatBottom();aiMessages.appendChild(node);if(followChat)aiMessages.scrollTop=aiMessages.scrollHeight;
+}
+function scrollChatToBottom(){followChat=true;aiMessages.scrollTop=aiMessages.scrollHeight;followChatUpdates();}
+function resizeAiInput(){
+  if(!aiInput.getClientRects().length)return;
+  const follow=nearChatBottom(),top=aiMessages.scrollTop,style=getComputedStyle(aiInput);
+  aiInput.style.height='auto';
+  const border=parseFloat(style.borderTopWidth)+parseFloat(style.borderBottomWidth);
+  const height=Math.max(parseFloat(style.minHeight)||0,Math.min(aiInput.scrollHeight+border,parseFloat(style.maxHeight)||180));
+  aiInput.style.height=height+'px';aiInput.style.overflowY=aiInput.scrollHeight+border>height+1?'auto':'hidden';
+  if(follow)scrollChatToBottom();else{followChat=false;aiMessages.scrollTop=top;}
+}
+aiInput.addEventListener('input',resizeAiInput);
+new MutationObserver(followChatUpdates).observe(aiMessages,{childList:true,subtree:true,characterData:true});
+const chatContentResize=new ResizeObserver(followChatUpdates);
+new MutationObserver(()=>{chatContentResize.disconnect();for(const child of aiMessages.children)chatContentResize.observe(child);}).observe(aiMessages,{childList:true});
+function resizeChatViewport(){
+  document.documentElement.style.setProperty('--chat-viewport-height',(window.visualViewport?.height||window.innerHeight)+'px');
+  resizeAiInput();
+}
+window.addEventListener('resize',resizeChatViewport);window.visualViewport?.addEventListener('resize',resizeChatViewport);
+resizeChatViewport();
 
 // V2资料搜索使用/wiki；旧资料页面已移除，客服问答保持/huiai。
 const VIEW_PATHS = { quick: "/wiki", ai: "/huiai" };
@@ -21,6 +53,7 @@ function viewFromPath() {
 function applyView(view, opts) {
   const push = !opts || opts.push !== false;
   document.body.dataset.view = view;
+  requestAnimationFrame(resizeChatViewport);
   localStorage.setItem("xhj_view", view);
   document.querySelectorAll(".view-switch .vs-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === view));
@@ -87,8 +120,7 @@ function addUserMessage(text, imageDataUrl) {
     t.textContent = text;
     bubble.appendChild(t);
   }
-  aiMessages.appendChild(div);
-  aiMessages.scrollTop = aiMessages.scrollHeight;
+  appendChatMessage(div);
   FrontendApp.events.dispatchEvent(new CustomEvent("user-message", {detail:{text,imageDataUrl}}));
 }
 
@@ -100,8 +132,7 @@ function addAssistantLoading(label) {
   lb0.className = "ai-msg-bubble";
   lb0.textContent = label || "思考中…";
   div.appendChild(lb0);
-  aiMessages.appendChild(div);
-  aiMessages.scrollTop = aiMessages.scrollHeight;
+  appendChatMessage(div);
   return div;
 }
 
@@ -316,7 +347,7 @@ function addAssistantMessage(data) {
   }
   lastNumericOptions = _numOpts.length ? { options: _numOpts, at: Date.now() } : null;
 
-  if (data.model === "v2-rules" && data.status === "answer" && data.result?.bom) {
+  if ((data.result?.operation === "ordering" && data.result?.bom) || data.result?.previewBom) {
     bubble.appendChild(renderV2Ordering(data.result));
   } else if (data.status === "answer" && data.pyramid) {
     bubble.appendChild(renderPyramid(data.pyramid));
@@ -384,11 +415,7 @@ function addAssistantMessage(data) {
     hintEl.textContent = outsideHint;  // 框外引导句，不放进白色气泡
     div.appendChild(hintEl);
   }
-  aiMessages.appendChild(div);
-  // 回答可能很长（结论+步骤+案例表），定位到本条回答开头，而不是滚到容器最底让客户往上翻
-  const delta = div.getBoundingClientRect().top - aiMessages.getBoundingClientRect().top;
-  if (data.model === "v2-rules" && data.status === "answer" && data.result?.bom) aiMessages.scrollTop = aiMessages.scrollHeight;
-  else aiMessages.scrollTop += delta - 6;
+  appendChatMessage(div);
   FrontendApp.events.dispatchEvent(new CustomEvent("assistant-message", {detail:data}));
 }
 
@@ -1136,9 +1163,6 @@ function prepareLegacyMessage(text, forceText) {
 function sendMessage(forceText, displayOverride) { return FrontendApp.chat.send(forceText, displayOverride); }
 
 aiSendBtn.addEventListener("click", () => sendMessage());
-aiInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.isComposing) sendMessage();
-});
 // ============ 截图 OCR：把配单文字 / 聊天截图识别成纯文本，再走同一套问答链路 ============
 // 边界：OCR 只做「图片→文字」，不做意图判断、不查库；识别后自动直接发问，不回填输入框、不在气泡铺文字；任何失败都提示直接打字，绝不硬猜。
 const aiImgBtn = document.getElementById("aiImgBtn");
@@ -1163,6 +1187,7 @@ function clearOcrImage() {
   if (aiMessages) aiMessages.classList.remove("drag-over");
 }
 async function handleOcrFile(file) {
+  if(aiImgBtn?.hidden)return;
   if (!file || !/^image\//.test(file.type)) {
     if (aiImgPreview) aiImgPreview.hidden = false;
     setOcrStatus('请选择图片文件（截图 / 照片均可）', true);
@@ -1203,6 +1228,7 @@ if (aiImgBtn && aiImgFile) {
 if (aiImgRemove) aiImgRemove.addEventListener("click", clearOcrImage);
 // 粘贴截图：输入框聚焦时 Ctrl+V 图片即识别
 aiInput.addEventListener("paste", (e) => {
+  if(aiImgBtn?.hidden)return;
   const items = (e.clipboardData && e.clipboardData.items) || [];
   for (const it of items) {
     if (it.type && it.type.indexOf("image/") === 0) {
@@ -1217,7 +1243,7 @@ aiInput.addEventListener("paste", (e) => {
   [aiMessages, aiInput].forEach((el) => el && el.addEventListener(ev, (e) => {
     if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
       e.preventDefault();
-      el.classList.add("drag-over");
+      if(!aiImgBtn?.hidden)el.classList.add("drag-over");
     }
   }));
 });
@@ -1238,7 +1264,7 @@ const quickSearchBtn = document.getElementById("quickSearchBtn");
 const searchResults = document.getElementById("searchResults");
 
 // 搜索框下资料分类：all 全部 / spec 规格书 / manual 说明书 / software 软件 / video 视频 / firmware 固件
-const CAT_LABEL = { all: "全部", spec: "规格书", manual: "说明书", software: "软件", video: "视频", firmware: "固件", other: "其他资料", pending: "待确认" };
+const CAT_LABEL = { all: "全部", spec: "规格书", manual: "说明书", software: "软件", video: "视频", firmware: "固件", other: "🔒 内部资料" };
 const CAT_GROUP_KEYS = { spec: ["spec"], manual: ["manual"], firmware: ["firmware"], other: ["other"], pending: ["pending"] }; // 各分类在产品资料组里保留的 key
 const CAT_PLACEHOLDER = {
   all: "如 R708规格书、6363固件、A5说明书、HDPlayer软件、复位视频",
@@ -1248,7 +1274,7 @@ const CAT_PLACEHOLDER = {
   software: "输入软件名，如 HDSet、HDPlayer",
   video: "输入操作 / 故障关键词，如 复位、WiFi、接线",
   firmware: "输入接收卡型号或芯片数字，如 R708、6363",
-  other: "输入产品型号或资料关键词",
+  other: "搜索目录、文件名…",
   pending: "输入产品型号，查看需要核对的资料",
 };
 // “全部”分类：宽屏每类各给一个例子；窄屏(手机)用短版，避免单行输入框被截断
@@ -1746,25 +1772,27 @@ function renderVideoAnswer(items) {
 const docsCache = new Map();
 const docsPending = new Map();
 const docsViews = new Map();
-async function fetchDocs(cat) {
-  const cached = docsCache.get(cat);
+async function fetchDocs(cat, history = "current", query = "") {
+  if(cat==='other')return fetchDirectoryPage({query});
+  const cacheKey = cat + ":" + history;
+  const cached = docsCache.get(cacheKey);
   if (cached && Date.now() - cached.time < 30000) return cached.data;
-  if (docsPending.has(cat)) return docsPending.get(cat);
+  if (docsPending.has(cacheKey)) return docsPending.get(cacheKey);
   const request = (async () => {
-    const resp = await fetch("/api/docs?cat=" + encodeURIComponent(cat) + "&list=1");
+    const resp = await fetch("/api/docs?cat=" + encodeURIComponent(cat) + "&list=1&history=" + encodeURIComponent(history));
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
     const docs = data.docs || null;
     if (!docs) throw new Error("资料目录响应不完整");
     const signature = JSON.stringify(docs);
-    const previous = docsCache.get(cat);
+    const previous = docsCache.get(cacheKey);
     const value = previous?.signature === signature ? previous.data : docs;
-    docsCache.set(cat, { data: value, signature, time: Date.now() });
+    docsCache.set(cacheKey, { data: value, signature, time: Date.now() });
     return value;
   })();
-  docsPending.set(cat, request);
+  docsPending.set(cacheKey, request);
   try { return await request; }
-  finally { docsPending.delete(cat); }
+  finally { docsPending.delete(cacheKey); }
 }
 
 function docPillEl(it, isFw) {
@@ -1797,6 +1825,11 @@ function docPillEl(it, isFw) {
 function docFileActions(item, isFw = false) {
   const actions = document.createElement('span'); actions.className = 'doc-file-actions';
   const preview = docPillEl(item, isFw); if (item.documentDate) preview.title += ' · 原文日期 ' + item.documentDate;
+  if(item.materialProperty){
+    const kind={spec:'规格书',manual:'说明书',other:'参考资料'}[item.baseDocumentKind];
+    const notes=[item.materialPropertyLabel,kind,item.historyStatus==='archived-not-automatically-invalid'?'来源归档，不代表已失效':null].filter(Boolean);
+    preview.title+=' · '+notes.join(' · ');
+  }
   actions.appendChild(preview);
   const url = window.ProductResources.downloadTarget(item);
   if (url) {
@@ -1883,7 +1916,7 @@ async function renderDocsCategory(cat, qArg) {
   const requestId = ++quickRequestId;
   const query = qArg == null ? quickSearchInput.value.trim() : String(qArg).trim();
   const catLabel = CAT_LABEL[cat] || '资料';
-  const cached = docsCache.get(cat);
+  const cached = docsCache.get(cat+":current");
   if (cached) presentDocs(cat, query, cached.data);
   else {
     searchResults.innerHTML = '<div class="search-empty">' + catLabel + '目录准备中…</div>';
@@ -1894,7 +1927,7 @@ async function renderDocsCategory(cat, qArg) {
   status.textContent = cached && Date.now() - cached.time >= 30000 ? '已显示缓存目录，正在检查更新…' : '';
   searchResults.appendChild(status);
   try {
-    const docs = await fetchDocs(cat);
+    const docs = await fetchDocs(cat,"current",query);
     if (requestId !== quickRequestId) return;
     if (!cached || docs !== cached.data) presentDocs(cat, query, docs);
     status.remove();
@@ -1909,7 +1942,20 @@ async function renderDocsCategory(cat, qArg) {
     }
   }
 }
+const directoryPageCache=new Map(),directoryPagePending=new Map();
+async function fetchDirectoryPage({directory='root',offset=0,query='',sort='name'}={}){
+ const key=JSON.stringify([directory,offset,query,sort]),cached=directoryPageCache.get(key);
+ if(cached&&Date.now()-cached.time<30000)return cached.docs;
+ if(directoryPagePending.has(key))return directoryPagePending.get(key);
+ const pending=(async()=>{const params=new URLSearchParams({cat:'other',directory,offset:String(offset),limit:'50',q:query,sort});const response=await fetch('/api/docs?'+params);const body=await response.json();if(!response.ok||!body.docs?.directoryPage)throw Error(body.error||'此目录读取失败');if(directoryPageCache.size>=200)directoryPageCache.delete(directoryPageCache.keys().next().value);directoryPageCache.set(key,{time:Date.now(),docs:body.docs});return body.docs;})();
+ directoryPagePending.set(key,pending);try{return await pending;}finally{directoryPagePending.delete(key);}
+}
+function renderSourceDirectory(docs,query=''){
+ window.SourceDirectoryBrowser.mount({container:searchResults,docs,fileActions:docFileActions,load:async options=>(await fetchDirectoryPage(options)).directoryPage,onLocate:item=>{quickSearchInput.value=item.name;renderDocsCategory('other',item.name);}});
+}
+
 function renderDocsView(cat, qArg, docs, states = new Map()) {
+  if(docs?.directoryGrouping==='lazy-source-directories'){renderSourceDirectory(docs,qArg);return;}
   const catLabel = CAT_LABEL[cat] || '资料';
   const groups = (docs && Array.isArray(docs.groups)) ? docs.groups : [];
   if (!groups.length) {
@@ -1926,6 +1972,19 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
     head.textContent = "规格书 · 按产品大类分类（共 " + docs.modelCount + " 款产品、" + docs.total + " 份，点链接直接打开或下载；也可在上方直接搜型号）";
   } else {
     head.textContent = "使用说明书 · 按产品大类分类（共 " + docs.modelCount + " 款产品、" + docs.total + " 份，点链接直接打开或下载；也可在上方直接搜型号）";
+  }
+  if (cat === "firmware" && document.body.dataset.audience !== 'public') {
+    const toggle = document.createElement('button');toggle.type = 'button';toggle.className = 'pr-history-toggle';toggle.dataset.firmwareHistory = 'toggle';
+    toggle.textContent = docs.historyOnly ? '返回当前固件' : '历史旧版固件';
+    toggle.setAttribute('aria-pressed', String(!!docs.historyOnly));
+    toggle.onclick = async () => {
+      toggle.disabled = true;
+      try {const next = await fetchDocs('firmware', docs.historyOnly ? 'current' : 'only');if (toggle.isConnected) renderDocsView(cat, qArg, next, states);}
+      catch (error) {toggle.textContent = '读取失败，点击重试';toggle.title = error.message;}
+      finally {toggle.disabled = false;}
+    };
+    head.append(' ', toggle);
+    if (docs.historyOnly) head.prepend('历史旧版 · ');
   }
   searchResults.appendChild(head);
   const wrap = document.createElement("div");
@@ -1986,7 +2045,9 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       const sum = document.createElement("summary");
       sum.innerHTML = '<span class="vid-ico">\u25B6</span><span class="dcg-label"></span><span class="dcg-count"></span>';
       sum.querySelector(".dcg-label").textContent = g.label;
-      sum.querySelector(".dcg-count").textContent = kwUp
+      sum.querySelector(".dcg-count").textContent = docs.materialGrouping
+        ? '（'+prods.reduce((n,p)=>n+p.items.length,0)+' 份）'
+        : kwUp
         ? "（" + prods.length + " / " + g.count + " 项命中）"
         : "（" + g.count + " 项 / " + g.fileCount + " 条关联）";
       const body = document.createElement("div");
@@ -2023,7 +2084,9 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       searchResults.style.display = "block";
       return;
     }
-    head.textContent = catLabel + " · " + docs.modelCount + " 个产品/资料主题 · " + (docs.uniqueFileCount ?? docs.total) + " 份资料"
+    head.textContent = docs.materialGrouping
+      ? catLabel+' · 按资料性质分类 · '+docs.total+' 个独立原件'+(kwUp?' · 已筛选':' · 可搜索名称、型号或来源')
+      : catLabel + " · " + docs.modelCount + " 个产品/资料主题 · " + (docs.uniqueFileCount ?? docs.total) + " 份资料"
       + (kwUp ? " · 匹配 " + shownModels + " 款" : " · 可输入型号筛选");
     if (groups.length === 1) wrap.classList.add("doc-catalog-flat");
   }
@@ -2122,7 +2185,7 @@ if (quickCats) {
         quickSearchInput.value = deepQ;
         updateQuickExamples();
         setTimeout(() => renderSoftwareCategory(deepQ), 60); // /wiki?cat=software&q=HDPlayer → 直达软件分类
-      } else if ((deepCat === "spec" || deepCat === "manual") && quickSearchInput) {
+      } else if (["spec","manual","other","pending"].includes(deepCat) && quickSearchInput) {
         setActiveCat(deepCat);
         quickSearchInput.value = deepQ;
         updateQuickExamples();
@@ -2262,7 +2325,8 @@ if (quickCats) {
 
 // Only JSON catalog metadata is warmed; no document or original-file URLs are fetched.
 function preloadDocumentCatalogs() {
-  const tasks = ['spec', 'manual', 'firmware', 'software', 'video', ...(document.body.dataset.audience==='public'?[]:['other','pending'])];
+  if(document.body.dataset.audience!=='public'&&new URLSearchParams(location.search).get('cat')==='other')return;
+  const tasks = ['spec', 'manual', 'firmware', 'software', 'video'];
   let next = 0;
   async function worker() {
     while (next < tasks.length) {
@@ -2301,7 +2365,7 @@ function buildSoftwareAccessButton(s) {
 
 // Explicit dependencies shared by the selected channel and browser-local conversation store.
 Object.assign(FrontendApp, {
- input:aiInput,sendButton:aiSendBtn,messages:aiMessages,
+ input:aiInput,sendButton:aiSendBtn,messages:aiMessages,resizeInput:resizeAiInput,appendChatMessage,scrollChatToBottom,
  state:{get history(){return chatHistory;},set history(v){chatHistory=v;},get triage(){return triagePath;},set triage(v){triagePath=v;},get numeric(){return lastNumericOptions;},set numeric(v){lastNumericOptions=v;}},
  getSessionId:getSid,setSessionId(id){activeSessionId=id;window.__v2SessionId=id;FrontendApp.events.dispatchEvent(new Event("session-change"));},
  resetState(){chatHistory=[];triagePath=null;lastNumericOptions=null;window.__v2LastReply=null;},
@@ -2317,6 +2381,5 @@ window.FrontendApp = FrontendApp;
 if(document.body.dataset.audience==='public'){
  const more=document.getElementById('quickMoreDocsBtn');if(more)more.hidden=true;
  document.querySelectorAll('#quickCats [data-cat=other],#quickCats [data-cat=pending]').forEach(button=>button.hidden=true);
- const input=document.getElementById('aiInput'),send=document.getElementById('aiSendBtn');if(input){input.disabled=true;input.placeholder='公网 AI 客服尚未开放';}if(send)send.disabled=true;
- const hint=document.querySelector('.ai-hint');if(hint)hint.textContent='当前仅开放产品速查及已批准资料。';
+ const hint=document.querySelector('.ai-hint');if(hint)hint.textContent='根据已批准公开的资料回答；内部资料与全文检索不对公网开放。';
 }

@@ -12,15 +12,17 @@ function createPublicCatalog({configFile,allowlistFile,now=Date.now}={}){
   return 'https://'+cfg.Bucket+'.'+cfg.Region+'.aliyuncs.com/'+key.split('/').map(encodeURIComponent).join('/')+'?'+new URLSearchParams({OSSAccessKeyId:cfg.AccessKeyId,Expires:String(expires),Signature:signature});
  }
  const hidden=new Set(['catalogSourceLabel','sourceGroup','documentMetadata','parameterEvidence','source','relations','sourceDirectory','matchedLocations','candidatePassages','locator','scopeEvidence','classificationBasis','classificationConflict','sha256','originalSha256','blockId','sourceReference','sourceReferences','sourceExcerpt','originalPath','alternativeOriginalPaths','localPath','path','file','record','identityEvidence','rawEvidence','toolTrace','classificationEvidence','resourceId','resourceVersionId','versionId','fileId','sourceLocationId']);
+ hidden.add('alternativeUrls');hidden.add('materialPropertyBasis');hidden.add('videoAccessChecked');
+ hidden.add('sourceDirectories');hidden.add('sourceAssociations');hidden.add('accessBasis');
  function transform(value){
   if(Array.isArray(value))return value.map(transform);
   if(value&&typeof value==='object'){
    const out={};for(const [key,v]of Object.entries(value)){if(hidden.has(key))continue;
-    if(['url','publicUrl','downloadUrl','manualUrl','download','readUrl','original'].includes(key)&&typeof v==='string'){out[key]=sign(value.name||value.clean||'');continue;}
+    if(['url','publicUrl','downloadUrl','manualUrl','download','readUrl','original'].includes(key)&&typeof v==='string'){out[key]=value.accessRestricted||/\.(mp4|webm|mov)$/i.test(value.name||'')&&!value.videoAccessChecked?null:sign(value.name||value.clean||'');continue;}
     out[key]=transform(v);
    }
    if(typeof value.name==='string'&&(/\.(pdf|docx)$/i.test(value.name)||value.kind==='spec'||value.kind==='manual')){
-    out.url=sign(value.name);out.available=!!out.url;out.unavailableReason=out.url?null:'not-approved-for-public-access';out.unavailableMessage=out.url?null:'此资料尚未开通公网访问';
+    out.url=value.accessRestricted?null:sign(value.name);out.available=!!out.url;out.unavailableReason=out.url?null:'not-approved-for-public-access';out.unavailableMessage=out.url?null:'此资料尚未开通公网访问';
    }
    if(Array.isArray(value.specFiles))out.specLinks=value.specFiles.map(sign);
    return out;
@@ -30,7 +32,7 @@ function createPublicCatalog({configFile,allowlistFile,now=Date.now}={}){
  // Scope the provider BEFORE quick retrieval. Public tools never receive the
  // internal index, cases, local resolver or source paths.
  function scopeApp(app){
-  const approvedDocument=d=>approved.has(d.name||d.file||'');
+  const approvedDocument=d=>approved.has(d.name||d.file||'')&&!require('../../domain/knowledge/resource-access.cjs').accessInfo(d,[d]).accessRestricted;
   const products=app.quickBrowse().map(p=>({...p,
    documents:(p.documents||[]).filter(d=>['spec','manual'].includes(d.kind)&&approvedDocument(d)),
    firmware:(p.firmware||[]).filter(approvedDocument),

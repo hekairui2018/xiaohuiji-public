@@ -15,18 +15,18 @@ test('No-model history browser preserves reference conditions and isolates suffi
  const api=createOfflineKnowledge({knowledge:fakeKnowledge});const r=api.searchCases('Z100 闪屏');assert.equal(r.results.length,1);assert.equal(r.results[0].id,'case-a');assert.equal(r.results[0].verificationStatus,'reference_only');assert.deepEqual(r.results[0].scope.softwareVersions,['1.0']);assert.equal(r.results[0].referenceOnly,true);assert.match(r.results[0].resultStatus,/不等于/);assert.equal(r.results[0].checks.length,0);
 });
 test('Offline pages and body search work without model tools; passage locations become real download links',async()=>{
- let calls=0;const upstream=http.createServer((req,res)=>{calls++;assert.ok(!req.url.includes('/chat'));res.setHeader('Content-Type','application/json');res.end(JSON.stringify({results:[{name:'Z100 V1.pdf',blockId:1,sha256:'a'.repeat(64),ordinal:2,text:'说明正文',locator:{page:1,cells:['internal author']},locations:[{id:7,path:'G:\\private\\file.pdf'}]}]}));});
+ const calls=[];const upstream=http.createServer((req,res)=>{const route=new URL(req.url,'http://local').pathname;calls.push(route);if(route==='/catalog'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({resources:[{name:'Z100 V1.pdf',locationId:7,sha256:'a'.repeat(64),folders:['产品说明书']}]}));return;}assert.equal(route,'/search');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({results:[{name:'Z100 V1.pdf',blockId:1,sha256:'a'.repeat(64),ordinal:2,text:'说明正文',locator:{page:1,cells:['internal author']},locations:[{id:7,path:'G:\\private\\file.pdf'}]}]}));});
  const source=await listen(upstream),s=createServer(undefined,{offlineKnowledge:createOfflineKnowledge({knowledge:fakeKnowledge,resourceBase:source})}),base=await listen(s);
  try{
   const html=await fetch(base+'/huiai').then(r=>r.text());assert.ok(html.includes('offline-client.js'));assert.ok(html.includes('data-client="offline"'));assert.ok(!html.includes('/v2/local-knowledge/client.js'));
-  const data=await fetch(base+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','X-V2-Offline-Knowledge':'text'},body:JSON.stringify({message:'Z100'})}).then(r=>r.json());
+  const data=await fetch(base+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','X-V2-Offline-Knowledge':'text'},body:JSON.stringify({message:'Z100 说明正文'})}).then(r=>r.json());
   assert.equal(data.model,'v2-offline-search');assert.equal(data.results[0].download,'/v2/offline/preview?id=7');assert.ok(!JSON.stringify(data).includes('G:'));assert.ok(!JSON.stringify(data).includes('internal author'));
   assert.equal((await fetch(base+'/v2/offline/read?block=../private')).status,400);
   assert.equal((await fetch(base+'/v2/offline/search?q=Z100',{headers:{Origin:'https://example.com'}})).status,403);
   assert.equal((await fetch(base+'/v2/offline/search?q=')).status,400);
   assert.equal((await fetch(base+'/official-files/Z100%20V1.pdf')).status,404); // No exact actual file: never substitute another version.
   assert.equal((await fetch(base+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','X-V2-Offline-Knowledge':'cases'},body:'{'})).status,400);
-  assert.equal(calls,2);
+  assert.deepEqual(calls,['/search','/catalog','/search']);
  }finally{await close(s);await close(upstream);}
 });
 test('An unavailable original index does not break existing quick lookup or ordering',async()=>{

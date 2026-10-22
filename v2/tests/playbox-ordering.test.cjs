@@ -47,7 +47,7 @@ test('Poster, meeting and HDMI requirements select eligible hardware rather than
 test('Unimplemented direct, special canvas and cascading do not yield a normal plan',async()=>{
  const direct=base();direct.architecture='direct';assert.equal((await app.dialogue(direct)).status,'unsupported');
  const cascade=base();cascade.requirements.cascadeSplicing={count:2};assert.equal((await app.dialogue(cascade)).status,'unsupported');
- const wide=base();wide.screen={moduleColumns:40,moduleRows:1};wide.providedDevices=[{modelId:'A5L'}];const result=await app.dialogue(wide);assert.equal(result.status,'unsupported');assert.ok(result.failures.some(f=>f.reason==='playbox-special-canvas-not-yet-implemented'));
+ const wide=base();wide.screen={moduleColumns:40,moduleRows:1};wide.providedDevices=[{modelId:'A5L'}];const result=await app.dialogue(wide);assert.equal(result.status,'needs_input');assert.equal(result.exportAllowed,false);assert.equal(result.plan.specialCanvas.raw.failed,false);assert.ok(result.hdsetSvg);
  const malformed=base();malformed.requirements.hdmiOut='true';assert.equal((await app.dialogue(malformed)).status,'needs_input');
 });
 test('No-AI dialogue gathers explicit playback mode across turns and keeps quick separate',async()=>{

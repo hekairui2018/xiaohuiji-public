@@ -18,19 +18,23 @@ function operationExcerpt(text,operation){
   if(section.trim().length<=1800&&!/\.{6}/.test(section))return {text:section.trim(),sectionFocused:true};
  }
  if(text.length>1800||/\.{6}/.test(text)||!/(?:点击|选择|打开|勾选|进入|按下|单击)/.test(text))return null;
+ // A complete context block can contain several tasks. Quote only clauses
+ // anchored to the requested task, rather than treating every clickable menu as evidence.
+ if(operation.terms?.length){const normalize=s=>String(s).normalize('NFKC').toLowerCase().replace(/wi[\s-]?fi|无线|热点/g,'wifi').replace(/u盤|优盘/g,'u盘').replace(/影片/g,'视频');const terms=operation.terms.map(normalize).filter(Boolean);const clauses=text.split(/\n|(?<=[。；;])/).map(s=>s.trim()).filter(Boolean);const focused=clauses.filter(line=>terms.every(t=>normalize(line).includes(t))&&/(?:点击|选择|打开|勾选|进入|按下|单击|连接|导出|发送|插入|更新)/.test(line));if(!focused.length)return null;return {text:[...new Set(focused)].slice(0,5).join('\n'),sectionFocused:false};}
  return {text:text.trim(),sectionFocused:false};
 }
 // Coverage uses query tokens, not an arbitrary cross-engine BM25 score cutoff.
-function relevantEvidence(query,rows,lookup,models=[]){
+function relevantEvidence(query,rows,lookup,models=[],{semantic=false}={}){
  const normalized=s=>String(s||'').normalize('NFKC').toLowerCase();
  let topic=normalized(query).replace(/(?:hd[-_ ]?)?[a-z]{1,6}\d[a-z0-9_+.-]*/g,token=>models.includes(modelId(token))?' ':token);
+ if(semantic)topic=topic.replace(/(?:是否)?必须(?:要|配)?|能不能|可不可以|需不需要|要不要|是不是|到底|一定|能够|外接|配(?=接收卡)/g,' ');
  topic=topic.replace(/请问|请|一下|帮我|如何|怎么|怎样|什么|有几个|有几|几个|数量|参数|规格|多少|是否|能否|可以|支持|需要|产品|资料|查询|设置|说明书|规格书|固件|软件|视频|教程|led|显示屏|屏幕|的|了|吗|呢/gi,' ');
  const tokens=topic.match(/[a-z0-9]+|[\u3400-\u9fff]{2,}/g)||[];
  return rows.filter(r=>{
   const named=extractKnownModels((r.name||'')+' '+(r.text||''),lookup);
   if(models.length&&!models.some(m=>named.includes(m)))return false;
-  const text=normalized((r.name||'')+' '+(r.text||''));
-  return tokens.length?tokens.every(t=>text.includes(t)):models.length>0&&models.some(m=>named.includes(m));
+  const text=normalized((r.name||'')+' '+(r.text||'')+(semantic?' '+(r.conditions||[]).join(' '):''));
+  return tokens.length?(semantic?tokens.some(t=>text.includes(t)):tokens.every(t=>text.includes(t))):models.length>0&&models.some(m=>named.includes(m));
  });
 }
 function createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia=async x=>x}){
@@ -47,7 +51,7 @@ function createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolv
   if(route.unknownModels?.length)return {...base,status:'clarify',reply:'尚未确认型号 '+route.unknownModels.join('、')+'。请核对完整型号，不能按相近型号提供参数或固件。'};
   if(route.hardwareRequested||(['resources','product'].includes(route.intent)&&facts.hardwareVersions?.length))return {...base,status:'clarify',reply:'当前查询包含硬件版本条件，但现有资料未建立该版本的适用关联，不能按相近型号或文件版本代替。请补充设备丝印和已确认的原文件依据。'};
   if(route.intent==='compatibility')return {...base,status:'clarify',reply:'不能仅凭型号相似判断固件通用。'+route.models.join('、')+'需要分别核对硬件版本、芯片、扫描方式及原固件文件；当前没有足够依据确认兼容，请勿互刷。'};
-  if(route.intent==='ordering'&&route.progressive&&app){const data=await tracked('ordering-dialogue',()=>require('./ordering-session.cjs').progressiveOrdering({...app,dialogue:app.customerDialogue||app.dialogue},route.query,route.orderingContext));return {...base,...data};}
+  if(route.intent==='ordering'&&route.progressive&&app){const data=await tracked('ordering-dialogue',()=>require('./ordering-session.cjs').progressiveOrdering({...app,dialogue:app.customerDialogue||app.dialogue},route.query,route.orderingContext,{delta:route.demand,update:route.taskUpdate}));return {...base,...data};}
   if(route.intent==='ordering'&&dialogue){const result=await tracked('ordering-dialogue',()=>dialogue({message:route.query,sessionId}));return {...base,reply:result.result?.reason==='no-engineering-input'?'请补充屏幕宽高或分辨率、模组像素和扫描方式、使用场景及同步/异步需求。仅凭点间距和颜色不能可靠选择控制卡。':result.reply,status:result.status,result:result.result};}
   if(route.intent==='aftersales'){
    const data=await tracked('case-search',()=>searchCases(route.query,null,{...facts,...(route.models.length?{modelIds:route.models}:{})}));

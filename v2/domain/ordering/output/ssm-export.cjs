@@ -21,6 +21,7 @@ function verifyGrid(gridXml,plan){
  }return parsed;
 }
 function exportSsm(result,shell){
+ if(result.exportAllowed===false||result?.plan?.specialCanvas)throw Error('Special canvas is a physical preview; logical configuration mapping has not been verified');
  if(result?.plan?.architecture==='direct')throw Error('Direct HUB configuration is not a receiver-grid SSM; no verified direct export format');
  if(result?.plan?.builtInRegions?.length)throw Error('Mixed built-in HUB and receiver regions require a verified C16 configuration format; SSM export withheld');
  if(result?.operation!=='ordering'||result.status!=='ready'||result.validation?.passed!==true)throw Error('SSM requires a verified ordering result');

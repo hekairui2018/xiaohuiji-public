@@ -69,6 +69,22 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   // Public traffic can never gain internal access, including from a client header.
   return !nature.accessRestricted||(!req?.v2Public&&!!req&&await authorizeRestrictedResource(req,{...item,...nature,sources:copies}));
  }
+ let directoryCache=null,directoryTime=0,directoryPending=null,directoryPrepared=null,directorySignature=null;
+ const directoryIndexes=new Map();
+ async function directoryCatalog(req,options={}){
+  if(req?.v2Public)throw Error('public-route-not-enabled');
+  if(!directoryCache||Date.now()-directoryTime>30000){
+   if(!directoryPending)directoryPending=request('/directory-catalog').then(raw=>{if(raw.directoryCatalogVersion!==1||!Array.isArray(raw.resources))throw Error('directory-catalog-service-not-updated');const signature=JSON.stringify(raw.resources);if(signature!==directorySignature){directoryIndexes.clear();directoryCache=raw.resources;directoryPrepared=require('../../domain/knowledge/source-directory.cjs').directoryItems(directoryCache);directorySignature=signature;}directoryTime=Date.now();}).finally(()=>{directoryPending=null;});
+   await directoryPending;
+  }
+  const {createDirectoryIndex,directoryPage}=require('../../domain/knowledge/source-directory.cjs');
+  // Source-copy restrictions were resolved once against the complete directory.
+  // Recheck employee authorization per request; never cache a privileged response.
+  const allowed=await Promise.all(directoryPrepared.map(async row=>!row.accessRestricted||!!req&&await authorizeRestrictedResource(req,{...row,sources:directoryCache.filter(r=>r.locationId===row.locationId||row.sha256&&r.sha256===row.sha256||row.resourceVersionId&&r.versionId===row.resourceVersionId)})));
+  const permissionKey=allowed.map(Boolean).map(Number).join('');
+  let index=directoryIndexes.get(permissionKey);if(!index){index=createDirectoryIndex(directoryPrepared.filter((row,i)=>allowed[i]));if(directoryIndexes.size>=4)directoryIndexes.delete(directoryIndexes.keys().next().value);directoryIndexes.set(permissionKey,index);}
+  return {cat:'other',docs:directoryPage(index,options)};
+ }
  async function permittedResourceId(id,req){
   const info=await request('/resource-info?id='+encodeURIComponent(id));
   if(typeof info.isVideo!=='boolean'||!Array.isArray(info.resources))throw Error('resource-access-metadata-unavailable');
@@ -332,7 +348,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     }
     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const started=Date.now();
-    const data=await quickRetrieval.answer(query,{state,facts:state.facts,onProgress});
+    const data=await quickRetrieval.answer(query,{state,facts:state.facts,currentFacts:input.facts||{},onProgress});
     state=sessions.recordResult(state.id,{kind,query,intent:data.intent,quickContext:data.quickContext,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
     const {routeLog,quickContext,queryPlan,retrievalTrace,candidateCount,retrievalPolicy,sourceFailures,...customerData}=data;
     const customerResults=(customerData.results||[]).map(({rankingSignals,...evidence})=>evidence);
@@ -344,6 +360,6 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}
  }
- return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts,authorizeResources,authorizeVideoMedia:authorizeResources};
+ return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts,authorizeResources,directoryCatalog,authorizeVideoMedia:authorizeResources};
 }
 module.exports={createOfflineKnowledge};

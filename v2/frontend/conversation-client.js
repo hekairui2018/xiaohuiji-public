@@ -48,7 +48,7 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
    fields().forEach((e,i)=>{const v=record.fields?.[fieldKey(e,i)];if(e.type==='checkbox')e.checked=!!v;else e.value=typeof v==='string'?v:'';});
    const nodes=liveNodes.get(record.id);messages.replaceChildren(...(nodes||[]));
    if(!nodes){for(const turn of record.turns){replayAt=turn.at;if(turn.role==='user')ui.addUserMessage(turn.text);else ui.addAssistantMessage({model:'v2-offline-search',reply:turn.text});}replayAt=undefined;}
-   state.history=record.turns.map(t=>({role:t.role,content:t.text}));document.querySelector('.v2-feedback').textContent='';messages.scrollTop=messages.scrollHeight;restoring=false;notice();input.focus();
+   state.history=record.turns.map(t=>({role:t.role,content:t.text}));document.querySelector('.v2-feedback').textContent='';ui.resizeInput?.();ui.scrollChatToBottom?.();restoring=false;notice();input.focus({preventScroll:true});
   }
   function modeChangeDisplay(){channel.setMode();}
   events.addEventListener('user-message',event=>{const at=messageTime();if(!restoring){const text=event.detail.text;current.turns.push({role:'user',text:typeof text==='string'&&text?text:'图片消息（图片不保存在前端历史）',at});later();}});

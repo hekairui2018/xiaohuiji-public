@@ -5,7 +5,7 @@ const {createQuickService}=require('./quick-service.cjs');
 const {createDialogueService}=require('./dialogue-service.cjs');
 const {serveStatic}=require('./static-service.cjs');
 const {createOriginalResource}=require('./original-resource.cjs');
-function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,developmentMonitor=null}={}){
+function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null}={}){
  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
  app={...app,dialogue:app.customerDialogue||app.dialogue};
  const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app);
@@ -22,12 +22,23 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   const route=req.url.split('?')[0];
   // Defense in depth: a guard may mark public traffic, but cannot authorize
   // internal dialogue, evidence, index or model routes by accident.
-  if(req.v2Public&&!(req.method==='POST'&&route==='/api/huidu/log')&&
+  if(req.v2Public&&!(req.method==='POST'&&(route==='/api/huidu/log'||require('./public-routes.cjs').publicPostRoutes.has(route)))&&
    !(req.method==='GET'&&require('./public-routes.cjs').publicGetRoutes.has(route))){send(403,{error:'public-route-not-enabled'});return;}
 
   if(!req.v2Public&&developmentMonitor?.handle(req,res))return;
   if(req.v2Public&&route==='/api/huidu/log'&&req.method==='POST'){if(offlineKnowledge&&await offlineKnowledge.handle(req,res))return;res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'log-store-not-configured'}));return;}
   if(req.v2Public&&!publicCatalog){res.writeHead(503);res.end('Public resources are not configured');return;}
+  if(req.v2Public&&route==='/api/ai/capabilities'){send(200,publicChat?await publicChat.capabilities():{modes:[],expert:{available:false}});return;}
+  if(req.v2Public&&route==='/api/ai/chat'){
+   if(!publicChat){send(503,{reply:'公网客服尚未配置，请稍后重试。'});return;}
+   const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});
+   try{
+    let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536){send(413,{reply:'问题内容过长。'});return;}chunks.push(chunk);}
+    let input;try{input=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{send(400,{reply:'请求格式不正确。'});return;}
+    const result=await publicChat.answer(input,{signal:controller.signal});if(!res.destroyed)send(result.code,result.body);
+   }catch{if(!res.headersSent&&!res.destroyed)send(503,{reply:'公网客服本次未完成，请稍后重试。'});}
+   return;
+  }
   if(route==='/'){res.writeHead(302,{Location:'/wiki'});res.end();return;}
   if(!req.v2Public&&offlineKnowledge&&await offlineKnowledge.handle(req,res))return;
   if(!req.v2Public&&localKnowledge&&await localKnowledge.handle(req,res))return;
@@ -36,16 +47,16 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
    const quick=req.v2Public?publicQuick:localQuick;
    const url=new URL(req.url,'http://localhost'),q=url.searchParams.get('q')||'';
    if(route.startsWith('/v2/resources/original/')){await original(route.slice('/v2/resources/original/'.length),res);return;}
-   const media=async body=>!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;
+   const media=async body=>!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body,{requestContext:req}):offlineKnowledge?.authorizeVideoMedia?offlineKnowledge.authorizeVideoMedia(body,req):body;
    if(route==='/v2/software-access/screen-control.png'&&!req.v2Public){const fs=require('node:fs'),path=require('node:path'),file=path.resolve(__dirname,'../../../tmp/v2-offline-runtime/software-assets/pingzhangkong-download.png');if(!fs.existsSync(file)){send(404,{error:'download-image-not-configured'});return;}res.writeHead(200,{'Content-Type':'image/png','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res);return;}
    if(route==='/api/search'){send(200,await media(await quick.search(q)));return;}
    if(route==='/api/software'){if(req.v2Public)send(200,await media(await quick.software(q)));else await catalogResponse(req,res,'software:'+q,async()=>localMedia(await localQuick.software(q)));return;}
    if(route==='/api/videos'){
     const body=quick.videos(q);
     if(url.searchParams.get('outline')==='1'){
-     if(!req.v2Public&&offlineKnowledge?.localizeMedia)send(200,await offlineKnowledge.localizeMedia(body,{metadataOnly:true}));
-     else send(200,{cat:'video',metadataOnly:true,groups:body.video.topicGroups.map(g=>({key:g.key,label:g.label,count:g.count})),total:body.video.total});
-    }else if(req.v2Public)send(200,await media(body));else await catalogResponse(req,res,'video:'+q,()=>localMedia(body));return;
+     if(!req.v2Public&&offlineKnowledge?.localizeMedia)send(200,await offlineKnowledge.localizeMedia(body,{metadataOnly:true,requestContext:req}));
+     else {const permitted=await media(body);send(200,{cat:'video',metadataOnly:true,groups:permitted.video.topicGroups.map(g=>({key:g.key,label:g.label,count:g.count})),total:permitted.video.total});}
+    }else send(200,await media(body));return;
    }
    if(route==='/api/docs'){
     const cat=url.searchParams.get('cat'),history=url.searchParams.get('history')||'current';
@@ -53,11 +64,20 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
     if(!['spec','manual','firmware','other','pending','history'].includes(cat)||!['current','all','only'].includes(history)){send(400,{error:'invalid_category_or_history'});return;}
     const limit=url.searchParams.has('limit')?Number(url.searchParams.get('limit')):null,offset=Number(url.searchParams.get('offset')||0);
     const view=url.searchParams.get('view')||'grouped';if(!['grouped','flat'].includes(view)){send(400,{error:'invalid_view'});return;}
-    if(!Number.isInteger(offset)||offset<0||(limit!==null&&(!Number.isInteger(limit)||limit<1||limit>200))||(offset&&limit===null)){send(400,{error:'invalid_pagination'});return;}
+    if(!Number.isInteger(offset)||offset<0||(limit!==null&&(!Number.isInteger(limit)||limit<1||limit>200))||(offset&&limit===null&&!(cat==='other'&&!req.v2Public))){send(400,{error:'invalid_pagination'});return;}
     const listOnly=url.searchParams.get('list')==='1';
+    if(!req.v2Public&&cat==='other'&&offlineKnowledge?.directoryCatalog){
+     const directory=url.searchParams.get('directory')||'root',query=url.searchParams.get('q')||'',sort=url.searchParams.get('sort')||'name';
+     if(!/^(?:root|[a-f0-9]{24})$/.test(directory)||query.length>240||!['name','type'].includes(sort)){send(400,{error:'invalid-directory-request'});return;}
+     try{send(200,await offlineKnowledge.directoryCatalog(req,{directory,offset,query,sort}));}catch(e){send(e.message==='directory-not-found'?404:e.message==='invalid-directory-request'?400:503,{error:e.message==='directory-not-found'?'directory-not-found':e.message==='invalid-directory-request'?'invalid-directory-request':'internal-directory-service-unavailable'});}return;
+    }
     // Public transformation and authorization remain uncached and separate.
     if(req.v2Public)send(200,await media(await quick.docs(cat,{includeHistory:false,historyOnly:false,websiteOnly:true,offset,limit,view})));
-    else await catalogResponse(req,res,docKey(cat,history,offset,limit,view,listOnly),()=>loadDocs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view},listOnly));
+    else if(offlineKnowledge?.authorizeResources&&['other','pending'].includes(cat)){
+     const body=await localQuick.docs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset:0,limit:null,view});
+     const permitted=await offlineKnowledge.authorizeResources(body,req);
+     const paged=require('../../domain/knowledge/resource-view.cjs').paginateDocs(permitted,{offset,limit,view});send(200,listOnly?list(paged):paged);
+    }else await catalogResponse(req,res,docKey(cat,history,offset,limit,view,listOnly),()=>loadDocs(cat,{includeHistory:history==='all',historyOnly:cat==='history'||history==='only',websiteOnly:true,offset,limit,view},listOnly));
     return;
    }
    if(serveStatic(req,res,undefined,{localKnowledge:!req.v2Public&&!!localKnowledge,offlineKnowledge:!req.v2Public&&!!offlineKnowledge,publicView:!!req.v2Public}))return;
@@ -77,7 +97,6 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   if(!offlineKnowledge)return;
   for(const cat of ['spec','manual','firmware','other','pending'])await catalogResponse.prepare(docKey(cat,'current',0,null,'grouped',true),()=>loadDocs(cat,{websiteOnly:true},true));
   await catalogResponse.prepare('software:',async()=>localMedia(await localQuick.software('')));
-  await catalogResponse.prepare('video:',()=>localMedia(localQuick.videos('')));
  };
  return server;
 }

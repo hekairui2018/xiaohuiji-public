@@ -39,7 +39,10 @@ async function startOffline(options={}){
  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
  const accessGuard=lan?require('../adapters/http/lan-access.cjs').createLanGuard({...lan,port,publicOrigin:options['public-origin']||null}):null;
- const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,developmentMonitor});
+ const publicEvidenceFile=path.join(dataDirectory,'public-evidence-verified.private.json');
+ const verifiedDocuments=fs.existsSync(publicEvidenceFile)?JSON.parse(fs.readFileSync(publicEvidenceFile,'utf8')).documents:[];
+ const publicChat=publicCatalog?require('../adapters/http/public-chat.cjs').createPublicChat({app,knowledge,catalog:publicCatalog,expert,verifiedDocuments}):null;
+ const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor});
  const preparationStarted=Date.now();
  try{await server.prepareCatalogs();console.log(JSON.stringify({event:'catalog-prepared',elapsedMs:Date.now()-preparationStarted}));await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});}catch(e){child.kill();logs.close();throw e;}
  const runtime={instance:'v2-offline',host,lan,port,resourcePort,publicOrigin:options['public-origin']||null,publicScope:publicCatalog?'product-quick-and-approved-cloud-documents':null,pid:process.pid,indexPid:child.pid,knowledgeVersion:knowledge.version,startedAt:new Date().toISOString()};

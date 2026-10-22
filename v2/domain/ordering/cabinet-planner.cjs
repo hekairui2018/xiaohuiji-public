@@ -8,9 +8,9 @@ function cabinetGeometry(cabinet,grid){
 }
 function cabinetCells(cabinet,module,receiver){
  const width=cabinet.moduleColumns,height=cabinet.moduleRows,count=Math.ceil(width*height/(receiver.width*receiver.height));
- let widths=[width],heights=[height];
- if(count===2){if(width>=height)widths=[Math.ceil(width/2),Math.floor(width/2)];else heights=[Math.ceil(height/2),Math.floor(height/2)];}
- else if(count!==1)return {status:'constraint_failure',reason:'cabinet-more-than-two-receivers-not-yet-established'};
+ if(count>2)return {status:'constraint_failure',reason:'cabinet-more-than-two-receivers-not-yet-established'};
+ const source=require('./official-runtime.cjs').officialCabinet(cabinet,module,receiver);
+ const widths=source.cabinetWidth,heights=source.cabinetHeight;
  if(widths.some(w=>w<1||w>receiver.width)||heights.some(h=>h<1||h>receiver.height))return {status:'constraint_failure',reason:'official-cabinet-split-exceeds-source-receiver-dimensions'};
  const cells=[];
  for(let boxRow=0;boxRow<cabinet.rows;boxRow++)for(let boxCol=0;boxCol<cabinet.columns;boxCol++){

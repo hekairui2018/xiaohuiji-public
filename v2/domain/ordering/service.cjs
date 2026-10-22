@@ -28,7 +28,12 @@ function createOrderingService(dataset,knowledge){return demand=>{
  const receivers=receiverLayouts(module,dataset,demand.providedDevices);if(receivers.status!=='selected')return receivers;
  const failures=[],conflicts=knowledge?.audit().parameterConflicts||[];
  for(const controller of candidates.controllers){
-  if(['playBox','asyncCard'].includes(candidates.family)&&controller.discount?.supportive&&screen.pixelWidth>=controller.discount.minWidth){failures.push({controller:controller.model,reason:'playbox-special-canvas-not-yet-implemented',sourceAnalysis:analyzeSpecialCanvas(module,screen,controller)});continue;}
+  if(['playBox','asyncCard'].includes(candidates.family)&&controller.discount?.supportive&&screen.pixelWidth>=controller.discount.minWidth){
+   const sourceCalculation=require('./official-runtime.cjs').officialDiscount(module,screen,controller,dataset.receivers());
+   const preview=require('./official-discount-plan.cjs').discountPlan(module,screen,controller,sourceCalculation);
+   if(preview)return {status:'needs_input',plan:preview,exportAllowed:false,configurationBlockReason:'special-canvas-logical-coordinate-map-not-verified',validation:{passed:true,scope:'official-segment-physical-preview-only-not-hardware-configuration'},...outputPlan(preview),method:'official-js-mL-and-discount-renderer'};
+   failures.push({controller:controller.model,reason:sourceCalculation.failed?'official-special-canvas-rejected':'official-special-canvas-coordinate-export-pending',sourceCalculation,sourceAnalysis:analyzeSpecialCanvas(module,screen,controller)});continue;
+  }
   const quantity=r=>demand.cabinet?Math.ceil(demand.cabinet.moduleColumns*demand.cabinet.moduleRows/(r.width*r.height)):Math.ceil(screen.columns/r.width)*Math.ceil(screen.rows/r.height);
   const layouts=[...receivers.layouts].sort((a,b)=>quantity(a)-quantity(b));
   for(const receiver of layouts){const boxes=demand.cabinet?cabinetCells(demand.cabinet,module,receiver):null;if(boxes&&boxes.status!=='planned'){failures.push({controller:controller.model,receiver:receiver.model,reason:boxes.reason});continue;}

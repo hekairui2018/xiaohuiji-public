@@ -63,9 +63,9 @@ function groupVideos(videos,resources=[]){
   const item={...v,...info,operationName:v.name.replace(/\.(mp4|webm|mov)$/i,''),operationTopic:videoTopic(v.name),language,languageLabel:{bilingual:'中英双语',en:'英文',zh:'中文',unknown:'语言未确认'}[language],...(info.categoryKey==='other'?{unclassifiedReason}:{} )};seen.set(identity,item);
   if(!groups.has(info.categoryKey))groups.set(info.categoryKey,{key:info.categoryKey,label:info.categoryLabel,videos:[]});groups.get(info.categoryKey).videos.push(item);
  }
- // Document aligner owns product order. Software is one special group before Other.
- const markers=[...groups.values()].filter(g=>!['other','software-cloud'].includes(g.key)).map(g=>({...g,products:[{model:'',items:[{fileId:'category:'+g.key}]}]}));
- const order=alignedResourceGroups(markers,[]).map(g=>g.key);if(groups.has('software-cloud'))order.push('software-cloud');if(groups.has('other'))order.push('other');
+ // Keep aligned product order; video browsing ends with LCD, then Other.
+ const markers=[...groups.values()].filter(g=>!['lcd','other','software-cloud'].includes(g.key)).map(g=>({...g,products:[{model:'',items:[{fileId:'category:'+g.key}]}]}));
+ const order=alignedResourceGroups(markers,[]).map(g=>g.key);if(groups.has('software-cloud'))order.push('software-cloud');if(groups.has('lcd'))order.push('lcd');if(groups.has('other'))order.push('other');
  return order.map(key=>{const g=groups.get(key);g.videos.sort((a,b)=>a.name.localeCompare(b.name,'zh-Hans-CN',{numeric:true}));const sections=new Map();for(const v of g.videos){const label=key==='other'?v.unclassifiedReason:v.operationTopic;if(!sections.has(label))sections.set(label,[]);sections.get(label).push(v);}return {...g,count:g.videos.length,sections:[...sections].map(([label,videos])=>({label,videos})).sort((a,b)=>{const order=key==='other'?['历史视频','签章相关','待分类']:topicOrder;return order.indexOf(a.label)-order.indexOf(b.label);})};});
 }
 module.exports={classifyResource,groupVideos};

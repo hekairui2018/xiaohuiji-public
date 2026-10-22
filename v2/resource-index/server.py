@@ -46,6 +46,22 @@ def create_server(work, port=0):
             try:
                 if u.path=='/':return self.send(200,PAGE,'text/html; charset=utf-8')
                 if u.path=='/health':return self.send(200,{'ok':True,'mode':'isolated-resource-candidate','aiEnabled':False,'pid':os.getpid()})
+                if u.path=='/resource-info':
+                    # Exact registered identity only; no scan, parsing or file reads.
+                    db=engine.connect(work,True)
+                    try:
+                        row=db.execute("SELECT * FROM locations WHERE id=? AND state='present' AND kind!='sensitive-metadata-only'",(int(first('id')),)).fetchone()
+                        if not row:return self.send(404,{'error':'resource-not-found'})
+                        video=Path(row['name']).suffix.lower() in ('.mp4','.webm','.mov')
+                        sources=db.execute("SELECT * FROM locations WHERE sha256=? AND state='present'",(row['sha256'],)).fetchall() if row['sha256'] else [row]
+                        return self.send(200,{'isVideo':video,'resources':[{'name':r['name'],'locationId':r['id'],'sha256':r['sha256'],'folders':list(Path(r['path']).parts[1:-1])} for r in sources]})
+                    finally:db.close()
+                if u.path=='/directory-catalog':
+                    from directory_catalog import directory_catalog
+                    db=engine.connect(work,True)
+                    try:result=directory_catalog(db)
+                    finally:db.close()
+                    return self.send(200,result)
                 if u.path=='/catalog':
                     db=engine.connect(work,True)
                     try:

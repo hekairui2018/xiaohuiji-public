@@ -95,6 +95,7 @@ function analyzeFrames(text){
  // capability inquiry; exporting existing device content is not finding a
  // tutorial in the resource catalogue. Keep the matched words for diagnostics.
  const proceduralPatterns=[
+  ['task-action',/(?:控制|切换|暂停|恢复|开始|停止)[^，。；]{0,8}(?:视频|影片|节目|播放)/],
   ['configuration-transition',/(?:新|旧|原)[^，。；]{0,8}流程[^，。；]{0,8}(?:改|切换|恢复)[^，。；]{0,8}流程/],
   ['task-method',/(?:什么|哪种|哪个|甚麼|什麼).{0,6}方法.{0,12}(?:控制|播放|发送|读取|调试|连接)|(?:升级|安装|设置|更换)(?:完|完成|后|了)[^，。；]{0,8}(?:需要|要不要|是否要)[^，。；]{0,6}(?:重启|复位)/],
   ['procedure-request',/(?:有|有没有|有无|给我|查看|找)[^，。；]{0,10}(?:操作步骤|操作步奏|使用方法)/],
@@ -104,7 +105,7 @@ function analyzeFrames(text){
   ['device-content-export',/(?:从[^，。；]{0,12}(?:盒子|设备|控制卡|播放器)(?:里|中|内)?[^，。；]{0,14}(?:导出|下载|拷出|复制出来)|(?:视频|节目|文件)[^，。；]{0,12}从[^，。；]{0,10}(?:盒子|设备|控制卡|播放器)[^，。；]{0,8}(?:导出|下载|拷出|复制出来))/],
   ['connection-choice',/(?:通过|用|接|插)[^，。；]{0,6}(?:哪一|哪个|哪根|哪条)[^，。；]{0,10}(?:网线|网口|接口)[^，。；]{0,12}(?:连接|接到|插到)/],
  ];
- const procedural=proceduralPatterns.map(([role,re])=>({role,match:re.exec(focusText)})).find(r=>r.match&&(!focusedSpans.some(t=>t.type==='document')||r.role==='device-content-export'));
+ const procedural=proceduralPatterns.map(([role,re])=>({role,match:re.exec(focusText)})).find(r=>r.match&&(r.role!=='task-action'||!/支持|能否|可以|有没有|是否/.test(focusText))&&(!focusedSpans.some(t=>t.type==='document')||r.role==='device-content-export'));
  const requestOperation=procedural?{type:'operation-request',role:procedural.role,text:procedural.match[0],start:procedural.match.index,end:procedural.match.index+procedural.match[0].length}:null;
  // A bare tutorial/manual names a resource even when its title contains a
  // verb. An explicit how-to question can still request the operation itself.

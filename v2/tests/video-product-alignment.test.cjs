@@ -3,9 +3,9 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {groupVideos,classifyResource}=require('../domain/knowledge/resource-categories.cjs');
 const {browseGroup}=require('../domain/knowledge/source-classification.cjs');
 test('Video categories use existing product labels/order and every category has operation topics',()=>{
- const names=['VP8000M调试.mp4','HDSet操作.mp4','LCD主板复位.mp4','C16L复位.mp4','B6基础操作.mp4','A6L投屏.mp4','R712固件升级.mp4','VPX20固件升级.mp4'];
+ const names=['VP8000M调试.mp4','HDSet操作.mp4','LCD主板复位.mp4','C16L复位.mp4','B6基础操作.mp4','A6L投屏.mp4','R712固件升级.mp4','VPX20固件升级.mp4','连接设置.mp4'];
  const result=groupVideos(names.map((name,i)=>({name,url:'/file?id='+i})));
- assert.deepEqual(result.map(g=>g.key),['receiver','player',browseGroup('B系列-广告机专用').key,'cd-control','processor',browseGroup('矩阵、音频处理器、分配器、切换器、延长器等信号传输设备').key,'lcd','software-cloud']);
+ assert.deepEqual(result.map(g=>g.key),['receiver','player',browseGroup('B系列-广告机专用').key,'cd-control','processor',browseGroup('矩阵、音频处理器、分配器、切换器、延长器等信号传输设备').key,'software-cloud','lcd','other']);
  assert.equal(result[1].label,'全彩播放盒（A、H系列）');assert.equal(result[4].label,'VP系列-处理器');
  for(const g of result){assert.equal(g.sections.reduce((n,s)=>n+s.videos.length,0),g.count);assert.ok(g.sections.every(s=>s.label&&s.videos.length));}
 });

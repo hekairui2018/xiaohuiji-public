@@ -12,7 +12,7 @@ function conversation(){
 const formal='配单P2.5 模组128x64，32扫，HUB75，全彩，室内，同步，接收卡，10宽10高';
 
 test('Customer speech reaches the shared ordering business route, not arbitrary FTS/case matches',async()=>{
- for(const text of ['我要配个 P3 屏','P3 宽 6 米高 3 米','整屏 1920×1080，同步','模组横着 20 张，竖着 10 张']){
+ for(const text of ['我要配个 P3 屏','P3 宽 6 米高 3 米','整屏分辨率 1920×1080，同步','模组横着 20 张，竖着 10 张']){
   const r=await conversation().say(text);assert.equal(r.intent,'ordering',text);assert.equal(r.modelCallCount,0);assert.equal(r.routeLog.sources[0].name,'ordering-dialogue');assert.equal(r.results.length,0);assert.equal(r.quickContext.ordering.pending.length>0,true);
   assert.equal((r.reply.match(/[？?]/g)||[]).length,1);assert(!r.result.bom);assert(!r.quickContext.ordering.confirmed.module?.scan);
  }
@@ -57,7 +57,7 @@ test('Explicit correction, negation and a new screen cannot reuse stale derived 
  r=await c.say('不是全彩');assert(!r.quickContext.ordering.confirmed.module.color);assert.equal(r.quickContext.ordering.simulations.length,0);
  r=await c.say('另一块屏');assert(!r.quickContext.ordering.confirmed.module);assert(!r.quickContext.ordering.confirmed.screen);
  r=await c.say('室内');assert(!r.quickContext.ordering.confirmed.module);assert.equal(r.quickContext.ordering.confirmed.environment,'indoor');
- assert(!((await conversation().say('继续配单')).quickContext.ordering.confirmed.module));
+ const absent=await conversation().say('继续配单');assert.equal(absent.answerType,'task-relation-unclear');assert.equal(absent.quickContext.ordering,null);
 });
 
 test('Unverified hardware versions and model suffixes cannot reach a conditional or formal selection',async()=>{

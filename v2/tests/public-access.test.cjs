@@ -20,7 +20,8 @@ test('Exact tunnel origin grants only public quick routes; internal files, sessi
  const guard=createLanGuard({address:'192.168.1.100',cidr:'192.168.1.100/24',port:8520,publicOrigin:'http://trial.example'});
  const run=(url,method='GET',extra={})=>{const req={url,method,headers:{host:'trial.example',...extra},socket:{remoteAddress:'127.0.0.1'}},res={setHeader(){},writeHead(s){this.status=s;},end(){}};return{ok:guard(req,res),status:res.status,public:req.v2Public};};
  assert.equal(run('/quick').status,403);assert.equal(run('/wiki').ok,true);assert.equal(run('/api/docs?cat=spec').ok,true);
- for(const route of ['/huiai','/v2/offline/file?id=1','/v2/offline/session?id=other','/v2/resources/original/'+'a'.repeat(64),'/api/health','/api/huidu/log'])assert.equal(run(route).status,403);
+ assert.equal(run('/huiai').ok,true);assert.equal(run('/api/ai/chat','POST').ok,true);
+ for(const route of ['/v2/offline/file?id=1','/v2/offline/session?id=other','/v2/resources/original/'+'a'.repeat(64),'/api/health','/api/huidu/log'])assert.equal(run(route).status,403);
  assert.equal(run('/api/search','POST').status,403);assert.equal(run('/quick','GET',{host:'attacker.example'}).status,403);assert.equal(run('/quick','GET',{origin:'http://attacker.example'}).status,403);
 });
 test('Only approved cloud originals get short-lived links; local locations and evidence are removed',()=>{
@@ -47,7 +48,8 @@ test('Public log upload reaches only the existing authenticated receiver and nev
   assert.equal((await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key'},'{')).status,400);
   assert.equal((await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key'},JSON.stringify({content:'x'.repeat(1024*1024)}))).status,413);
   for(const route of ['/api/huidu/log','/v2/offline/session?id=another','/v2/offline/log-status','/api/health'])assert.equal((await send(route,'GET')).status,403);
-  for(const route of ['/api/ai/chat','/api/ocr','/v2/ordering/chat'])assert.equal((await send(route,'POST',{'x-upload-key':'synthetic-key'})).status,403);
+  assert.equal((await send('/api/ai/chat','POST',{'x-upload-key':'synthetic-key'})).status,503); // No scoped public-chat provider: fail closed.
+  for(const route of ['/api/ocr','/v2/ordering/chat'])assert.equal((await send(route,'POST',{'x-upload-key':'synthetic-key'})).status,403);
   assert.equal((await send('/api/huidu/log','POST',{'x-upload-key':'synthetic-key',Origin:'https://evil.example'})).status,403);assert.equal(received.length,1);
  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
 });

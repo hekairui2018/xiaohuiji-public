@@ -1,17 +1,5 @@
 'use strict';
-function mergeOrderingDemand(previous,delta){
- const demand=structuredClone(previous||{schemaVersion:'2.0',operation:'ordering'});
- if(delta.module?.pitchMm!==undefined&&demand.module?.pitchMm!==undefined&&delta.module.pitchMm!==demand.module.pitchMm){
-  demand.module={};for(const p of Object.keys(demand.provenance||{}))if(p.startsWith('/module/'))delete demand.provenance[p];
- }
- const geometry=delta.screen||{},modes=[['moduleColumns','moduleRows'],['pixelWidth','pixelHeight'],['physicalWidthMm','physicalHeightMm']];
- const changed=modes.find(keys=>keys.some(k=>geometry[k]!==undefined));
- if(changed&&demand.screen)for(const keys of modes)if(keys!==changed)for(const k of keys){delete demand.screen[k];if(demand.provenance)delete demand.provenance['/screen/'+k];}
- for(const f of ['module','screen','cabinet','environment','controlMode','architecture','providedDevices','requirements','topic'])if(delta[f]!==undefined)demand[f]=['module','screen','cabinet','requirements'].includes(f)?{...demand[f],...delta[f]}:structuredClone(delta[f]);
- for(const p of ['/module/color','/module/driverFamily'])if(delta.provenance?.[p]?.kind==='user-negated'&&demand.module)delete demand.module[p.split('/')[2]];
- for(const f of ['environment','controlMode','architecture'])if(delta.provenance?.['/'+f]?.kind==='user-negated')delete demand[f];
- demand.provenance={...demand.provenance,...delta.provenance};return demand;
-}
+const {mergeOrderingDemand}=require('../../domain/parser/ordering-demand.cjs');
 function createOrderingSessions(app,{ttlMs=300000,maxSessions=200,now=Date.now}={}){
  const cache=new Map(),key=id=>typeof id==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(id)?id:null;
  const expiry=setInterval(()=>{for(const [id,row]of cache)if(now()-row.at>ttlMs)cache.delete(id);},30000);expiry.unref?.();
@@ -30,11 +18,14 @@ function createOrderingSessions(app,{ttlMs=300000,maxSessions=200,now=Date.now}=
  };
 }
 // Progressive conversation is a presentation of the existing calculator, never a second solver.
-async function progressiveOrdering(app,text,previous){
- const delta=app.understandInput(text,'ordering').demand;
+async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update}={}){
+ const choice=/^配单方案[:：]\s*(\d+)$/.exec(text);
+ const chosen=choice?previous?.simulations?.[Number(choice[1])-1]:null;
+ if(choice&&!chosen)return {status:'clarify',reply:'这份候选已失效，请重新计算后选择。',orderingState:previous,result:{status:'needs_input',operation:'ordering'}};
+ const delta=resolvedDelta?structuredClone(resolvedDelta):app.understandInput(choice?'继续配单':text,'ordering').demand;
  if(!delta||delta.operation!=='ordering')throw Error('ordering-route-mismatch');
  if(/不限定设备(?:型号)?|取消指定设备|不限制设备型号/.test(text)){delta.providedDevices=[];delta.provenance['/providedDevices']={kind:'user-cleared',text};}
- if(delta.providedDevices&&previous?.confirmed.providedDevices&&app.orderingReferences){
+ if(delta.providedDevices?.length&&delta.provenance?.['/providedDevices']?.kind!=='user-negated'&&previous?.confirmed.providedDevices&&app.orderingReferences){
   const id=require('../../domain/identity/model-id.cjs').modelId,refs=app.orderingReferences({...delta,providedDevices:[...previous.confirmed.providedDevices,...delta.providedDevices]});
   const controllers=new Set(refs.devices.map(r=>id(r.model))),receivers=new Set(refs.receivers.map(r=>id(r.model)));
   const role=d=>controllers.has(d.modelId)?'controller':receivers.has(d.modelId)?'receiver':null;
@@ -47,7 +38,11 @@ async function progressiveOrdering(app,text,previous){
   for(const k of Object.keys(delta.screen))delta.provenance['/screen/'+k]={kind:'user-approved-proposal',text,source:p.source};
   acceptedProposal={...p,originalTarget:previous.confirmed.screen,userQuote:text};
  }
- const demand=mergeOrderingDemand(previous?.confirmed,delta);
+ const demand=update?.restore?structuredClone(update.restore):mergeOrderingDemand(previous?.confirmed,delta);
+ for(const operation of update?.operations||[])if(operation.op==='clear'){
+  const parts=operation.path.split('/').filter(Boolean),last=parts.pop();let parent=demand;for(const part of parts)parent=parent?.[part];if(parent)delete parent[last];
+  demand.provenance??={};demand.provenance[operation.path]=operation.source;
+ }
  const refs=app.orderingReferences?.(demand),negated=Object.values(demand.provenance||{}).some(p=>p.kind==='user-negated');
  const modules=(refs?.modules||[]).filter(row=>demand.provenance?.['/module/color']?.kind!=='user-negated'||!(row.color.R&&row.color.G&&row.color.B));
  const known=[],s=demand.screen||{},m=demand.module||{};
@@ -79,19 +74,21 @@ async function progressiveOrdering(app,text,previous){
   if(grid.basis.length){derivedDemand.screen=grid.screen;derived.push(...grid.basis);}
  }
  const strict=await app.dialogue(derivedDemand);
- let stage=strict.status==='ready'?'formal':strict.status==='conflict'?'conflict':'needs-input';
+ let stage=strict.status==='ready'&&strict.exportAllowed!==false?'formal':strict.status==='conflict'?'conflict':'needs-input';
  const simulations=[];
  const evidence=modules.slice(0,3).map(row=>({moduleId:row.id,pitchMm:row.dotPitch.spacing,pixels:row.resolution,scan:row.scanningMethod,interface:row.interface,source:row.source}));
  // A requested product is a constraint, not proof that it can drive this screen.
  const id=require('../../domain/identity/model-id.cjs').modelId;
  const missingDevice=(demand.providedDevices||[]).some(d=>![...refs?.devices||[],...refs?.receivers||[]].some(r=>id(r.model)===d.modelId));
  const multi=/主屏.*副屏|副屏.*主屏|[两二三四五六七八九十2-9]\s*(?:块|面)(?:独立)?屏|多块屏|异形屏/.test(text)||previous?.scope==='multiple-or-irregular';
- if(stage!=='formal'&&stage!=='conflict'&&!missingDevice&&!multi&&!negated&&m.pitchMm&&demand.controlMode&&Object.keys(s).length){
-  for(const row of modules.slice(0,3)){
+ if(stage!=='formal'&&stage!=='conflict'&&!missingDevice&&!multi&&!negated&&m.pitchMm&&Object.keys(s).length){
+  for(const row of [...modules].sort((a,b)=>Number(b.size[0]===320&&b.size[1]===160&&b.interface==='HUB75')-Number(a.size[0]===320&&a.size[1]===160&&a.interface==='HUB75')).slice(0,3)){
+   for(const mode of demand.controlMode?[demand.controlMode]:['sync','async']){
    const hypothesis=structuredClone(demand),assumptions=[];
    const sourceModule={pitchMm:row.dotPitch.spacing,pixelWidth:row.resolution[0],pixelHeight:row.resolution[1],physicalWidthMm:row.size[0],physicalHeightMm:row.size[1],scan:{numerator:1,denominator:Number(row.scanningMethod.replace(/S$/,''))},interface:row.interface,color:{r:row.color.R,g:row.color.G,b:row.color.B}};
    for(const [key,value]of Object.entries(sourceModule))if(hypothesis.module[key]===undefined){hypothesis.module[key]=value;assumptions.push('/module/'+key);}
    if(!hypothesis.environment){hypothesis.environment=row.indoor?'indoor':'outdoor';assumptions.push('/environment');}
+   if(!hypothesis.controlMode){hypothesis.controlMode=mode;assumptions.push('/controlMode');}
    if(!hypothesis.architecture){hypothesis.architecture='receiver';assumptions.push('/architecture');}
    if(!hypothesis.requirements?.controllerFamily){
     const specified=refs.devices[0],family=specified?.category==='同步异步播放盒'?'playBox':specified?.category==='异步控制卡'?'asyncCard':hypothesis.controlMode==='async'?'playBox':'processor';
@@ -100,7 +97,8 @@ async function progressiveOrdering(app,text,previous){
    const geometry=deriveGrid(hypothesis,row);hypothesis.screen=geometry.screen;
    if(!geometry.screen.moduleColumns||!geometry.screen.moduleRows)continue;
    const result=await app.dialogue(hypothesis);
-   if(result.status==='ready')simulations.push({moduleId:row.id,assumptions,source:row.source,inputs:hypothesis,derived:geometry.basis,controller:result.plan.controller.model,receiver:result.bom.find(b=>b.kind==='receiver'),validation:result.validation,datasetVersion:result.datasetVersion});
+   if(result.status==='ready'||result.exportAllowed===false&&result.plan?.specialCanvas)simulations.push({moduleId:row.id,assumptions,source:row.source,inputs:hypothesis,derived:geometry.basis,controller:result.plan.controller.model,receiver:result.bom.find(b=>b.kind==='receiver'),validation:result.validation,datasetVersion:result.datasetVersion,preview:{plan:result.plan,topology:result.topology,topologySvg:result.topologySvg,hdsetSvg:result.hdsetSvg,previewBom:result.bom,exportAllowed:false}});
+  }
   }
  }
  if(stage!=='formal'&&stage!=='conflict'&&Object.keys(s).length&&(evidence.length||simulations.length))stage='provisional';
@@ -118,6 +116,7 @@ async function progressiveOrdering(app,text,previous){
   else if(!m.pixelWidth||!m.pixelHeight)pending.push({path:'/module',question:'能提供单块模组的完整型号或规格文字吗？用来确认候选，其他已知条件不用重填。'});
   else{const first=strict.missing_parameters?.[0];pending.push({path:first?.path||'/module',question:first?.reason||'请提供模组完整规格，核对当前条件与选型库不一致的地方。'});}
  }
+ if(chosen){const index=simulations.findIndex(s=>s.moduleId===chosen.moduleId&&s.inputs.controlMode===chosen.inputs.controlMode&&s.controller===chosen.controller);if(index>=0)simulations.unshift(...simulations.splice(index,1));}
  const orderingState={confirmed:demand,derived,pending,candidates:evidence,simulations,gridProposal,acceptedProposal,stage,scope:multi?'multiple-or-irregular':'single-screen',datasetVersion:refs?.datasetVersion||strict.datasetVersion};
  const header=known.length?'已记下：'+known.join('；')+'。':'可以，我先帮你确定配单方向。';
  let reply;
@@ -141,6 +140,9 @@ async function progressiveOrdering(app,text,previous){
   if(simulations.length&&/按暂定|按当前方案/.test(text))lines.push('已保留这份暂定方向；确认现场模组完整规格后，再转正式配单。');
   else if(pending[0])lines.push(pending[0].question);reply=lines.join('\n');
  }
- return {reply,status:stage==='formal'?'answer':'clarify',result:stage==='formal'?strict:{status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
+ const preview=orderingState.simulations[0]?.preview;
+ if(preview){preview.options=simulations.map((s,i)=>({id:i+1,moduleId:s.moduleId,controller:s.controller,receiver:s.receiver,controlMode:s.inputs.controlMode}));preview.assumptions=simulations[0].assumptions;}
+ if(preview)reply+='\n暂定预览：'+preview.plan.module.size.join('×')+'mm、'+preview.plan.module.interface+'；未确认条件只用于预览，现场规格不同须重算。';
+ return {reply,status:stage==='formal'?'answer':'clarify',result:stage==='formal'?strict:{...(preview||{}),exportAllowed:false,status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
 }
 module.exports={createOrderingSessions,mergeOrderingDemand,progressiveOrdering};

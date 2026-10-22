@@ -20,8 +20,11 @@ test('Screenshot conversation retains P2 and consumes resolution without issuing
  let r=await say('P2，10高10宽配个屏');assert.equal(r.intent,'ordering');assert.equal(r.quickContext.ordering.confirmed.screen,undefined,'unitless 10 must not become metres or modules');
  r=await say('分辨率是1600x800');assert.equal(r.intent,'ordering');assert.match(r.reply,/1600×800/);assert.match(r.reply,/P2/);assert.doesNotMatch(r.reply,/屏幕宽、高各多少米|相关原文/);
  assert.deepEqual(r.quickContext.ordering.confirmed.screen,{pixelWidth:1600,pixelHeight:800});assert.equal(r.quickContext.ordering.confirmed.module.pitchMm,2);assert.equal(searches,0);assert.equal(r.modelCallCount,0);assert.ok(!r.result.bom);
- assert.match(r.reply,/先筛主控/);assert.match(r.reply,/接收卡数量及布线还未核定/);
- assert.ok(r.quickContext.ordering.controllerPreviews.length);assert.equal(r.quickContext.ordering.confirmed.controlMode,undefined);assert.equal(r.quickContext.ordering.confirmed.architecture,undefined);assert.equal(r.quickContext.ordering.confirmed.environment,undefined);
+ // Existing business output can produce either a conditional calculation or
+ // a source-backed controller preview. Neither may become confirmed fields.
+ if(r.quickContext.ordering.simulations.length){assert.match(r.reply,/不是正式BOM/);assert.ok(r.quickContext.ordering.simulations.every(s=>s.source&&s.assumptions.length&&s.preview.exportAllowed===false));}
+ else{assert.match(r.reply,/先筛主控/);assert.match(r.reply,/接收卡数量及布线还未核定/);assert.ok(r.quickContext.ordering.controllerPreviews.length);}
+ assert.equal(r.quickContext.ordering.confirmed.controlMode,undefined);assert.equal(r.quickContext.ordering.confirmed.architecture,undefined);assert.equal(r.quickContext.ordering.confirmed.environment,undefined);
  r=await say('分辨率改为1920x1080');assert.equal(r.intent,'ordering');assert.deepEqual(r.quickContext.ordering.confirmed.screen,{pixelWidth:1920,pixelHeight:1080});assert.equal(r.quickContext.ordering.confirmed.module.pitchMm,2);
 });
 test('Controller preview uses existing source filters and does not weaken final module validation',()=>{

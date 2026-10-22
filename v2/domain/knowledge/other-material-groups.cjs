@@ -1,4 +1,5 @@
 'use strict';
+const {sourceHistory}=require('./source-history.cjs');
 const {resourceCopies,accessInfo}=require('./resource-access.cjs');
 const {isSignedDocument}=require('./document-versions.cjs');
 const {identifyDocument}=require('./document-catalog.cjs');
@@ -11,7 +12,7 @@ function materialInfo(item,copies=[]){
  if(access.accessRestricted)add('internal',access.accessBasis);
  // Source archival status is not a declaration of invalidity. A year/"旧" in
  // an arbitrary filename is not sufficient to mark a file obsolete.
- if(item.versionSelection==='historical'||copies.some(r=>r.versionSelection==='historical'||r.lifecycleStatus==='superseded')||folders.some(f=>/^(?:历史报告|历史资料|旧版资料|已停产资料|已作废资料)$/.test(f)))add('history','explicit-source-archive-or-compared-document-family');
+ const archive=sourceHistory(item,copies);if(archive.archived)add('history',archive.historyBasis);
  if(isSignedDocument(item)||copies.some(r=>isSignedDocument({name:[...(r.folders||[]),r.name].join('/')})))add('signed','registered-signed-edition-or-signing-source');
  if(folders.some(f=>/竞品对比|其他厂家|友商资料|其他品牌/.test(f))||/模组配置文件\/海康威视/.test(source)||copies.some(r=>r.manufacturerRole==='other-manufacturer'))add('external','explicit-other-manufacturer-or-competitive-comparison-source');
  const specificSource=folders.filter(f=>!/控标文件和认证证书|品质资料（/.test(f)).join('/');
@@ -33,7 +34,7 @@ function materialInfo(item,copies=[]){
  const key=access.accessRestricted?'internal':conflict?'pending':['history','signed','external','certificate','project','technical','general','pending'].find(k=>flags.has(k));
  const kinds=new Set(copies.map(r=>identifyDocument(r)?.kind).filter(k=>k&&k!=='pending'));
  const baseKind=kinds.size===1?[...kinds][0]:null;
- return {...access,materialProperty:key,materialPropertyLabel:definitions.find(([k])=>k===key)[1],materialProperties:[...flags],materialPropertyBasis:basis,
+ return {...access,...archive,materialProperty:key,materialPropertyLabel:definitions.find(([k])=>k===key)[1],materialProperties:[...flags],materialPropertyBasis:basis,
   baseDocumentKind:baseKind,historyStatus:flags.has('history')?'archived-not-automatically-invalid':'not-established',
   manufacturerRole:flags.has('external')?'other-manufacturer-or-comparison':/模块.*认证|正基WiFi/.test(source)?'supplier-component-not-product-competitor':'not-established'};
 }

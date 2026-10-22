@@ -20,7 +20,7 @@ function controllerCandidates(demand,screen,dataset,selectedModule){
  const rows=dataset.devices().filter(d=>d.category===category&&![3,4,5].includes(d.status)&&modelId(d.model)&&
    (!specified.length||modelId(d.model)===modelId(specified[0].modelId))&&d.totalPoints>=screen.points*(requirements.cascadeSplicing?.count||1)&&d.maxWidth>=screen.pixelWidth&&d.maxHeight>=screen.pixelHeight&&satisfiesFeatures(d,requirements,family)&&
    (family!=='asyncCard'||(demand.architecture==='direct'?d.singleCardMode===true:d.singleCardMode===false||requirements.c16Sharing&&['C16L','C16H'].includes(d.model))&&asyncCardFits(d,module,screen,(demand.providedDevices||[]).find(d=>receiverIds.has(modelId(d.modelId)))?.modelId?.replace(/^HD-/i,''))));
- const candidates=['playBox','asyncCard'].includes(family)?orderPlayboxes(rows):rows;
+ const candidates=[...new Map(require('./official-runtime.cjs').publicFilter(rows,screen,family==='processor'?4:family==='playBox'?3:2).map(d=>[d.model,d])).values()];
  return candidates.length?{status:'selected',controllers:candidates,family}:{status:'no_feasible_plan',reason:'no-source-supported-controller-candidate'};
 }
 module.exports={controllerCandidates};

@@ -66,5 +66,5 @@ test('Restricted claims are removed before composition; route log has counts and
 });
 test('Engineering delegates to the existing business executor and social does not call it',async()=>{
  let calls=0;const client=api({businessAnswer:async route=>{calls++;assert.equal(route.intent,'ordering');return {reply:'请补充屏幕参数',results:[],status:'clarify',retrievalTrace:[{name:'ordering-dialogue'}]};}});
- const r=await client.answer('配单 屏幕宽1920高1080');assert.equal(r.answerType,'engineering');assert.equal(calls,1);await client.answer('你好');assert.equal(calls,1);
+ const r=await client.answer('配单 屏幕宽1920高1080像素');assert.equal(r.answerType,'engineering');assert.equal(calls,1);await client.answer('你好');assert.equal(calls,1);
 });

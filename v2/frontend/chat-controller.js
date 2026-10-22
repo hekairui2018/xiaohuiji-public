@@ -7,6 +7,13 @@ window.ChatController = Object.freeze({create(ui, channel = {}) {
   return response.json();
  });
  let sending = false;
+ let composing = false;
+ ui.input.addEventListener('compositionstart',()=>{composing=true;});
+ ui.input.addEventListener('compositionend',()=>{composing=false;});
+ ui.input.addEventListener('keydown',event=>{
+  if(event.key!=='Enter'||event.shiftKey||event.isComposing||composing||event.keyCode===229)return;
+  event.preventDefault();if(!event.repeat)send();
+ });
  function busy(value) {
   sending = value;
   ui.input.disabled = ui.sendButton.disabled = value;
@@ -30,16 +37,18 @@ window.ChatController = Object.freeze({create(ui, channel = {}) {
   if (channel.validate?.(text)===false) return;
   channel.beforeSend?.();const sessionId=ui.getSessionId();
   const displayText=legacy?(display!==undefined?display:text.replace(/\[[A-Z_]+\]/g,'')).trim():display||text;
-  ui.input.value='';busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());
+  ui.input.value='';ui.resizeInput?.();busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());
   try {await query(text,sessionId);}
   catch(error) {
    if (ui.getSessionId()!==sessionId) return;
    ui.removeLoading();
-   if (!legacy) {ui.input.value=text;ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});}
+   ui.input.value=text;ui.resizeInput?.();
+   if (!legacy) {ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});}
    else {const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.style.color='#c00';bubble.textContent='请求失败：'+error.message;row.append(bubble);ui.messages.append(row);}
-  } finally {busy(false);ui.input.focus();}
+  } finally {busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}
  }
  async function sendImage(dataUrl) {
+  if(channel.allowImages?.()===false)return;
   if (sending || ui.sendButton.disabled) return;
   channel.beforeSend?.();const sessionId=ui.getSessionId();
   ui.setImageState({dataUrl,text:'',busy:true});busy(true);ui.addUserMessage('',dataUrl);ui.addLoading(legacy?'识别图片中…':'本地识别图片文字…');

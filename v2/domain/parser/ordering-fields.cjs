@@ -24,7 +24,7 @@ function parseOrderingFields(text){
  m=text.match(/^(?:配单\s*)?P\d+(?:\.\d+)?\s+(\d+)\s*[x×]\s*(\d+)\s+(?:同步|异步)/i);if(m){set(screen,'pixelWidth',Number(m[1]),m,'/screen');set(screen,'pixelHeight',Number(m[2]),m,'/screen');}
  m=text.match(/(\d+)\s*(?:块|个)?(?:宽|列)\s*[，,x×* ]*\s*(\d+)\s*(?:块|个)?(?:高|行)/i);if(m){set(screen,'moduleColumns',Number(m[1]),m,'/screen');set(screen,'moduleRows',Number(m[2]),m,'/screen');}
  // Screen and module dimensions are distinct. No grid rounding or inferred module properties.
- m=text.match(/(?:整屏|屏幕)(?:分辨率|像素)?\s*[:：]?\s*(\d{3,5})\s*[x×*]\s*(\d{2,5})/i)||text.match(/^\s*(\d{3,5})\s*[x×*]\s*(\d{3,5})(?:\s*(?:点|像素))?(?:[，,\s]*(?:同步|异步))?\s*$/i);
+ m=text.match(/(?:整屏|屏幕)(?:的)?(?:分辨率|像素)?\s*(?:是|为|改为|调整为)?\s*[:：]?\s*(\d{3,5})\s*[x×*]\s*(\d{2,5})(?![\d.]|\s*(?:mm|毫米|米|m\b))/i)||text.match(/^\s*(\d{3,5})\s*[x×*]\s*(\d{3,5})(?:\s*(?:点|像素))?(?:[，,\s]*(?:同步|异步))?\s*$/i);
  if(m){set(screen,'pixelWidth',Number(m[1]),m,'/screen');set(screen,'pixelHeight',Number(m[2]),m,'/screen');}
  for(const [axis,key]of [['宽|长','pixelWidth'],['高','pixelHeight']]){
   m=text.match(new RegExp('(?:'+axis+')\\s*(\\d{3,5})(?![0-9]|\\s*(?:米|m|毫米|张|块|排|个|列|行))','i'));
@@ -61,4 +61,32 @@ function parseOrderingFields(text){
  if(Object.keys(module).length)fields.module=module;if(Object.keys(screen).length)fields.screen=screen;
  if(Object.keys(provenance).length)fields.provenance=provenance;return fields;
 }
-module.exports={parseOrderingFields};
+// Shared lexical observation: values, entity and units stay independent until
+// the dialogue owner resolves them. This never selects equipment or rounds grids.
+function geometryObservation(input){
+ const text=String(input).normalize('NFKC').replace(/乘以|乘/g,'×');
+ const number='(\\d+(?:\\.\\d+)?)',unit='(毫米|mm|厘米|cm|米|m|像素|点|px)?';
+ const pair=new RegExp(number+'\\s*'+unit+'\\s*[x×*]\\s*'+number+'\\s*'+unit,'i').exec(text);
+ const axes=[...text.matchAll(new RegExp('(宽|长|高)\\s*(?:是|为|改为)?\\s*'+number+'\\s*'+unit,'gi'))];
+ let values=null,units=[],axisUnits={};
+ if(pair){values={width:Number(pair[1]),height:Number(pair[3])};units=[pair[2],pair[4]].filter(Boolean);axisUnits={width:pair[2]||pair[4],height:pair[4]||pair[2]};}
+ else if(axes.length){values={};for(const a of axes){const axis=a[1]==='高'?'height':'width';values[axis]=Number(a[2]);if(a[3]){units.push(a[3]);axisUnits[axis]=a[3];}}}
+ const entity=/模组/.test(text)?'module':/箱体/.test(text)?'cabinet':/HDMI|输入|输出|信号源/i.test(text)?'signal':/整屏|屏幕|屏宽|屏高/.test(text)?'screen':null;
+ const label=/分辨率|像素|\bpx\b|这是.{0,3}点数/i.test(text)?'pixels':/毫米|\bmm\b/i.test(text)?'mm':/厘米|\bcm\b/i.test(text)?'cm':/(?:单位|尺寸|宽|高|长).{0,8}米|\bm\b/i.test(text)?'m':null;
+ const normalize=u=>/毫米|^mm$/i.test(u)?'mm':/厘米|^cm$/i.test(u)?'cm':/^米$|^m$/i.test(u)?'m':'pixels';
+ const kinds=[...new Set(units.map(normalize))];
+ const mixedPhysical=kinds.length>1&&!kinds.includes('pixels');
+ return {values,axisUnits:Object.fromEntries(Object.entries(axisUnits).filter(([,u])=>u).map(([k,u])=>[k,normalize(u)])),entity,unit:kinds.length===1?kinds[0]:mixedPhysical?'mm':label,conflict:kinds.length>1&&!mixedPhysical||kinds.length===1&&label&&kinds[0]!==label,quote:String(input)};
+}
+function geometryDelta(observation,entity,unit){
+ const delta={provenance:{}},factor={mm:1,cm:10,m:1000,pixels:1}[unit];
+ if(!observation?.values||!['screen','module'].includes(entity)||factor===undefined)return delta;
+ for(const [axis,value]of Object.entries(observation.values)){
+  const key=(unit==='pixels'?'pixel':'physical')+(axis==='width'?'Width':'Height')+(unit==='pixels'?'':'Mm');
+  const axisFactor={mm:1,cm:10,m:1000,pixels:1}[observation.axisUnits?.[axis]]??factor;
+  delta[entity]??={};delta[entity][key]=value*axisFactor;
+  delta.provenance['/'+entity+'/'+key]={kind:'user-stated',text:observation.quote,unit:observation.axisUnits?.[axis]||unit,rawValue:value};
+ }
+ return delta;
+}
+module.exports={parseOrderingFields,geometryObservation,geometryDelta};

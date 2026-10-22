@@ -42,7 +42,7 @@ test('Special width segmentation matches original mL.P; partial segments and exc
   const original=vm.runInNewContext('('+source.slice(start+2,end)+')',{n:val({H4K:false}),t:[],o:val({pixel:{long:screen.pixelWidth,width:screen.pixelHeight}}),a:val(controller),d:val(columns),c:val(module.resolution[0]),h:val(false),e:655360,Js,ol:val([]),console:{log(){}}},{timeout:1000});assert.equal(original(controller,()=>{}),true);
   const result=analyzeSpecialCanvas(module,screen,controller);assert.equal(result.status,'candidate');assert.equal(result.nominalWidth,Js.value[0].width);assert.equal(result.count,Js.value[0].num);assert.equal(result.portsPerSegment,Js.value[0].networkPortNumber);assert.equal(result.segments.reduce((s,r)=>s+r.pixelWidth,0),screen.pixelWidth);assert.ok(result.segments.every(s=>s.portColumns.reduce((a,b)=>a+b,0)===s.moduleColumns));assert.equal(result.formalPlan,false);
  }
- const blocked=await app.dialogue('配单P2.5 模组128x64 32扫 HUB75 全彩 室内 异步 播放盒 接收卡 40宽1高 A5L');assert.equal(blocked.status,'unsupported');assert.ok(blocked.failures.some(f=>f.sourceAnalysis?.status==='candidate'));
+ const blocked=await app.dialogue('配单P2.5 模组128x64 32扫 HUB75 全彩 室内 异步 播放盒 接收卡 40宽1高 A5L');assert.equal(blocked.status,'needs_input');assert.equal(blocked.exportAllowed,false);assert.ok(blocked.plan.specialCanvas);assert.ok(blocked.hdsetSvg);
  const over=analyzeSpecialCanvas(module,{columns:60,rows:100,pixelWidth:7680,pixelHeight:6400},dataset.findProducts('A7')[0]);assert.equal(over.status,'pending');
 });
 test('Playbox cascade checks declared count and multiplied load, but never fabricates a multi-device topology',async()=>{
