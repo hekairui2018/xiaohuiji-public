@@ -7,7 +7,7 @@ function parseOrderingFields(text){
  const fields={},module={},screen={},provenance={},requirements={};
  const set=(target,key,value,match,prefix)=>{target[key]=value;provenance[prefix+'/'+key]={kind:'user-stated',text:match[0]};};
  let m=text.match(/\bP\s*(\d+(?:\.\d+)?)/i);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');
- m=text.match(/模组(?:分辨率|像素)?\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)/i);if(m){set(module,'pixelWidth',Number(m[1]),m,'/module');set(module,'pixelHeight',Number(m[2]),m,'/module');}
+ m=text.match(/模组(?:的)?(?:分辨率|像素)?\s*(?:是|为|改为|调整为)?\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)(?![\d.]|\s*(?:mm|毫米|米|m\b))/i);if(m){set(module,'pixelWidth',Number(m[1]),m,'/module');set(module,'pixelHeight',Number(m[2]),m,'/module');}
  m=text.match(/(?:^|[^A-Z0-9_-])(?:(\d+)\s*\/\s*)?(\d+)\s*(?:扫|S\b)/i);if(m)set(module,'scan',{numerator:m[1]?Number(m[1]):1,denominator:Number(m[2])},m,'/module');
  m=text.match(/\bHUB(?:75E?|12|08|320|50)\b/i);if(m)set(module,'interface',m[0].toUpperCase(),m,'/module');
  m=text.match(/(\d+)R\s*(\d+)G\s*(\d+)B/i);if(m)set(module,'color',{r:Number(m[1]),g:Number(m[2]),b:Number(m[3])},m,'/module');
@@ -16,6 +16,11 @@ function parseOrderingFields(text){
  if(/(?:不是|非|不要|不使用)\s*全彩/.test(text))provenance['/module/color']={kind:'user-negated',text};
  if(/(?:不是|非|不要|不使用)\s*PWM/i.test(text))provenance['/module/driverFamily']={kind:'user-negated',text};
  m=text.match(/整屏(?:分辨率|像素)\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)/i);if(m){set(screen,'pixelWidth',Number(m[1]),m,'/screen');set(screen,'pixelHeight',Number(m[2]),m,'/screen');}
+ // A standalone resolution statement supplies screen pixels, including a
+ // follow-up answer to the ordering assistant. Keep module/input dimensions
+ // and physical units out of this field rather than matching a loose suffix.
+ m=text.match(/(?:^|[，,;；。])\s*(?:(?:整屏|屏幕)(?:的)?\s*)?(?:分辨率|像素)\s*(?:是|为|改为|调整为)?\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)(?![\d.]|\s*(?:mm|毫米|米|m\b))/i);
+ if(m){set(screen,'pixelWidth',Number(m[1]),m,'/screen');set(screen,'pixelHeight',Number(m[2]),m,'/screen');}
  m=text.match(/^(?:配单\s*)?P\d+(?:\.\d+)?\s+(\d+)\s*[x×]\s*(\d+)\s+(?:同步|异步)/i);if(m){set(screen,'pixelWidth',Number(m[1]),m,'/screen');set(screen,'pixelHeight',Number(m[2]),m,'/screen');}
  m=text.match(/(\d+)\s*(?:块|个)?(?:宽|列)\s*[，,x×* ]*\s*(\d+)\s*(?:块|个)?(?:高|行)/i);if(m){set(screen,'moduleColumns',Number(m[1]),m,'/screen');set(screen,'moduleRows',Number(m[2]),m,'/screen');}
  // Screen and module dimensions are distinct. No grid rounding or inferred module properties.

@@ -129,7 +129,14 @@ async function progressiveOrdering(app,text,previous){
   if(evidence.length&&m.pitchMm&&Object.keys(s).length&&!simulations.length)lines.push('选型库有'+modules.length+'种符合已知条件的模组候选，现场规格尚待确认。');
   if(simulations.length){const first=simulations[0],row=modules.find(m=>m.id===first.moduleId);lines.push('暂定方向（不是正式BOM）：若采用库中'+row.resolution.join('×')+'点、'+row.scanningMethod+'、'+row.interface+'的'+(row.indoor?'室内':'户外')+'模组，按'+(first.inputs.requirements.controllerFamily==='playBox'?'播放盒':'主控')+'＋接收卡架构预核算，可选'+first.controller+(first.receiver?'，'+first.receiver.modelId+'约'+first.receiver.quantity+'张':'')+'。模组未确认项及架构均为假设，现场不同必须重算。');}
   else if(m.pitchMm&&s.physicalWidthMm&&s.physicalHeightMm)lines.push('按标称P'+m.pitchMm+'换算约'+Math.round(s.physicalWidthMm/m.pitchMm)+'×'+Math.round(s.physicalHeightMm/m.pitchMm)+'点，只作尺寸方向；模组整拼与实际分辨率尚未确认，暂不定设备数量。');
-  else if(s.pixelWidth&&s.pixelHeight)lines.push('整屏共'+(s.pixelWidth*s.pixelHeight).toLocaleString('en-US')+'像素；先确定模组条件，再核对主控和接收卡。');
+  else if(s.pixelWidth&&s.pixelHeight){
+   lines.push('整屏共'+(s.pixelWidth*s.pixelHeight).toLocaleString('en-US')+'像素。');
+   const previews=refs?.controllerPreviews||[];
+   if(previews.length){
+    lines.push('按官网JS静态规则先筛主控：'+previews.map(p=>(p.family==='processor'?'实时显示方向':'播放盒方向')+'可先看'+p.models.map(m=>m.modelId.replace(/^HD-/, '')).join('、')).join('；')+'。这是主控初筛，接收卡数量及布线还未核定。');
+    orderingState.controllerPreviews=previews;
+   }
+  }
   if(simulations.length)lines.push('依据：现有选型库对应模组记录及条件计算；候选原记录已保留。');
   if(simulations.length&&/按暂定|按当前方案/.test(text))lines.push('已保留这份暂定方向；确认现场模组完整规格后，再转正式配单。');
   else if(pending[0])lines.push(pending[0].question);reply=lines.join('\n');
