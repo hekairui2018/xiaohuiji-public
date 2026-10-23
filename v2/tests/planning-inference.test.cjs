@@ -15,3 +15,8 @@ test('Not knowing module details is a planning preference, and refusing defaults
  for(const text of ['不知道模组','模组不知道，按常规的配','不知道扫描，按常规配','按常规模组配'])assert.equal(planningPreference(text).useCatalog,true);
  assert.equal(planningPreference('不要默认模组').useCatalog,false);assert.equal(planningPreference('R712规格书').related,false);
 });
+test('A later module preference or label cannot steal the object and units of a screen dimension clause',()=>{
+ const {geometryObservation}=require('../domain/parser/ordering-fields.cjs');
+ for(const text of ['配单P2，宽10米高10米，室内同步，按常规模组配','按常规模组配，P2宽10米高10米，室内同步','P2宽10米高10米按常规模组配','P2，宽10米高10米，模组分辨率不知道']){const g=geometryObservation(text);assert.notEqual(g.entity,'module',text);assert.equal(g.unit,'m',text);assert.equal(g.conflict,false,text);assert.deepEqual(g.values,{width:10,height:10});}
+ const module=geometryObservation('P2，模组尺寸320×160mm，整屏按常规配');assert.equal(module.entity,'module');assert.equal(module.unit,'mm');
+});

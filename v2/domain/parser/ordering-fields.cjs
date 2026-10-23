@@ -72,8 +72,14 @@ function geometryObservation(input){
  let values=null,units=[],axisUnits={};
  if(pair){values={width:Number(pair[1]),height:Number(pair[3])};units=[pair[2],pair[4]].filter(Boolean);axisUnits={width:pair[2]||pair[4],height:pair[4]||pair[2]};}
  else if(axes.length){values={};for(const a of axes){const axis=a[1]==='高'?'height':'width';values[axis]=Number(a[2]);if(a[3]){units.push(a[3]);axisUnits[axis]=a[3];}}}
- const entity=/模组/.test(text)?'module':/箱体/.test(text)?'cabinet':/HDMI|输入|输出|信号源/i.test(text)?'signal':/整屏|屏幕|屏宽|屏高/.test(text)?'screen':null;
- const label=/分辨率|像素|\bpx\b|这是.{0,3}点数/i.test(text)?'pixels':/毫米|\bmm\b/i.test(text)?'mm':/厘米|\bcm\b/i.test(text)?'cm':/(?:单位|尺寸|宽|高|长).{0,8}米|\bm\b/i.test(text)?'m':null;
+ // Resolve the object and its label in the clause containing the dimensions.
+ // A later request to use a catalogue module must not own an earlier screen size.
+ const anchor=pair?.index??axes[0]?.index;
+ const left=anchor===undefined?0:Math.max(...[...text.slice(0,anchor).matchAll(/[，,；;。]/g)].map(m=>m.index+1),0);
+ const right=anchor===undefined?text.length:anchor+(text.slice(anchor).search(/[，,；;。]/)<0?text.length-anchor:text.slice(anchor).search(/[，,；;。]/));
+ const scope=text.slice(left,right).replace(/(?:按|用|采用).{0,6}(?:常规|默认|推荐).{0,4}模组(?:配|计算)?|模组(?:不知道|不清楚|不确定)|(?:不知道|不清楚|不确定)模组/g,'');
+ const entity=/模组/.test(scope)?'module':/箱体/.test(scope)?'cabinet':/HDMI|输入|输出|信号源/i.test(scope)?'signal':/整屏|屏幕|屏宽|屏高/.test(scope)?'screen':null;
+ const label=/分辨率|像素|\bpx\b|这是.{0,3}点数/i.test(scope)?'pixels':/毫米|\bmm\b/i.test(scope)?'mm':/厘米|\bcm\b/i.test(scope)?'cm':/(?:单位|尺寸|宽|高|长).{0,8}米|\bm\b/i.test(scope)?'m':null;
  const normalize=u=>/毫米|^mm$/i.test(u)?'mm':/厘米|^cm$/i.test(u)?'cm':/^米$|^m$/i.test(u)?'m':'pixels';
  const kinds=[...new Set(units.map(normalize))];
  const mixedPhysical=kinds.length>1&&!kinds.includes('pixels');
