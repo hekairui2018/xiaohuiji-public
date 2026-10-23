@@ -5,10 +5,11 @@ const {createQuickService}=require('./quick-service.cjs');
 const {createDialogueService}=require('./dialogue-service.cjs');
 const {serveStatic}=require('./static-service.cjs');
 const {createOriginalResource}=require('./original-resource.cjs');
-function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null}={}){
+function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,publicOnly=false,publicSearch=null}={}){
  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
  app={...app,dialogue:app.customerDialogue||app.dialogue};
- const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app);
+ const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app,publicCatalog?.localRelease?{
+  localCatalog:async()=>publicCatalog.resourceRows(),resolveDocuments:async rows=>rows.map(r=>({available:!!publicCatalog.localRelease.urlFor(r.name),url:publicCatalog.localRelease.urlFor(r.name)}))}:{});
  const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog,productFacts:offlineKnowledge?.productFacts}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
  const orderingDialogue=createDialogueService(app,{operation:'ordering'});
  const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache({staleMs:60000});
@@ -22,12 +23,16 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   const route=req.url.split('?')[0];
   // Defense in depth: a guard may mark public traffic, but cannot authorize
   // internal dialogue, evidence, index or model routes by accident.
-  if(req.v2Public&&!(req.method==='POST'&&(route==='/api/huidu/log'||require('./public-routes.cjs').publicPostRoutes.has(route)))&&
-   !(req.method==='GET'&&require('./public-routes.cjs').publicGetRoutes.has(route))){send(403,{error:'public-route-not-enabled'});return;}
+  if(req.v2Public&&!require('./public-routes.cjs').isPublicRoute(req.method,route)){send(403,{error:'public-route-not-enabled'});return;}
 
   if(!req.v2Public&&developmentMonitor?.handle(req,res))return;
   if(req.v2Public&&route==='/api/huidu/log'&&req.method==='POST'){if(offlineKnowledge&&await offlineKnowledge.handle(req,res))return;res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'log-store-not-configured'}));return;}
   if(req.v2Public&&!publicCatalog){res.writeHead(503);res.end('Public resources are not configured');return;}
+  if(req.v2Public&&route.startsWith('/public-files/')){if(publicCatalog.localRelease)await publicCatalog.localRelease.serve(req,res);else {res.writeHead(404);res.end();}return;}
+  if(req.v2Public&&['/api/public-search','/api/public-context'].includes(route)){
+   if(!publicSearch){send(503,{error:'public-search-not-configured'});return;}
+   try{const p=new URL(req.url,'http://localhost').searchParams;const result=route==='/api/public-search'?await publicSearch.search(p.get('q')):await publicSearch.read({name:p.get('name'),sha256:p.get('sha256'),unit:p.get('id'),offset:Number(p.get('offset')||0)});send(result.code,result.body);}catch{send(503,{error:'public-search-unavailable'});}return;
+  }
   if(req.v2Public&&route==='/api/ai/capabilities'){send(200,publicChat?await publicChat.capabilities():{modes:[],expert:{available:false}});return;}
   if(req.v2Public&&route==='/api/ai/chat'){
    if(!publicChat){send(503,{reply:'公网客服尚未配置，请稍后重试。'});return;}
@@ -47,7 +52,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
    const quick=req.v2Public?publicQuick:localQuick;
    const url=new URL(req.url,'http://localhost'),q=url.searchParams.get('q')||'';
    if(route.startsWith('/v2/resources/original/')){await original(route.slice('/v2/resources/original/'.length),res);return;}
-   const media=async body=>!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body,{requestContext:req}):offlineKnowledge?.authorizeVideoMedia?offlineKnowledge.authorizeVideoMedia(body,req):body;
+   const media=async body=>req.v2Public&&publicCatalog.localRelease?body:!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body,{requestContext:req}):offlineKnowledge?.authorizeVideoMedia?offlineKnowledge.authorizeVideoMedia(body,req):body;
    if(route==='/v2/software-access/screen-control.png'&&!req.v2Public){const fs=require('node:fs'),path=require('node:path'),file=path.resolve(__dirname,'../../../tmp/v2-offline-runtime/software-assets/pingzhangkong-download.png');if(!fs.existsSync(file)){send(404,{error:'download-image-not-configured'});return;}res.writeHead(200,{'Content-Type':'image/png','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res);return;}
    if(route==='/api/search'){send(200,await media(await quick.search(q)));return;}
    if(route==='/api/software'){if(req.v2Public)send(200,await media(await quick.software(q)));else await catalogResponse(req,res,'software:'+q,async()=>localMedia(await localQuick.software(q)));return;}
@@ -94,7 +99,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   }catch{send(500,{error:'internal_error'});}
  });
  server.prepareCatalogs=async()=>{
-  if(!offlineKnowledge)return;
+  if(!offlineKnowledge||publicOnly)return;
   for(const cat of ['spec','manual','firmware','other','pending'])await catalogResponse.prepare(docKey(cat,'current',0,null,'grouped',true),()=>loadDocs(cat,{websiteOnly:true},true));
   await catalogResponse.prepare('software:',async()=>localMedia(await localQuick.software('')));
  };

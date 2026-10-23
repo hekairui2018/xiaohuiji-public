@@ -13,6 +13,7 @@ const concepts=[
  {id:'program-cycle',type:'topic',words:['循环播放','播放一次','节目单']},
  {id:'usb',type:'topic',words:['U盘','USB','优盘']},
  {id:'white-screen',type:'symptom',words:['白屏']},
+ {id:'red-dots',type:'symptom',words:['红点','红色亮点','红色点']},
  {id:'no-output',type:'symptom',words:['没有输出','无输出']},
  {id:'ghost',type:'symptom',words:phenomenonWords},
  {id:'grayscale',type:'attribute',words:['灰阶','灰度等级','灰度级','grayscale','gray level','gray scale','grey scale']},
@@ -21,8 +22,8 @@ const concepts=[
  {id:'width',type:'attribute',words:['宽高','长宽高','宽度','高度','最宽','最高','长宽','水平','垂直','width','height','horizontal','vertical']},
  {id:'ports',type:'attribute',words:['接口','网口','HDMI','HUB75','USB','端口','interface','port']},
  {id:'function',type:'attribute',words:['功能','支持','音频','4G','播放','function','support']},
- {id:'flicker',type:'symptom',words:['闪烁','闪屏','频闪','一直闪','flicker']},
- {id:'color',type:'symptom',words:['颜色异常','颜色不正常','颜色不对','偏色','色差','变色','色块','color abnormal']},
+ {id:'flicker',type:'symptom',words:['闪烁','闪屏','频闪','一直闪','还闪','flicker']},
+ {id:'color',type:'symptom',words:['颜色异常','颜色不正常','颜色不对','偏色','色差','变色','色块','发绿','发红','发蓝','color abnormal']},
  {id:'black',type:'symptom',words:['黑屏','不亮','无显示','black screen']},
  {id:'garbled',type:'symptom',words:['花屏','乱码','garbled']},
  {id:'discovery',type:'symptom',words:['搜不到','搜索不到','找不到','无法搜索','不广播','发现不了']},
@@ -114,7 +115,7 @@ function parseScopedQuery(message,lookup,state={}){
   for(const c of concepts)if(c.type==='attribute'&&c.words.some(w=>norm(relation.target.text).includes(norm(w)))&&!symptoms.includes(c.id))symptoms.push(c.id);
  }
  if(route.decision.answerNeed==='parameter-overview'&&!attributes.length)attributes.push('load','ports','size','grayscale');
- const operation=route.intent==='operation',selectSoftware=operation&&/(?:用|使用).{0,4}(?:什么|哪个|那个|哪款)软件|调试软件/.test(active),upgrade=operation&&/升级|烧录/.test(active),sendProgram=operation&&/发送.*节目|节目.*发送/.test(active);
+ const operation=route.intent==='operation',selectSoftware=operation&&/(?:用|使用).{0,4}(?:什么|哪个|那个|哪款)软件|调试软件/.test(active),upgrade=operation&&/升级|烧录/.test(active),sendProgram=operation&&/发送.*节目|节目.*发送|(?:更新|发布|拷贝|导出|存入|存到).{0,10}节目|节目.{0,20}(?:更新|发布|拷|导出|存到|存入)/.test(active);
  const software=[...new Set([...(route.software||[]),...(context&&!currentSoftware.length?previous?.software||[]:[])])];
  const intent=ambiguous?'ambiguous':numeric&&numericCandidates.length===1&&!chipCandidates.length?'product':chipCandidates.length&&['technical','clarify'].includes(route.intent)||chips.length&&['technical','clarify'].includes(route.intent)?'chip':software.length&&route.intent==='parameters'?'software-function':route.intent;
  const decision={...route.decision,intent,original,contextUsed:!!context||route.decision.contextUsed};

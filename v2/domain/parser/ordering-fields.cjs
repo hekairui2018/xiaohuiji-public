@@ -1,12 +1,13 @@
 'use strict';
 // Lexical parameters only. Device/count/port choices are left to rules and math.
 function parseOrderingFields(text){
- text=String(text).normalize('NFKC').replace(/(\d)\s*乘\s*(\d)/g,'$1×$2');
+ text=require('./customer-meaning.cjs').spokenGeometry(text).replace(/(\d)\s*乘\s*(\d)/g,'$1×$2');
  // V1 axis convention: 长…宽… without 高 means horizontal/vertical.
  if(/长[^高]*宽/.test(text)&&!text.includes('高'))text=text.replace(/长度|长/g,'\uE000').replace(/宽度|宽/g,'高').replace(/\uE000/g,'宽');
  const fields={},module={},screen={},provenance={},requirements={};
  const set=(target,key,value,match,prefix)=>{target[key]=value;provenance[prefix+'/'+key]={kind:'user-stated',text:match[0]};};
  let m=text.match(/\bP\s*(\d+(?:\.\d+)?)/i);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');
+ m=text.match(/点间距\s*(?:是|为)?\s*(\d+(?:\.\d+)?)\s*(?:毫米|mm)/i);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');
  m=text.match(/模组(?:的)?(?:物理)?尺寸\s*(?:是|为)?\s*[:：]?\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|毫米|cm|厘米)/i);if(m){const factor=/cm|厘米/i.test(m[3])?10:1;set(module,'physicalWidthMm',Number(m[1])*factor,m,'/module');set(module,'physicalHeightMm',Number(m[2])*factor,m,'/module');}
  m=text.match(/模组(?:的)?(?:分辨率|像素)?\s*(?:是|为|改为|调整为)?\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)(?![\d.]|\s*(?:mm|毫米|米|m\b))/i);if(m){set(module,'pixelWidth',Number(m[1]),m,'/module');set(module,'pixelHeight',Number(m[2]),m,'/module');}
  m=text.match(/(?:^|[^A-Z0-9_-])(?:(\d+)\s*\/\s*)?(\d+)\s*(?:扫|S\b)/i);if(m)set(module,'scan',{numerator:m[1]?Number(m[1]):1,denominator:Number(m[2])},m,'/module');
@@ -40,9 +41,10 @@ function parseOrderingFields(text){
  m=text.match(/(\d+(?:\.\d+)?)\s*(?:米|m)\s*(?:宽|长)[，,\s]*(\d+(?:\.\d+)?)\s*(?:米|m)\s*高/i);
  if(m){set(screen,'physicalWidthMm',Number(m[1])*1000,m,'/screen');set(screen,'physicalHeightMm',Number(m[2])*1000,m,'/screen');}
  for(const [axis,key]of [['横(?:向|着|排)?|宽|列','moduleColumns'],['竖(?:向|着|排)?|纵(?:向|着|排)?|高|行','moduleRows']]){
-  m=text.match(new RegExp('(?:'+axis+')\\s*(?:摆|放|有|是)?\\s*(\\d{1,3})\\s*(?:张|块|个)(?!像素|点)','i'));
+  m=text.match(new RegExp('(?:'+axis+')\\s*(?:排了|摆了|放了|排|摆|放|有|是|为)?\\s*(\\d{1,3})\\s*(?:张|块|个)(?!像素|点)','i'));
   if(m)set(screen,key,Number(m[1]),m,'/screen');
  }
+ m=text.match(/(?:模组)?\s*(?:一|1|每)(?:行|排)\s*(\d+)\s*(?:块|张|个)(?:模组)?[，,\s]*(?:一共|共|总共)?\s*(\d+)\s*(?:行|排)/);if(m){set(screen,'moduleColumns',Number(m[1]),m,'/screen');set(screen,'moduleRows',Number(m[2]),m,'/screen');}
  const box=text.match(/每箱模组\s*(\d+)\s*[x×*]\s*(\d+)/i),array=text.match(/箱体阵列\s*(\d+)\s*[x×*]\s*(\d+)/i);
  if(box||array){fields.cabinet={};if(box){fields.cabinet.moduleColumns=Number(box[1]);fields.cabinet.moduleRows=Number(box[2]);}if(array){fields.cabinet.columns=Number(array[1]);fields.cabinet.rows=Number(array[2]);}}
  const positive=text.replace(/(?:不是|不要|不用|不做|非)\s*(?:同步|异步|室内|户内|室外|户外)/g,'');
@@ -50,6 +52,7 @@ function parseOrderingFields(text){
  else if(/(?:不是|不要|不用|不做|非)\s*(?:室内|户内|室外|户外)/.test(text))provenance['/environment']={kind:'user-negated',text};
  if(/异步/.test(positive)&&!/同步/.test(positive.replace(/异步/g,'')))fields.controlMode='async';else if(/同步/.test(positive)&&!/异步/.test(positive))fields.controlMode='sync';
  else if(/(?:不是|不要|不用|不做|非)\s*(?:同步|异步)/.test(text))provenance['/controlMode']={kind:'user-negated',text};
+ if(!fields.controlMode){const described=require('./customer-meaning.cjs').describedControlMode(text);if(described){fields.controlMode=described;delete provenance['/controlMode'];}}
  if(/接收卡/.test(text)&&!/直控/.test(text))fields.architecture='receiver';else if(/直控/.test(text)&&!/接收卡/.test(text))fields.architecture='direct';
  if(/播放盒/.test(text)&&!/(?:不是|不要|不用|不使用)\s*播放盒/.test(text))requirements.controllerFamily='playBox';
  if(/异步(?:控制)?卡/.test(text)&&!/(?:不是|不要|不用|不使用)\s*异步(?:控制)?卡/.test(text))requirements.controllerFamily='asyncCard';
@@ -65,7 +68,7 @@ function parseOrderingFields(text){
 // Shared lexical observation: values, entity and units stay independent until
 // the dialogue owner resolves them. This never selects equipment or rounds grids.
 function geometryObservation(input){
- const text=String(input).normalize('NFKC').replace(/乘以|乘/g,'×');
+ const text=require('./customer-meaning.cjs').spokenGeometry(input).replace(/乘以|乘/g,'×');
  const number='(\\d+(?:\\.\\d+)?)',unit='(毫米|mm|厘米|cm|米|m|像素|点|px)?';
  const pair=new RegExp(number+'\\s*'+unit+'\\s*[x×*]\\s*'+number+'\\s*'+unit,'i').exec(text);
  const axes=[...text.matchAll(new RegExp('(宽|长|高)\\s*(?:是|为|改为)?\\s*'+number+'\\s*'+unit,'gi'))];

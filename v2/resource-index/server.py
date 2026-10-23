@@ -43,7 +43,7 @@ def create_server(work, port=0, role_index=None):
                     if route=='/role/search':
                         result=role_engine.search(work,role_index,query=body.get('q',''),role=body.get('role','all'),
                             concepts=body.get('concepts'),models=body.get('models'),documents=body.get('documents'),
-                            authorized_keys=body.get('authorized_keys'),limit=body.get('limit',4),version=body.get('version'))
+                            authorized_keys=body.get('authorized_keys'),limit=body.get('limit',4),version=body.get('version'),chips=body.get('chips'))
                     else:
                         result=role_engine.read(work,role_index,unit=body.get('unit',''),offset=body.get('offset',0),authorized_keys=body.get('authorized_keys'))
                     return self.send(200,result)
@@ -77,7 +77,7 @@ def create_server(work, port=0, role_index=None):
                     keys=json.loads(first('authorized_keys','null'))
                     if u.path=='/role/search':
                         result=role_engine.search(work,role_index,query=first('q'),role=first('role','all'),concepts=json.loads(first('concepts','null')),
-                            models=json.loads(first('models','[]')),documents=json.loads(first('documents','null')),authorized_keys=keys,limit=int(first('limit','4')),version=first('version') or None)
+                            models=json.loads(first('models','[]')),documents=json.loads(first('documents','null')),authorized_keys=keys,limit=int(first('limit','4')),version=first('version') or None,chips=json.loads(first('chips','[]')))
                     else:result=role_engine.read(work,role_index,unit=first('unit'),offset=int(first('offset','0')),authorized_keys=keys)
                     return self.send(200,result)
                 if u.path=='/resource-info':

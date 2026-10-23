@@ -11,6 +11,9 @@ function decideClause(text,{models=[],software=[],orderingContext=null,relations
  const cite=(rule,match)=>{if(match){const index=original.indexOf(match[0]);reasons.push({rule,text:index<0?original:match[0],start:index<0?0:index});}};
  const positive=query.replace(/(?<!是)(?:不是|并非|没有|不要|不用|不需要|无需|不)\s*(?:做|要|查|找|下载|看)?(?:故障排查|故障诊断|售后排查|说明书|手册|规格书|固件|配单|配卡|配屏|参数|资料|黑屏|灰阶异常|花屏|故障)/g,s=>' '.repeat(s.length));
  const categories=resourceCategories.filter(([,re])=>re.test(positive)).map(([k])=>k);
+ // A software name identifies the object; it does not turn its manual/spec
+ // request into an installer request.
+ if(categories.includes('software')&&categories.some(c=>['manual','spec','firmware','video'].includes(c))&&!/安装包|下载器|安装程序|下载软件|软件安装/.test(positive))categories.splice(categories.indexOf('software'),1);
  for(const [type,re]of [['document',/说明书|说名书|说明数|手册|规格书|资料|文档|教程|固件|\.pdf|\.bin/i],['interface',/HDMI|HUB75|USB|DVI|网口/i],['software',/软件|APP|云平台/i],['module',/模组|单元板/],['device',/设备|控制卡|接收卡|发送卡|屏幕|显示屏/]]){const m=re.exec(positive);if(m)objects.push({type,text:m[0]});}
  for(const id of models)objects.push({type:'product',id});for(const name of software)objects.push({type:'software',id:name});
  for(const [id,re]of [['grayscale',/灰阶|灰度(?:等级|级)/],['load',/带载|带得|带几|带多少/],['size',/尺寸|宽高|宽|高|分辨率/],['function',/功能|用途|支持|能干啥|有什么用/],['firmware',/固件|刷|烧录|升级/]]){const m=re.exec(positive);if(m)topics.push({id,text:m[0]});}
@@ -40,9 +43,10 @@ function decideClause(text,{models=[],software=[],orderingContext=null,relations
  const service=fastSemantics&&/(?:销售|代理|技术支持|技术).{0,12}(?:电话|联系|上班|工作时间)|(?:电话|联系).{0,12}(?:销售|代理)|多少钱|报价|价格|报修|维修.{0,6}(?:电话|联系)|保修期|售后.{0,6}(?:电话|联系)|(?:人工(?:服务|客服)?|转人工|销售|技术支持)$|(?:想|打算|需要)购买/.exec(positive);
  const requestedAssistance=fastSemantics&&/(?:需要|请|帮忙|能否|找人).{0,8}远程.{0,8}(?:协助|调整|调试)|谁有空.{0,6}(?:调个屏|调试|帮忙)/.exec(positive);
  const softwareAvailability=fastSemantics&&/(?:还有|有没有|有无).{0,8}(?:软件|安装包)(?:吗|么|呀|[?？])?$|^(?:电脑(?:版|端)?|手机(?:版|端)?)?(?:发布|播控|播放|控制)?软件$/.exec(positive);
- const explicitOrder=/配单|配卡|配屏|配个|配一|我要配|帮我配|选型|BOM|用几张卡|网口规划|算.{0,5}(?:张卡|接收卡|配单)|选控制卡|(?:用|选)什么(?:控制|发送|接收)卡|画.{0,6}(?:接线图|拓扑)/i.exec(positive);
+ let explicitOrder=/配单|配卡|配屏|配个|配一|我要配|帮我配|选型|BOM|用几张卡|网口规划|算.{0,5}(?:张卡|接收卡|配单)|选控制卡|(?:用|选)什么(?:控制|发送|接收)卡|画.{0,6}(?:接线图|拓扑)/i.exec(positive);
  const accessorySelection=fastSemantics&&/4G|5G|RF/.test(positive)&&/模块/.test(positive)&&/选型|怎么配|型号/.test(positive);
  const delta=parseOrderingFields(query),geometry=Object.keys(delta.screen||{}).length>0;
+ if(explicitOrder?.[0]==='选型'&&!geometry&&models.length&&/选型.{0,10}(?:注意|条件|原则)/.test(positive))explicitOrder=null;
  const continuation=orderingContext&&!fault&&!document&&!compatible&&!software.length&&!how&&(Object.keys(delta).some(k=>k!=='provenance')||Object.values(delta.provenance||{}).some(v=>v.kind==='user-negated')||/继续配单|恢复配单|按暂定|刚才.*(?:那个|方案)|允许调整尺寸|可以调整尺寸|按整拼尺寸|按这个尺寸|不限定设备|取消指定设备|不限制设备型号/.test(positive)||/换成|改用|能不能用|不能用|为啥不用/.test(positive)&&models.length);
  let intent='clarify',action='clarify',chosen=null;
  if(socialSignal||/^(?:(?:你好|您好|嗨|嘿|哈喽|hello|hi|早上好)|(?:谢谢|多谢|感谢|thanks|明白了|不错|好的)|(?:你是谁|你能做什么|你有什么功能|能帮我什么))(?:呀|啊|哦|了)?$/.test(social)){intent='social';action='social';chosen=[query];}
@@ -86,7 +90,15 @@ function decideAction(text,options={}){
   const goals=[...new Set(requests.map(c=>decideClause(c.text,{...options,relations:frame.relations.filter(r=>r.clauseStart===c.start).map(r=>({...r,predicate:{...r.predicate,start:r.predicate.start-c.start,end:r.predicate.end-c.start},target:r.target?{...r.target,start:r.target.start-c.start,end:r.target.end-c.start}:null})),lexicalSpans:c.tokens.map(t=>({...t,start:t.start-c.start,end:t.end-c.start}))}).action))].filter(a=>a!=='clarify');
   if(goals.length>1)decision={...decision,intent:'clarify',action:'clarify-multiple-actions',alternatives:goals,missing:['action-priority'],reasons:[{rule:'independent-clause-goals',text:original,start:0}]};
  }
- return {...decision,original,focusText:frame.focusText,frames:frame.clauses,relations:frame.relations,requestRelations:frame.focusedRelations,
+ // The request focus can be the final clause (“按常规模组就行”). Screen facts
+ // elsewhere in the same request still describe the engineering task.
+ const fullFields=parseOrderingFields(original);
+ const wholeOperation=/(?:怎么|如何|怎样|教我|步骤).{0,25}(?:存入|存到|拷到|拷贝|导出|发送|发布|更新|设置|复制|备份|调整|修改|连接)/.test(original);
+ if(wholeOperation&&(options.software?.length||options.models?.length)&&!['aftersales','compatibility','resources','service'].includes(decision.intent)&&!/黑屏|花屏|发绿|闪烁|还闪|连不上|发送失败/.test(original))decision={...decision,intent:'operation',action:'guide-operation',missing:[],reasons:[{rule:'whole-request-operation',text:original,start:0}]};
+ if(!['aftersales','compatibility','service','social'].includes(decision.intent)&&!/(?:查|找|下载|给我|发我).{0,8}(?:规格书|说明书|手册|固件|视频)|(?:怎么|如何).{0,12}(?:设置|发送|升级|导出)|黑屏|花屏|发绿|闪烁|还闪|连不上|发送失败/.test(original)&&require('./customer-meaning.cjs').orderingScene(original,fullFields)){
+  decision={...decision,intent:'ordering',action:'plan-engineering',orderingKind:null,missing:[],alternatives:[],reasons:[{rule:'whole-request-screen-conditions',text:original,start:0}]};
+ }
+ return {...decision,original,focusText:decision.intent==='ordering'||wholeOperation&&decision.intent==='operation'?original:frame.focusText,frames:frame.clauses,relations:frame.relations,requestRelations:frame.focusedRelations,
   reasons:decision.reasons.map(r=>({...r,start:Math.max(0,original.indexOf(r.text)),rule:frame.changed?'request-scope:'+r.rule:r.rule}))};
 }
 function chatIntent(text,lookup,state={}){

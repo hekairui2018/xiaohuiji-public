@@ -175,7 +175,7 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   // requests may finish from the directory; ambiguous/fault inputs query both cases and text.
   const explicitDocs=q.intent==='resources';
   const tasks=[];
-  if(q.intent==='parameters'&&q.models.length&&q.attributes.length&&searchContext)tasks.push(call('parameter-original-context',async()=>{
+  if(q.intent==='parameters'&&q.models.length&&(q.attributes.length||q.literals.length)&&searchContext)tasks.push(call('parameter-original-context',async()=>{
    // A parameter search uses parameter units. A failed claim is not permission
    // to promote a fault report or a FAQ containing arbitrary numbers.
    const terms=parameterSearchTerms(q),models=q.models.map(m=>m.replace(/^HD-/,''));
@@ -217,10 +217,10 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
    const request=operationRequest(q);if(!request.terms.length)return [];
    routeLog.operationRequest={terms:request.terms,groups:request.groups};
    const uniqueDocuments=[...new Set(documents)],candidates=[];for(let offset=0;offset<uniqueDocuments.length;offset+=4)candidates.push(...await searchContext({query:request.query,concepts:request.terms,documents:uniqueDocuments.slice(offset,offset+4),models:[],chips:q.chips,version:q.versions.find(v=>v.kind!=='hardware')?.value}));
-   const rows=[],seen=new Set();for(const r of candidates){const context=readContext?await readContext(r):null;if(!context?.text)continue;const section=operationSection(context,r,request),legacy=()=>operationExcerpt(context.text,{...q.operation,terms:request.terms});let excerpt=q.operation.sendProgram&&!q.evidencePlan.scenario.media.length?legacy()||section:section||legacy();if(excerpt&&!operationCovers(excerpt.text,request.groups))excerpt=null;if(q.operation.selectSoftware){const documented=extractKnownModels(r.name+' '+context.text,lookup);if(q.models.length&&!q.models.every(id=>documented.includes(id)))continue;const lines=context.text.split(/\n|(?<=[。；;])/).filter(line=>{const ids=extractKnownModels(line,lookup);return !q.models.length||!ids.length||q.models.some(id=>ids.includes(id));}).filter(line=>/HDSet|HDPlayer|HDSign|HDShow|LCD.?Player|屏掌控/i.test(line)&&/软件|调试|设置|应用|端[:：]|software|application/i.test(line)&&line.length<700&&/调试|配置|屏参|节目|发送|播放|电脑端软件|手机APP|application/i.test(line));excerpt=lines.length?{text:[...new Set(lines)].slice(0,3).join('\n'),sectionFocused:true}:null;}if(!excerpt)continue;const key=r.sha256+'|'+excerpt.text;if(seen.has(key))continue;seen.add(key);rows.push({...r,...context,...excerpt,type:'operation',softwareAssociation:q.operation.selectSoftware&&/电脑端|手机端|手机APP|配套软件|调试软件|应用软件|软件为|软件是|software/i.test(excerpt.text),genericOperation:!q.software.length,software,modelIds:[],evidenceId:r.unitId||r.evidenceId||'operation-'+r.blockId});}
+   const rows=[],seen=new Set();for(const r of candidates){const context=readContext?await readContext(r):null;if(!context?.text)continue;const section=operationSection(context,r,request),legacy=()=>operationExcerpt(context.text,{...q.operation,terms:request.terms});let excerpt=q.operation.sendProgram&&!q.evidencePlan.scenario.media.length?legacy()||section:section||legacy();if(excerpt&&!operationCovers(excerpt.text,request.groups))excerpt=null;if(q.operation.selectSoftware){const documented=extractKnownModels(r.name+' '+context.text,lookup);if(q.models.length&&!q.models.every(id=>documented.includes(id)))continue;const lines=context.text.split(/\n|(?<=[。；;])/).filter(line=>{const ids=extractKnownModels(line,lookup);return !q.models.length||!ids.length||q.models.some(id=>ids.includes(id));}).filter(line=>/HDSet|HDPlayer|HDSign|HDShow|LCD.?Player|屏掌控/i.test(line)&&/软件|调试|设置|应用|端[:：]|software|application/i.test(line)&&line.length<700&&/调试|配置|屏参|节目|发送|播放|电脑端软件|手机APP|application/i.test(line));excerpt=lines.length?{text:[...new Set(lines)].slice(0,3).join('\n'),sectionFocused:true}:null;}if(!excerpt)continue;const key=r.sha256+'|'+excerpt.text;if(seen.has(key))continue;seen.add(key);rows.push({...r,...context,...excerpt,type:'operation',softwareAssociation:q.operation.selectSoftware&&/电脑端|手机端|手机APP|配套软件|调试软件|应用软件|软件为|软件是|software/i.test(excerpt.text),genericOperation:!q.software.length&&!q.models.some(id=>extractKnownModels(r.name,lookup).includes(id)),software,modelIds:[],evidenceId:r.unitId||r.evidenceId||'operation-'+r.blockId});}
    return rows;
   }).then(rows=>add('operation-originals',rows)));
-  if(quick&&(q.categories.includes('software')||q.intent==='software-function'))tasks.push(call('software-catalog',async()=>{const d=await quick.software(q.query);return (d.software?.items||[]).map(r=>({type:q.intent==='software-function'?'software':'document',sourceKind:'registered-software-purpose',category:'software',name:r.name,text:r.purpose,download:r.url||r.downloadUrl}));}).then(rows=>add('catalog',rows)));
+  if(quick&&(q.categories.includes('software')||q.intent==='software-function'))tasks.push(call('software-catalog',async()=>{const d=await quick.software(q.query);return (d.software?.items||[]).map(r=>({type:q.intent==='software-function'?'software':'document',sourceKind:'registered-software-purpose',category:'software',name:r.sourceName||r.name,software:[r.name],sha256:r.sha256,text:r.purpose,download:r.url||r.downloadUrl}));}).then(rows=>add('catalog',rows)));
   if(explicitDocs&&q.categories.includes('video'))tasks.push(call('video-catalog',async()=>{const d=await localizeMedia({video:{groups:[{videos:app?.resourceLookup?.(q.query)?.items||[]}]}});return (d.video?.groups||[]).flatMap(g=>g.videos||[]).map(r=>({type:'document',category:'video',name:r.name,download:r.publicUrl||r.url}));}).then(rows=>add('catalog',rows)));
   const goodCatalog=lists.some(l=>l.source==='catalog'&&l.rows.some(r=>r.available&&r.download));
   const searchTerms=q.symptoms.length?[...q.symptoms.map(id=>concepts.find(c=>c.id===id).words[0]),...q.evidencePlan.scenario.media.includes('usb-disk')?['U盘']:[],...(q.concepts.includes('wifi')?['Wi-Fi']:[])]:q.attributes.length?parameterConcepts(q).map(id=>concepts.find(c=>c.id===id).words[0]):q.categories.map(c=>({manual:'说明书',spec:'规格书',firmware:'固件',software:'软件',video:'视频'}[c]));
@@ -250,7 +250,10 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   let parameter=(q.models.length?results:[]).filter(r=>parameterSourceAllowed(r)&&!parameterNote(r.text)&&(!numericParameterRequest(q)||parameterValue(q,r.text))&&(r.type==='parameter'||r.type==='passage'&&q.attributes.length&&parameterValue(q,r.text)&&matchesParameter(q,r.text)));
   const ambiguousParameterNumbers=parameter.some(parameterRowNumberGap);
   parameter=parameter.map(r=>parameterAnswerExcerpt(q,r)).filter(Boolean);
-  if(q.decision.answerNeed==='capability-confirmation')parameter=relevantEvidence(q.original,parameter,lookup,q.models,{semantic:true});
+  if(q.decision.answerNeed==='capability-confirmation'){
+   const relevant=new Set(relevantEvidence(q.original,parameter,lookup,q.models,{semantic:true}));
+   parameter=parameter.filter(r=>relevant.has(r)||!q.attributes.length&&r.field==='original-parameter-context'&&r.knowledgeUnit?.textBoundary?.startsWith('native-')&&matchesParameter(q,r.text)&&parameterValue(q,r.text));
+  }
   if(q.intent==='parameters'&&parameter.length){
    // Keep distinct conditions/editions, but do not repeat identical claim text.
    parameter=[...new Map(parameter.map(r=>[canonical(r.text).replace(/\s+/g,'')+'|'+JSON.stringify((r.conditions||[]).map(s=>canonical(s).replace(/\s+/g,'')))+'|'+(r.documentVersion||''),r])).values()];
@@ -273,7 +276,11 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   if(q.intent==='aftersales')reply.push(...aftersalesReply(q,results,facts));
   if(cases.length&&q.intent!=='aftersales'){reply.push('以下案例仅作条件参考，未确认的触发场景不能直接套用。');for(const r of cases.slice(0,2))reply.push(`${r.rankingSignals?.scene?.conditional?'场景未完全确认：':''}${r.name}\n适用条件：${JSON.stringify({models:r.modelIds||[],...r.scope})}\n历史记录：${r.historicalMeasure||r.text}\n来源：${(r.sources||[]).map(s=>s.name+(s.locator?' · '+JSON.stringify(s.locator):'')).join('；')||'已有案例索引'}`);}
   const docs=results.filter(r=>r.type==='document');if(docs.length&&!['operation','product'].includes(q.intent))reply.push('找到对应资料：'+docs.map(r=>r.name+(r.documentVersion?'（'+r.documentVersion+'）':'')).join('；')+'。'+(q.categories.includes('firmware')?'请提供接收卡当前实读版本、芯片完整型号及硬件条件，再核对所需固件系列；这些是候选文件，不是推荐互刷。':'可预览或下载核对原文。'));
-  if(!q.compatibility&&results.some(r=>r.type==='passage')&&!q.attributes.length&&!['chip','aftersales'].includes(q.intent)&&!(q.intent==='software-function'&&software.length&&q.decision.answerNeed==='software-overview'))for(const r of [...new Map(results.filter(r=>r.type==='passage').map(r=>[canonical(r.text),r])).values()].slice(0,2))reply.push('相关原文（适用条件待核对）：\n'+r.text+'\n来源：'+r.name+' · '+require('../../domain/knowledge/answer-guidance.cjs').sourceLocation(r.locator));
+  let passages=results.filter(r=>r.type==='passage'&&r.text);
+  const nativeRelevance=r=>(r.proximity?.nativeFieldMatches?.length||0)*2+(r.proximity?.lexicalMatches||[]).filter(s=>/[\u3400-\u9fff]/.test(s)).length;
+  const strongestNative=Math.max(0,...passages.map(nativeRelevance));
+  if(strongestNative)passages=passages.filter(r=>nativeRelevance(r)===strongestNative);
+  if(!q.compatibility&&passages.length&&!q.attributes.length&&!['chip','aftersales'].includes(q.intent)&&!(q.intent==='parameters'&&parameter.length)&&!(q.intent==='software-function'&&software.length&&q.decision.answerNeed==='software-overview'))for(const r of [...new Map(passages.map(r=>[canonical(r.text),r])).values()].slice(0,2))reply.push('相关原文（适用条件待核对）：\n'+r.text+'\n来源：'+r.name+' · '+require('../../domain/knowledge/answer-guidance.cjs').sourceLocation(r.locator));
   if(!['aftersales','parameters'].includes(q.intent))for(const r of results.filter(r=>r.type==='faq'))reply.push(`${r.faqExact?'已有FAQ标准答案（原问题完全匹配）':'FAQ原记录（适用条件待核对）'}：${r.standardQuestion}\n${r.standardAnswer}\n来源：${r.name}${r.locator?' · '+require('../../domain/knowledge/answer-guidance.cjs').sourceLocation(r.locator):''}`);
   let answerType=q.intent==='software-function'?software.length&&q.decision.answerNeed==='software-overview'?'software-function-answer':'insufficient-evidence':q.intent==='product'?'product-guide':q.intent==='parameters'?parameter.length?'parameter-answer':'insufficient-evidence':operations.length?'operation-excerpt':results.some(r=>r.type==='chip')?'chip-table':cases.length?'conditional-cases':results.length?'resource-evidence':'insufficient-evidence';
   if(!results.length&&!['product','software-function'].includes(q.intent)){answerType=failures.length?'service-unavailable':q.unknownModels.length?'entity-not-registered':q.intent==='clarify'&&!q.numeric?'unrecognized-intent':lists.some(l=>l.rows.length)||routeLog.operationManualCount||parameterNotes.length?'insufficient-evidence':'data-not-registered';if(q.intent!=='aftersales'||['service-unavailable','entity-not-registered'].includes(answerType))reply.push(answerType==='service-unavailable'?'资料数据服务暂不可用，暂时无法核对原文，请稍后重试。':answerType==='entity-not-registered'?'尚未登记或确认型号 '+q.unknownModels.join('、')+'，不会按相近型号替代。':answerType==='unrecognized-intent'?'还不能确认你要查询的方向。可以问产品参数、芯片智能设置、资料、操作、故障或工程配单。':answerType==='insufficient-evidence'?'已找到资料候选，但没有足够证据回答这个具体问题；请补充现场条件，不能把文件标题当成答案。':q.intent==='operation'?'没有找到能核验该操作步骤的已解析原文。请补充所用软件及版本，暂不编造步骤。':'当前登记数据中未查到满足这些精确条件的资料，请核对完整型号或芯片名称。');}
@@ -310,7 +317,7 @@ function parameterSearchTerms(q){
   if(/网口|ethernet|rj.?45|\bLAN\b/i.test(question))return ['网口'];
   for(const term of ['HUB75','HDMI','USB'])if(question.toUpperCase().includes(term))return [term];
  }
- return q.attributes.map(id=>id==='grayscale'?'灰度等级':concepts.find(c=>c.id===id)?.words[0]).filter(Boolean);
+ return q.attributes.length?q.attributes.map(id=>id==='grayscale'?'灰度等级':concepts.find(c=>c.id===id)?.words[0]).filter(Boolean):q.literals.slice(0,6);
 }
 function parameterConceptMatch(id,text){
  const value=norm(text).replace(/\s+/g,'');
@@ -318,6 +325,12 @@ function parameterConceptMatch(id,text){
 }
 function matchesParameter(q,text){
  const value=norm(text).replace(/\s+/g,'');
+ if(!q.attributes.length)return (q.literals||[]).some(term=>{
+  const literal=norm(term).replace(/\s+/g,'');
+  if(/^[a-z0-9_.+-]+$/i.test(literal))return value.includes(literal);
+  const grams=[...new Set(literal.match(/[\u3400-\u9fff]+/g)?.flatMap(word=>Array.from({length:Math.max(0,word.length-1)},(_,i)=>word.slice(i,i+2)))||[])];
+  return grams.filter(g=>value.includes(g)).length>=2;
+ });
  // Resolution is a pixel/load question. A board's physical dimensions are a
  // different field even though the parser groups both under "size".
  if(resolutionRequest(q))return /分辨率|resolution|像素|pixels|带载|万点|controlrange|load/i.test(value);
@@ -339,6 +352,8 @@ function parameterValue(q,text){
   if(parameterNote(line)||!matchesParameter(q,line))return false;
   let value=line;
   for(const id of q.models){const escaped=id.replace(/^HD-/, '').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');value=value.replace(new RegExp('(?:HD[-_ ]?)?'+escaped+'(?![a-z0-9])','gi'),'');}
+  // An explicit unlimited value is a source value, even without a digit.
+  if(/无(?:数量)?限制|不限制数量|数量不限|无上限|unlimited|no (?:quantity )?limit/i.test(value))return true;
   if(!/\d/.test(value))return false;
   if(/问题现象|解决方法|油画|跳灰|灰阶缺失|调试参数无反应|升级.{0,12}固件|修改.{0,12}gamma/i.test(value))return false;
   const compact=value.replace(/\s+/g,'');
@@ -386,7 +401,7 @@ function aftersalesFacts(q,prior){
  let normal=(out.knownNormal||[]).filter(s=>!(discoveryFailed&&/设备发现|找到设备|搜到设备|设备.*(?:找到|搜到|发现)/.test(s))&&!(sendFailed&&/发送|发布/.test(s)));
  for(const clause of [...clauses,...normal.map(canonical)]){
   if(!discoveryFailed&&/(?:能|可以|已|已经|正常).{0,4}(?:找到|搜到|发现|识别)(?:了)?(?:设备|控制卡)|(?:设备|控制卡).{0,4}(?:能找到|能搜到|已找到|已搜到)/.test(clause))normal.push('设备发现已成功');
-  if(!sendFailed&&/(?:发送|发布)(?:已|已经)?成功|(?:节目|内容)(?:已|已经)?(?:成功发送|发送成功)/.test(clause))normal.push('节目发送已成功');
+  if(!sendFailed&&/(?:发送|发布|发)(?:已|已经|也)?成功|(?:节目|内容)(?:已|已经)?(?:成功发送|发送成功)/.test(clause))normal.push('节目发送已成功');
  }
  if(normal.length||out.knownNormal?.length)out.knownNormal=unique(normal);
  const positive=clauses.filter(s=>!/(?:不是|并非|并不是|非)(?:整屏|全屏|局部)/.test(s));
@@ -486,7 +501,7 @@ function operationRequest(q){
 function operationCovers(text,groups){const body=compactOperation(text);return groups.every(words=>words.some(word=>body.includes(compactOperation(word))));}
 function operationSection(context,candidate,request){
  const unit=context.knowledgeUnit||candidate.knowledgeUnit;
- if(!candidate.unitId||unit?.id!==candidate.unitId||unit.kind!=='operation'||!unit.sourceSpans?.length||context.contextComplete!==true||!/^explicit-heading-continuous-section/.test(context.contextBoundary||unit.boundaryBasis||''))return null;
+ if(!candidate.unitId||unit?.id!==candidate.unitId||unit.kind!=='operation'||!unit.sourceSpans?.length||context.contextComplete!==true||!/^(?:explicit-heading-continuous-section|native-section-task)/.test(context.contextBoundary||unit.boundaryBasis||''))return null;
  if(!request.groups.length||/\.{6}|…{3}/.test(context.text))return null;
  const text=context.text,headings=[];
  const pattern=/^(?:[ \t]*)(第[^\n]{1,12}章[^\n]{0,65}|\d+(?:\.\d+)*(?:[.、．])?\s*[^\n]{1,65})[ \t]*$/gm;
@@ -494,14 +509,15 @@ function operationSection(context,candidate,request){
  const options=[];
  for(const [i,heading]of headings.entries()){
   const headingMatches=request.groups.filter(words=>operationCovers(heading.text,[words])).length;
-  if(!headingMatches)continue;
+  const nativeTask=unit.boundaryBasis==='native-section-task'&&unit.sectionPath?.at(-1)?.trim()===heading.text.trim();
+  if(!headingMatches&&!nativeTask)continue;
   const next=headings.slice(i+1).find(h=>h.level<=heading.level),end=next?.start??text.length;
   const section=text.slice(heading.start,end).trim();
   if(section.length>1800||section.length<=heading.text.length||!operationCovers(section,request.groups))continue;
   // Keep prerequisites, following steps and warnings together. The role unit
   // can be text-complete while diagrams still contain unparsed UI instructions.
   const action=/(?:点击|选择|打开|勾选|进入|按下|单击|插入|发送|拷贝)|导出.{0,12}(?:节目|文件|参数)/.test(section);
-  if(!action&&!/如图|图\s*\d/.test(section))continue;
+  if(!action&&!/如图|图\s*\d/.test(section)&&!nativeTask)continue;
   let at=0;const spans=unit.sourceSpans.filter(p=>{const low=at;at+=p.end-p.start+1;return at>heading.start&&low<end;});
   options.push({text:section,sectionFocused:true,operationSectionMatch:true,operationHeadingMatches:headingMatches,operationVisualOnly:!action,operationSectionStart:heading.start,...(spans[0]?.locator?{locator:spans[0].locator}:{}),excerptSourceSpans:spans});
  }
@@ -534,7 +550,10 @@ function rank(q,lists,lookup,filtered={},audit=[]){
   if(q.deniedFault&&r.type==='case'){reject('negated-fault-request');continue;}
   if(q.versions.length&&!q.versions.every(v=>{const known=v.kind==='hardware'?r.scope?.hardwareVersions||[]:v.kind==='firmware'?r.scope?.firmwareVersions||[]:v.kind==='software'?r.scope?.softwareVersions||[]:[...(r.versions||[]),r.documentVersion].filter(Boolean);return known.some(x=>norm(x).replace(/^v/,'')===norm(v.value).replace(/^v/,''));})){reject('unverified-version-constraint');continue;}
   const sourceChips=r.chips||r.scope?.chips||(all.match(/\b(?:ICND?|SM|FM|LS|DP|MBI|TC|RUL|RUC)\d{3,5}[A-Z0-9]*\b/gi)||[]);
+  if(q.intent==='aftersales'&&q.symptoms.includes('red-dots')&&!matchesConcept('red-dots',r.phenomenon||r.standardQuestion||body)){reject('different-distinctive-symptom');continue;}
+  if(q.intent==='aftersales'&&/屏|模组|区域|几行|几排|右边|左边/.test(q.original)&&!/指示灯|状态灯|运行灯|GPS|\bRUN\b/i.test(q.original)&&/指示灯|运行灯|GPS\s*指示|\bRUN\b/i.test(body)&&!/(?:屏幕|屏体|模组|显示屏).{0,15}(?:闪|黑|异常|发绿|不亮)/.test(body)){reject('indicator-not-screen-symptom');continue;}
   if(q.chips.length&&sourceChips.length&&!q.chips.some(c=>sourceChips.some(k=>norm(k)===norm(c)))){reject('different-chip');continue;}
+  if(q.intent==='aftersales'&&q.chips.length&&!sourceChips.length&&r.type==='passage'&&!r.referenceOnly){reject('chip-scope-not-established');continue;}
   if(r.type==='faq'&&q.intent==='operation'&&q.operation?.terms?.length){const question=norm(r.standardQuestion||'');const taskConcepts=q.concepts.filter(id=>['password','power-schedule','brightness','usb','program-cycle'].includes(id));if(taskConcepts.length&&!taskConcepts.every(id=>matchesConcept(id,question))){reject('faq-other-task');continue;}}
   if(q.software.length&&['operation','aftersales'].includes(q.intent)&&r.type==='faq'&&!q.software.some(name=>norm((r.name||'')+' '+(r.standardQuestion||'')).includes(norm(name)))){reject('faq-software-not-established');continue;}
   if(q.intent==='aftersales'&&q.symptoms.length&&r.type==='case'&&!q.symptoms.some(id=>matchesConcept(id,(r.name||'')+' '+(r.phenomenon||'')))){reject('case-symptom-only-in-remedy');continue;}
@@ -567,7 +586,7 @@ function rank(q,lists,lookup,filtered={},audit=[]){
   const languagePreference=r.type==='parameter'?(/英文|english/i.test(q.original)?(!/[\u4e00-\u9fff]/.test(r.text)?4:0):/[\u4e00-\u9fff]/.test(r.text)?4:0):r.category==='video'?(/英文|english/i.test(q.original)?(/英文|english|\(英\)/i.test(r.name)?4:0):!/英文|english|印尼|西班牙|葡萄牙|\(英\)/i.test(r.name)?4:0):0;
   if(videoTask)signals.videoTask=videoTask;
   const score=(r.softwareAssociation?30:0)+languagePreference+(videoTask?videoTask.score:0)+modelMatch.length*12+(signals.structured?12:0)+signals.coverage*10+titleHits.length*2+(signals.categoryMatch?8:0)+literalHits.length+(r.type==='case'&&q.symptoms.length?5:0)+(r.faqExact?20:0)+(['chip','operation'].includes(r.type)?40:0)+(r.sectionFocused?20:0)+(r.operationSectionMatch?20:0)+(r.chipIdentityLinked?8:0)+(['case','operation','passage'].includes(r.type)?sceneSignals.score:0);
-  audit.push({...current,disposition:'ranked',score,signals});const existing=merged.get(key);if(existing){existing.rrf+=1/(60+i+1);existing.sources.add(list.source);}else merged.set(key,{candidate:r,signals,score,rrf:1/(60+i+1),sources:new Set([list.source])});
+  audit.push({...current,disposition:'ranked',score,signals});const existing=merged.get(key);if(existing){existing.rrf+=1/(60+i+1);existing.sources.add(list.source);if(score>existing.score){existing.candidate=r;existing.signals=signals;existing.score=score;}}else merged.set(key,{candidate:r,signals,score,rrf:1/(60+i+1),sources:new Set([list.source])});
  }
  return [...merged.values()].sort((a,b)=>b.score-a.score||b.rrf-a.rrf||a.candidate.name.localeCompare(b.candidate.name));
 }

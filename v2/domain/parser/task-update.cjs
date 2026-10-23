@@ -5,15 +5,26 @@ const {parseOrderingFields,geometryObservation,geometryDelta}=require('./orderin
 const leaves=(value,prefix='')=>Object.entries(value||{}).flatMap(([key,item])=>key==='provenance'?[]:item&&typeof item==='object'&&!Array.isArray(item)?leaves(item,prefix+'/'+key):[{path:prefix+'/'+key,value:item}]);
 function messageUpdate(text,task,{correction=false}={}){
  const delta=parseOrderingFields(text),geometry=geometryObservation(text);
- const structuredSpecification=!!(delta.module?.scan||delta.module?.interface||delta.screen?.moduleColumns||delta.screen?.moduleRows);
+ const spoken=require('./customer-meaning.cjs').spokenGeometry(text);
+ const relative=[...spoken.matchAll(/(宽|高)\s*(?:再)?\s*(增加|减少|加|减|多|少)\s*(\d+(?:\.\d+)?)\s*(块|张|列|行|像素|点|毫米|厘米|米)/g)];
+ let relativeError=null;
+ for(const change of relative){
+  const width=change[1]==='宽',unit=change[4],grid=/块|张|列|行/.test(unit),pixels=/像素|点/.test(unit);
+  const key=grid?(width?'moduleColumns':'moduleRows'):(pixels?'pixel':'physical')+(width?'Width':'Height')+(pixels?'':'Mm');
+  const previous=task?.ordering?.confirmed?.screen?.[key];
+  const amount=Number(change[3])*(grid||pixels?1:unit==='米'?1000:unit==='厘米'?10:1)*(/减|少/.test(change[2])?-1:1);
+  if(!Number.isFinite(previous)||previous+amount<=0){relativeError='这次是相对调整，但当前没有可用于计算的同单位原值，或调整后的值无效。请给出新的宽或高及单位。';continue;}
+  delta.screen??={};delta.screen[key]=previous+amount;delta.provenance??={};delta.provenance['/screen/'+key]={kind:'user-relative-update',text,previous,change:amount};
+ }
+ const structuredSpecification=!!(relative.length||delta.module?.scan||delta.module?.interface||delta.screen?.moduleColumns||delta.screen?.moduleRows);
  // Remove only geometric facts owned by this observation; the legacy direct
  // ordering endpoint keeps its schema and parser, while dialogue waits on units.
  if(geometry.values&&!structuredSpecification){for(const entity of ['screen','module'])for(const key of ['pixelWidth','pixelHeight','physicalWidthMm','physicalHeightMm']){
   if(delta[entity])delete delta[entity][key];delete delta.provenance?.['/'+entity+'/'+key];
  }for(const entity of ['screen','module'])if(delta[entity]&&!Object.keys(delta[entity]).length)delete delta[entity];}
  const commands={
-  correct:correction||/不对|说错|更正|改成|改为|换成|换为|调整为/.test(text),
-  negate:/^(?:不是|不要|不用|不使用|取消)/.test(text)&&!/[，,].*(?:改成|而是|是)/.test(text),
+  correct:correction||relative.length>0||/不对|说错|更正|改成|改为|换成|换为|调整为/.test(text),
+  negate:/^(?:不是|不要|不用|不使用|取消)/.test(text)&&!/[，,].*(?:改成|而是|是)/.test(text)&&!delta.controlMode,
   revert:/按之前那个|还是原来的|恢复原来的|撤销(?:刚才|上次)?(?:修改|更改)?|改回原来/.test(text),
   resume:/(?:继续|恢复|接着|回到)/.test(text)&&/(?:配|屏|方案|刚才|之前|上次)/.test(text),
   acknowledge:/^(?:是|这是|指的是|刚才说的是|我说的是|单位(?:是|为)|补充|补充的是)/.test(text),
@@ -67,6 +78,7 @@ function messageUpdate(text,task,{correction=false}={}){
   if(denied.length){pending=null;clarification=null;}
  }
  if(commands.correct&&!operations.length&&!geometry.values&&!geometry.unit){clarification='要更正哪项条件？请指出尺寸、分辨率、点间距、同步/异步或具体型号；已有条件先保留。';pending={...(pending||{}),correction:true};}
+ if(relativeError){clarification=relativeError;pending={...(pending||{}),correction:true};}
  return {delta,geometry,resolvedGeometry,pending,clarification,commands,operations,hasChanges:operations.length>0};
 }
 module.exports={messageUpdate,leaves};

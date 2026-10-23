@@ -19,6 +19,7 @@ import engine
 from catalog_metadata import analyze
 from current_documents import historical_locations
 import proximity
+import case_knowledge
 
 REVISION = 'role-shadow-3'
 DEFAULT_INDEX = getattr(engine, 'SOURCE_PROJECT', engine.PROJECT) / 'tmp/customer-service-20261023/role-index'
@@ -81,7 +82,7 @@ def body_role(name, meta):
         return 'operation'
     if re.search(r'FAQ|FQA|常见问题|问答', name, re.I):
         return 'faq'
-    if re.search(r'案例|售后|问题总结|问题汇总', name):
+    if re.search(r'案例|售后|问题总结|问题汇总|问题经验|经验分享', name):
         return 'case'
     # A filename remains an explicit, weaker classification basis.
     if re.search(r'规格书|specifications?', name, re.I):
@@ -135,7 +136,7 @@ def case_heading(line):
         return value
     numbered = re.match(r'^\d+(?:\.\d+)*(?:[、.．])?\s+(.+)$', value)
     if not numbered:
-        numbered = re.match(r'^\d+[、.．]([^\d\s].+)$', value)
+        numbered = re.match(r'^\d+[、.．]\s*(.+)$', value)
     if not numbered:
         return None
     title = numbered[1].strip()
@@ -148,7 +149,7 @@ def case_heading(line):
     return value if re.search(r'问题|故障|异常|案例|闪屏|闪烁|黑屏|花屏|白屏|不亮|乱码|掉线|死机|偏色|色差', title) else None
 
 
-def case_sections(text):
+def case_sections(text, heading_offsets=None):
     """Keep title and conditions with a case; never merge sibling records."""
     lines, cursor = [], 0
     for line in text.splitlines(keepends=True):
@@ -156,7 +157,7 @@ def case_sections(text):
         cursor += len(line)
     markers = []
     for i, (start, end, line) in enumerate(lines):
-        title = case_heading(line)
+        title = line.strip() if heading_offsets is not None and start in heading_offsets else None if heading_offsets is not None else case_heading(line)
         if title is None:
             continue
         # A short chip grouping label immediately before a numbered title belongs
@@ -184,8 +185,29 @@ def case_sections(text):
             yield start, min(header_end, end), end, title
 
 
-def units_for(blocks, role):
+def units_for(blocks, role, case_heading_paragraphs=None):
     """Return literal source spans, with honest automatically inferred boundaries."""
+    if blocks and all(json.loads(b['locator']).get('structure') == 'native-paragraphs-1' for b in blocks):
+        import paragraphs
+        yield from paragraphs.units_for(blocks, role)
+        return
+    if role == 'faq' and any('row' in json.loads(b['locator']) for b in blocks):
+        headers = {}
+        for b in blocks:
+            loc = json.loads(b['locator']); cells = loc.get('cells')
+            if not isinstance(cells, list):
+                continue
+            sheet = loc.get('sheet', '')
+            if loc.get('row') == 1:
+                headers[sheet] = case_knowledge.faq_columns(cells)
+                continue
+            columns = headers.get(sheet)
+            p = span(b)
+            if columns and columns['question']:
+                p['recordFields'] = columns
+            yield {'spans':[p], 'heading':'', 'complete':False, 'basis':'native-faq-row;question-and-site-trigger;answer-unverified',
+                   'toc':False, **({'matchText':case_knowledge.faq_mask(b['text'],cells,columns)} if columns and columns['question'] else {})}
+        return
     if role == 'parameter':
         # Native rows stay individual. PDF chunks sharing a page stay together:
         # parameter, maximum/recommended values and notes remain one source window.
@@ -279,20 +301,31 @@ def units_for(blocks, role):
                 yield from units_for(pending, role)
             return
         text = '\n'.join(b['text'] for b in blocks)
-        sections = list(case_sections(text))
+        offsets = None
+        if case_heading_paragraphs:
+            offsets, cursor = set(), 0
+            for b in blocks:
+                if json.loads(b['locator']).get('paragraph') in case_heading_paragraphs:
+                    offsets.add(cursor)
+                cursor += len(b['text'])+1
+        sections = list(case_sections(text, offsets))
         if sections:
             if sections[0][0] > 0:
                 yield {'spans': extract_spans(blocks, 0, min(sections[0][0], MAX_UNIT)),
                        'heading': '', 'complete': False,
                        'basis': 'case-document-prefix-not-record', 'toc': False}
             for start, header_end, end, title in sections:
-                for low in range(start, end, MAX_UNIT):
+                # Native Word subheadings define one complete text case. Large
+                # reads paginate that unit; legacy unverified windows retain
+                # their conservative boundary contract.
+                unit_size = max(1,end-start) if offsets is not None else MAX_UNIT
+                for low in range(start, end, unit_size):
                     prefix = extract_spans(blocks, start, header_end) if low > start else []
                     for p in prefix:
                         p['role'] = 'condition'
-                    yield {'spans': prefix + extract_spans(blocks, low, min(low + MAX_UNIT, end)),
+                    yield {'spans': prefix + extract_spans(blocks, low, min(low + unit_size, end)),
                            'heading': title, 'complete': False,
-                           'basis': 'explicit-case-heading-continuous-section;source-outcome-unverified' + (';window-limited' if end - start > MAX_UNIT else ''), 'toc': False}
+                           'basis': 'explicit-case-heading-continuous-section;source-outcome-unverified' + (';native-word-heading' if offsets is not None else ';window-limited' if end - start > MAX_UNIT else ''), 'toc': False}
             return
     for b in blocks:
         loc = json.loads(b['locator'])
@@ -300,7 +333,7 @@ def units_for(blocks, role):
                'basis': 'native-row' if 'row' in loc else 'parsed-original-fragment', 'toc': False}
 
 
-def build(work=engine.DEFAULT_WORK, folder=DEFAULT_INDEX, replace=False):
+def build(work=engine.DEFAULT_WORK, folder=DEFAULT_INDEX, replace=False, selected_names=None):
     started = time.perf_counter()
     target = index_path(folder)
     if target.exists() and not replace:
@@ -329,7 +362,7 @@ def build(work=engine.DEFAULT_WORK, folder=DEFAULT_INDEX, replace=False):
         CREATE VIRTUAL TABLE unit_fts USING fts5(title,path,heading,body,keywords);
         ''')
         locations = [dict(r) for r in source.execute("SELECT * FROM locations WHERE state='present' AND kind!='sensitive-metadata-only'")
-                     if r['kind'] == 'document' or file_role(r) != 'document']
+                     if (r['kind'] == 'document' or file_role(r) != 'document') and (selected_names is None or r['name'] in selected_names)]
         by_hash = collections.defaultdict(list)
         for row in locations:
             if row['kind'] == 'document' and row['sha256']:
@@ -368,7 +401,7 @@ def build(work=engine.DEFAULT_WORK, folder=DEFAULT_INDEX, replace=False):
             # Repeated document headers/footers are navigation, not an answer to
             # a technical keyword (for example the company name contains 灰度).
             # Mask them for ranking while preserving literal source text/offsets.
-            match_body = ''.join(ranking_line(line,repeated_lines) for line in body.splitlines(keepends=True))
+            match_body = ''.join(ranking_line(line,repeated_lines) for line in definition.get('matchText',body).splitlines(keepends=True))
             uid = hashlib.sha256(J([REVISION, key, role, spans, name if meta else None]).encode('utf8')).hexdigest()
             kind = 'file' if meta else 'passage'
             models = sorted(engine.model_tokens(body))
@@ -393,7 +426,12 @@ def build(work=engine.DEFAULT_WORK, folder=DEFAULT_INDEX, replace=False):
             name = rows[0]['name']
             paths = '\n'.join(r['path'] for r in rows)
             role = body_role(name, metadata[sha])
-            for definition in units_for(blocks, role):
+            native_case_headings = None
+            if role == 'case' and Path(rows[0]['path']).suffix.lower() == '.docx':
+                original = Path(rows[0]['path'])
+                if original.is_file() and engine.digest(original) == sha:
+                    native_case_headings = case_knowledge.docx_headings(original)
+            for definition in units_for(blocks, role, native_case_headings):
                 add(sha, role, definition, name, paths, blocks)
         seen = set()
         for row in locations:
@@ -419,7 +457,7 @@ def build(work=engine.DEFAULT_WORK, folder=DEFAULT_INDEX, replace=False):
                    'elapsedMs':round((time.perf_counter()-started)*1000,3),
                    'limits':['No source scan, OCR, model call or source modification.',
                              'Role and section boundaries are deterministic candidates, not reviewed engineering facts.',
-                             'PDF parameter windows preserve literal text, not validated table geometry.',
+                             'Native table cells/geometry are present only in structured locators; legacy PDF windows remain unverified.',
                              'Unparsed images, missing pages and visual instructions remain unverified.']}
         shadow.execute('INSERT INTO meta VALUES(?,?)',('build',J(receipt)))
         shadow.commit()
@@ -496,19 +534,37 @@ def restore(db, source, row, where, args):
             'uses':[row['role']], 'boundaryBasis':row['basis'], 'complete':bool(row['complete']),
             'bodyParsed':bool(spans), 'compatibilityConfirmed':False,
             'sourceSpans':spans, 'readAuthority':'caller-scope-required;not-a-public-read-token'}
+    structured = [p['locator'] for p in parts if p['locator'].get('structure') == 'native-paragraphs-1']
+    if structured:
+        unit.update({'uses': sorted({row['role']} | {use for loc in structured for use in loc.get('uses', [])}),
+                     'sectionPath': next((loc.get('sectionPath', []) for loc in reversed(structured)), []),
+                     'subjects': sorted({loc['contextSubject'] for loc in structured if loc.get('contextSubject')}),
+                     'visualContextRequired': any(loc.get('visualContextRequired', False) for loc in structured),
+                     'textBoundary': 'native-paragraph-table-or-task;not-visually-reviewed'})
+    if row['role'] == 'case':
+        unit['caseFields'] = case_knowledge.case_fields('\n'.join(p['text'] for p in parts))
+    if row['role'] == 'faq':
+        fields = next((p['recordFields'] for p in spans if p.get('recordFields')), None)
+        if fields and parts:
+            unit['faqFields'] = case_knowledge.faq_fields(parts[0]['locator'].get('cells', []), fields)
     return sources,parts,unit
 
 
 def search(work, folder=DEFAULT_INDEX, query='', role='all', concepts=None, models=None,
-           documents=None, authorized_keys=None, limit=4, version=None):
+           documents=None, authorized_keys=None, limit=4, version=None, chips=None):
     started = time.perf_counter()
     if not isinstance(query,str) or not 1<=len(query)<=240 or role not in ROLES|{'all','text','products','cases'}:
         raise ValueError('invalid-role-query')
     models = [engine.normalize_model(x) for x in validated_list(models or [],'models',4)]
     documents = validated_list(documents,'documents',4)
     authorized_keys = validated_list(authorized_keys,'authorized-keys')
+    chips = [str(x).upper() for x in validated_list(chips or [], 'chips', 6)]
     groups = proximity.concepts_for(query, concepts)
     terms = list(dict.fromkeys(engine.fts_tokens(' '.join([query]+[word for group in groups for word in group])).split()))
+    if len(terms)>1 and (models or documents):
+        # The brand prefix appears in nearly every file title. Exact document/
+        # model scope already carries it; it is not a technical search topic.
+        terms = [term for term in terms if term != 'hd']
     match = ' OR '.join('"'+t.replace('"','""')+'"' for t in terms)
     if not match:
         return {'results':[],'candidateCount':0,'elapsedMs':0,'semantics':REVISION}
@@ -525,14 +581,36 @@ def search(work, folder=DEFAULT_INDEX, query='', role='all', concepts=None, mode
         ranked = []
         for row in rows:
             sources,parts,unit = restore(db,source,row,where,args)
+            case_match = case_knowledge.compare(query, unit['caseFields'], chips) if unit.get('caseFields') else None
+            if case_match and case_match['conflictingFields']:
+                continue
             text = '\n'.join(p['text'] for p in parts)
             if row['kind']=='file':
                 text = sources[0]['name']+'\n'+sources[0]['path']
+            if chips and not case_match:
+                chip_text = row['match_text'] if row['role'] == 'faq' else text
+                if not set(chips).issubset({m.upper() for m in case_knowledge.CHIP.findall(chip_text)}):
+                    continue
             window = proximity.best_window(row['match_text'] if parts else text,groups,900)
             coverage = window['coverage'] if window else 0
+            native = any(p['locator'].get('structure') == 'native-paragraphs-1' for p in parts)
+            lexical, fields = [], []
+            if native:
+                # Phrase boundaries in a customer's question are not hard
+                # constraints. Native labels and character n-grams can recall
+                # "显卡要求" -> table label "显卡", while models remain in the
+                # independent, exact source_where constraint above.
+                wanted = set(engine.fts_tokens(query).split()) - {m.lower() for m in models} - {'hd'}
+                available = set(engine.fts_tokens(row['match_text']).split())
+                lexical = sorted(wanted & available)
+                compact = re.sub(r'\s+', '', query).casefold()
+                fields = [r[0] for p in parts for r in p['locator'].get('cells', [])
+                          if r and isinstance(r[0], str) and 1 < len(r[0]) <= 40 and re.sub(r'\s+', '', r[0]).casefold() in compact]
+                if not window and (fields or len(lexical) >= 2):
+                    window = {'start':0, 'end':min(900,len(text)), 'span':min(900,len(text)), 'coverage':0}
             # A matching model in a title is useful file navigation, but cannot
             # satisfy an unrelated operation/parameter body request by itself.
-            if not coverage:
+            if not coverage and not (native and (fields or len(lexical) >= 2)):
                 continue
             present = engine.model_tokens(text) & engine.known_product_models()
             if models and present and not set(models).intersection(present):
@@ -546,8 +624,10 @@ def search(work, folder=DEFAULT_INDEX, query='', role='all', concepts=None, mode
                 'locations':[{'id':s['id'],'path':s['path'],'name':s['name'],'resource_id':s['resource_id'],'version_id':s['version_id']} for s in sources],
                 'versions':re.findall(r'(?i)\bV\d+(?:\.\d+)+',sources[0]['name']),
                 'mentionedModels':sorted(present),'knowledgeUnit':unit,'score':-row['rank'],
+                **({'caseMatch':case_match} if case_match else {}),
                 'constraints':{'requestedModels':models,'mentionedModels':sorted(present),'compatibilityConfirmed':False},
                 'proximity':{'conceptCount':len(groups),'matchedConcepts':coverage,'spanChars':window['span'] if window else 0,
+                    **({'lexicalMatches':lexical,'nativeFieldMatches':fields,'matchBasis':'literal-phrase-or-native-label-and-ngram;not-semantic-proof'} if native else {}),
                     'contextBoundary':row['basis'],'totalContextChars':len(text),'excerptStart':low,'excerptEnd':high,
                     'contextBlockIds':[p['blockId'] for p in parts],'boundaryWindowLimited':not bool(row['complete']),
                     'hits':[]}}
@@ -556,9 +636,9 @@ def search(work, folder=DEFAULT_INDEX, query='', role='all', concepts=None, mode
                                'readMore':'/role/read?unit='+row['uid']})
             else:
                 result['locationId'] = sources[0]['id']
-            ranked.append(((row['toc'],-coverage,row['rank']),result))
+            ranked.append(((row['toc'],-case_match['score'] if case_match else 0,-(len(lexical)+len(fields) if native else coverage),row['rank']),result))
         ranked.sort(key=lambda item:item[0])
-        return {'results':[r for _,r in ranked[:max(1,min(int(limit),10))]],'candidateCount':len(rows),
+        return {'results':[r for _,r in ranked[:max(1,min(int(limit),32))]],'candidateCount':len(rows),
                 'elapsedMs':round((time.perf_counter()-started)*1000,3),'semantics':REVISION+';source-role-fields;permission-before-limit;not-compatibility'}
     finally:
         source.close()

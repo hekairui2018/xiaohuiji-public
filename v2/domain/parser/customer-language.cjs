@@ -29,7 +29,7 @@ function expertTaskContext(state){
 }
 function diagnosticContext(message,state,route){
  const task=expertTaskContext(state),hint=route?.hintIntent||route?.intent;
- const faultWords=/黑屏|花屏|闪烁|闪屏|颜色不正常|局部异常|异常位置|不亮/;
+ const faultWords=/黑屏|花屏|闪烁|闪屏|还闪|发绿|发红|颜色不正常|局部异常|异常位置|不亮/;
  const followup=/下一步|接下来|继续|先.{0,8}(?:查|核对)|排线|互换|重插|直连|直接接|异常位置|试过|更换|替换|跟着|跟随|移动|恢复|还是/;
  const previous=(state.messages||[]).filter(m=>m.role==='user').map(m=>m.content);if(previous.at(-1)===message)previous.pop();
  // A diagnostic task survives a short technical follow-up. Independent product,
@@ -42,10 +42,10 @@ function diagnosticContext(message,state,route){
  const changedObject=currentModels.length&&priorModels.length&&!currentModels.some(m=>priorModels.includes(m));
  const quotes=[...(!changedObject&&related||!changedObject&&hint==='aftersales'?prior:[]),message].slice(-6);
  const text=quotes.join('；');
- let symptomDomain=null;for(const quote of quotes){if(/黑屏|花屏|闪屏|闪烁|颜色不正常|局部异常|异常位置|(?:屏|模组).{0,8}不亮/.test(quote))symptomDomain='screen-display';if(/(?:连不上|找不到|搜不到|搜索不到).{0,8}(?:设备|控制卡)|(?:节目|发送).{0,8}(?:失败|不成功)/.test(quote))symptomDomain='software-or-delivery';}
+ let symptomDomain=null;for(const quote of quotes){if(faultWords.test(quote)||/(?:屏|模组).{0,8}不亮/.test(quote))symptomDomain='screen-display';if(/(?:连不上|找不到|搜不到|搜索不到).{0,8}(?:设备|控制卡)|(?:节目|发送).{0,8}(?:失败|不成功)/.test(quote))symptomDomain='software-or-delivery';}
  let topology=null;
  for(const clause of text.split(/[，。；;！!?？]/)){
-  if(/^(?:不是|没有|未|还没|不接)/.test(clause.trim())){if(/(?:外接|独立).{0,12}接收卡/.test(clause))topology=null;continue;}
+  if(/^(?:不是|没有|未|还没|不接)/.test(clause.trim())){if(/(?:外接|独立).{0,12}接收卡/.test(clause)&&topology==='independent-receiver')topology=null;continue;}
   if(/如果|假如|假设|要是|若|是不是|是否|会不会|可能|或许|也许/.test(clause)||/[吗么]\s*$/.test(clause))continue;
   if(/(?:外接|独立|级联|串接).{0,12}接收卡|(?:用|接|带).{0,8}R\d{3}[A-Z]?/i.test(clause))topology='independent-receiver';
   if(/(?:直连|直接带|直接接|板载).{0,12}模组/.test(clause))topology='controller-direct-to-module';

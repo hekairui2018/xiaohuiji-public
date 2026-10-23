@@ -55,18 +55,18 @@ function createExpertEvidence({request,searchCases,caseMap,clean,location,defaul
   let raw,roleUsed=false;
   // In the Python contract an omitted document filter means unrestricted names;
   // [] explicitly permits none. File navigation must also include metadata roles.
-  if(roleIndexEnabled&&roleRequest&&!chips.length&&!args.version){try{raw=await roleRequest('/role/search',{q:args.query,role:kind==='files'?'all':({products:'parameter',cases:'case'})[scope]||scope,concepts,models,...(args.documents!==undefined?{documents:args.documents}:{}),limit:4});if(!Array.isArray(raw.results)||raw.results.some(r=>!r.knowledgeUnit?.id||r.unitId!==r.knowledgeUnit.id||!Array.isArray(r.knowledgeUnit.sourceSpans)))throw Error('role-index-invalid');roleUsed=true;}catch{raw=null;}}
+  if(roleIndexEnabled&&roleRequest&&(!chips.length||scope==='cases')&&!args.version){try{raw=await roleRequest('/role/search',{q:args.query,role:kind==='files'?'all':({products:'parameter',cases:'case'})[scope]||scope,concepts,models,...(chips.length?{chips}:{}),...(args.documents!==undefined?{documents:args.documents}:{}),limit:4});if(!Array.isArray(raw.results)||raw.results.some(r=>!r.knowledgeUnit?.id||r.unitId!==r.knowledgeUnit.id||!Array.isArray(r.knowledgeUnit.sourceSpans)))throw Error('role-index-invalid');roleUsed=true;}catch{raw=null;}}
   if(!raw)raw=await request('/proximity/search?'+params);
   // The role index has source-bound case boundaries. Do not mix its units with
   // older derived case records whose original boundaries were not verified.
   if(roleUsed&&kind==='cases')candidates.length=0;
   for(const r of raw.results||[]){const id=stableId(roleUsed?['unit',r.sha256,r.unitId]:['passage',r.sha256,r.blockId,r.readAnchor]),loc=r.locations?.[0],readAvailable=Number.isInteger(r.blockId)&&r.blockId>0;
-   const e={evidenceId:id,blockId:r.blockId,name:clean(r.name),text:clean(r.text),locator:location(r.locator),modelIds:r.constraints?.mentionedModels||[],scope:r.constraints,verificationStatus:'original-passage-not-compatibility',download:loc?fileUrl(loc.id,r.name):null,readAvailable,sourceKind:roleUsed?'role-index-original':'parsed-original',proximity:r.proximity||{matchedConcepts:0,spanChars:0},readAnchor:r.readAnchor,originalFileLocated:!!loc,...(roleUsed?{knowledgeUnit:r.knowledgeUnit,role:r.role,unitId:r.unitId,sha256:r.sha256}: {})};
+   const e={evidenceId:id,blockId:r.blockId,name:clean(r.name),text:clean(r.text),locator:location(r.locator),modelIds:r.constraints?.mentionedModels||[],scope:r.constraints,verificationStatus:'original-passage-not-compatibility',download:loc?fileUrl(loc.id,r.name):null,readAvailable,sourceKind:roleUsed?'role-index-original':'parsed-original',proximity:r.proximity||{matchedConcepts:0,spanChars:0},readAnchor:r.readAnchor,originalFileLocated:!!loc,...(roleUsed?{knowledgeUnit:r.knowledgeUnit,role:r.role,unitId:r.unitId,sha256:r.sha256,...(r.caseMatch?{caseMatch:r.caseMatch}: {})}: {})};
    // If two cases share a parsed block, each gets its own authorized read handle.
    const handle=1_000_000_000+(++sequence);e.blockId=handle;
    if(readAvailable)authorized.set(handle,{kind:roleUsed?'role':'original',sourceBlock:r.blockId,anchor:r.readAnchor,e});else e.blockId=null;candidates.push(e);
   }
-  candidates.sort((a,b)=>(b.proximity.matchedConcepts-a.proximity.matchedConcepts)||(a.proximity.spanChars-b.proximity.spanChars));
+  if(!roleUsed)candidates.sort((a,b)=>(b.proximity.matchedConcepts-a.proximity.matchedConcepts)||(a.proximity.spanChars-b.proximity.spanChars));
   const selected=candidates.slice(0,4);
   for(const e of selected)if(e.blockId)issued.add(e.blockId);
   for(const e of selected){const source=authorized.get(e.blockId);if(!source||source.kind!=='original')continue;

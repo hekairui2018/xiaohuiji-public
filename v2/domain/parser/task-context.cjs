@@ -37,7 +37,7 @@ function decideTask(message,lookup,state={}){
  const planning=require('../ordering/planning-inference.cjs').planningPreference(text);
  update.planningPreference=planning;
  const raw=chatIntent(text,lookup),decision=raw.decision;
- const resume=/(?:继续|恢复|接着|回到)/.test(text)&&/(?:配|屏|方案|刚才|之前|上次)/.test(text);
+ const resume=/(?:继续|恢复|接着|回到)(?!播|显示|运行)/.test(text)&&/(?:配|屏|方案|刚才|之前|上次)/.test(text);
  const cancel=/^(?:取消|结束|停止|放弃)(?:当前|这个|刚才的)?(?:配单|任务|方案)[。！!\s]*$/.test(text);
  const correction=/(?:不是|改成|改为|改用|更正|说错|不对)/.test(text);
  // Contrast grammar only exposes the positive replacement; preserve the
@@ -56,7 +56,7 @@ function decideTask(message,lookup,state={}){
  const hasSlots=fields.length>0||update.operations.some(o=>['clear','exclude'].includes(o.op))||Object.values(delta.provenance||{}).some(p=>p.kind==='user-negated');
  const independent=['resources','parameters','operation','compatibility','aftersales','software-function','service','chip','product','technical'].includes(raw.intent);
  const explicitQuery=raw.models.length&&!update.commands.correct||raw.software?.length||/[?？]|多少|多大|怎么|如何|查|找|下载|给我|发我|规格书|说明书|灰阶|闪屏|黑屏|打不开/.test(text);
- const fieldReply=active?.type==='ordering'&&!explicitQuery&&(update.geometry.values||update.geometry.unit||update.commands.correct||update.commands.revert||update.commands.complete||update.commands.approve);
+ const fieldReply=active?.type==='ordering'&&!explicitQuery&&(hasSlots||update.geometry.values||update.geometry.unit||update.commands.correct||update.commands.revert||update.commands.complete||update.commands.approve);
  const queryAct=!fieldReply&&['query-parameters','find-resources','guide-operation','confirm-compatibility','troubleshoot','ask-software-function','request-service'].includes(decision.action);
  const feedback=active&&!hasSlots&&!raw.models.length&&!queryAct&&/^(?:(?:这个|这|回答|答复|方案|感觉|还是|有点|我觉得)\s*)*(?:(?:不太|不够|不怎么|不|太)(?:行|满意|合适|准确|清楚)|答错了?|没看懂|看不懂)[啊呀呢吧了。！!\s]*$/.test(text);
  let relation='NEW_TOPIC',target=null,reason='independent-request',needsInput=false;
