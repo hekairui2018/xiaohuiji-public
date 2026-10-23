@@ -20,7 +20,7 @@ function createParagraphEvidence({resourceBase,authorizedDocuments}){
  function evidence(row){return {
   name:row.name,sha256:row.sha256,text:row.kind==='file'?'':row.text,
   unitId:row.unitId,blockId:row.blockId,role:row.role,kind:row.kind,
-  evidenceId:'unit-'+row.unitId,locator:row.locator,versions:row.versions||[],
+  evidenceId:'unit-'+row.unitId,locator:row.knowledgeUnit?.sourceSpans?.find(s=>s.role==='body'&&s.locator)?.locator||row.locator,versions:row.versions||[],
   mentionedModels:row.mentionedModels||[],knowledgeUnit:row.knowledgeUnit,
   sourceStatus:row.kind==='file'?'registered-metadata-only':'original-structured-text',
   bodyParsed:row.knowledgeUnit?.bodyParsed===true,compatibilityConfirmed:false,
@@ -33,7 +33,10 @@ function createParagraphEvidence({resourceBase,authorizedDocuments}){
   const byHash=new Map();
   for(const r of grants){if(!byHash.has(r.sha256))byHash.set(r.sha256,new Set());byHash.get(r.sha256).add(r.name);}
   const role=options.role||({products:'parameter',firmware:'firmware',cases:'case',faq:'faq',video:'video',files:'all',resources:'all'})[kind]||'text';
-  const data=await request('/role/search',{q:query,role,concepts:options.concepts,models:options.models||[options.model].filter(Boolean),
+  const proposed=options.concepts?.length?options.concepts:String(query).match(/[A-Za-z0-9]+(?:[-_.+][A-Za-z0-9]+)*|[\u3400-\u9fff]{2,8}/g)||[];
+  const concepts=[...new Set(proposed.filter(w=>typeof w==='string'&&w.trim()&&w.length<=32).map(w=>w.trim()))].slice(0,6);
+  if(!concepts.length)return {results:[],candidateCount:0,elapsedMs:0};
+  const data=await request('/role/search',{q:String(query).slice(0,240),role,concepts,models:options.models||[options.model].filter(Boolean),
    documents:options.documents,authorized_keys:[...byHash.keys()],limit:Math.min(options.limit||6,32),version:options.version,chips:options.chips});
   const seen=new Set();
   const results=(data.results||[]).flatMap(row=>{
@@ -50,9 +53,10 @@ function createParagraphEvidence({resourceBase,authorizedDocuments}){
   if(!grants.some(r=>r.name===candidate.name&&r.sha256===candidate.sha256))throw Error('paragraph-source-not-authorized');
   const raw=await request('/role/read',{unit:candidate.unitId,offset,authorized_keys:[candidate.sha256]});
   if(raw.knowledgeUnit?.documentId!==candidate.sha256||raw.knowledgeUnit?.id!==candidate.unitId)throw Error('paragraph-source-identity-conflict');
+  let textOffset=0;const contextParts=(raw.blocks||[]).map(b=>{const part={blockId:b.blockId,locator:b.locator,charStart:b.charStart,charEnd:b.charEnd,textStart:textOffset,textEnd:textOffset+b.text.length};textOffset+=b.text.length+1;return part;});
   return {text:(raw.blocks||[]).map(b=>b.text).join('\n'),knowledgeUnit:raw.knowledgeUnit,contextBoundary:raw.boundary,
    contextComplete:raw.nextOffset===null,nextOffset:raw.nextOffset,totalChars:raw.totalChars,
-   contextParts:(raw.blocks||[]).map(b=>({blockId:b.blockId,locator:b.locator,charStart:b.charStart,charEnd:b.charEnd}))};
+   contextParts};
  }
  return {search,read};
 }

@@ -7,6 +7,7 @@ function parseOrderingFields(text){
  const fields={},module={},screen={},provenance={},requirements={};
  const set=(target,key,value,match,prefix)=>{target[key]=value;provenance[prefix+'/'+key]={kind:'user-stated',text:match[0]};};
  let m=text.match(/\bP\s*(\d+(?:\.\d+)?)/i);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');
+ if(!m){m=text.match(/(?:户外|户内|室内|室外)\s*(\d+(?:\.\d+)?)\s*(?=[，,。；\s]|模组|全彩)/);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');}
  m=text.match(/点间距\s*(?:是|为)?\s*(\d+(?:\.\d+)?)\s*(?:毫米|mm)/i);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');
  m=text.match(/模组(?:的)?(?:物理)?尺寸\s*(?:是|为)?\s*[:：]?\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|毫米|cm|厘米)/i);if(m){const factor=/cm|厘米/i.test(m[3])?10:1;set(module,'physicalWidthMm',Number(m[1])*factor,m,'/module');set(module,'physicalHeightMm',Number(m[2])*factor,m,'/module');}
  m=text.match(/模组(?:的)?(?:分辨率|像素)?\s*(?:是|为|改为|调整为)?\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)(?![\d.]|\s*(?:mm|毫米|米|m\b))/i);if(m){set(module,'pixelWidth',Number(m[1]),m,'/module');set(module,'pixelHeight',Number(m[2]),m,'/module');}
@@ -41,7 +42,7 @@ function parseOrderingFields(text){
  m=text.match(/(\d+(?:\.\d+)?)\s*(?:米|m)\s*(?:宽|长)[，,\s]*(\d+(?:\.\d+)?)\s*(?:米|m)\s*高/i);
  if(m){set(screen,'physicalWidthMm',Number(m[1])*1000,m,'/screen');set(screen,'physicalHeightMm',Number(m[2])*1000,m,'/screen');}
  for(const [axis,key]of [['横(?:向|着|排)?|宽|列','moduleColumns'],['竖(?:向|着|排)?|纵(?:向|着|排)?|高|行','moduleRows']]){
-  m=text.match(new RegExp('(?:'+axis+')\\s*(?:排了|摆了|放了|排|摆|放|有|是|为)?\\s*(\\d{1,3})\\s*(?:张|块|个)(?!像素|点)','i'));
+  m=text.match(new RegExp('(?:'+axis+')\\s*(?:排了|摆了|放了|改成|改为|调整到|调整为|变成|变为|保持|保留|仍为|排|摆|放|有|是|为)?\\s*(\\d{1,3})\\s*(?:张|块|个)(?!像素|点)','i'));
   if(m)set(screen,key,Number(m[1]),m,'/screen');
  }
  m=text.match(/(?:模组)?\s*(?:一|1|每)(?:行|排)\s*(\d+)\s*(?:块|张|个)(?:模组)?[，,\s]*(?:一共|共|总共)?\s*(\d+)\s*(?:行|排)/);if(m){set(screen,'moduleColumns',Number(m[1]),m,'/screen');set(screen,'moduleRows',Number(m[2]),m,'/screen');}
@@ -60,6 +61,7 @@ function parseOrderingFields(text){
  if(/(?:需要|要|支持)\s*HDMI\s*输出/i.test(text)&&!/(?:不要|不需要|无需|不支持)\s*HDMI\s*输出/i.test(text))requirements.hdmiOut=true;
  if(/(?:用于|做|是)\s*广告屏/.test(text)&&!/(?:不是|不做|不用于)\s*广告屏/.test(text))requirements.posterScreen=true;
  if(/(?:用于|做|是)\s*会议屏/.test(text)&&!/(?:不是|不做|不用于)\s*会议屏/.test(text))requirements.meetingScreen=true;
+ if(/(?:wi[ -]?fi|无线).{0,8}(?:卡|控制|主控|联网|发送|传输)|(?:要|需要|支持|带).{0,8}wi[ -]?fi/i.test(text)&&!/(?:不要|不用|无需|不需要).{0,5}(?:wi[ -]?fi|无线)/i.test(text))requirements.communication=['WiFi'];
  if(Object.keys(requirements).length)fields.requirements=requirements;
  for(const k of ['environment','controlMode','architecture'])if(fields[k])provenance['/'+k]={kind:'user-stated',text};
  if(Object.keys(module).length)fields.module=module;if(Object.keys(screen).length)fields.screen=screen;
@@ -70,7 +72,7 @@ function parseOrderingFields(text){
 function geometryObservation(input){
  const text=require('./customer-meaning.cjs').spokenGeometry(input).replace(/乘以|乘/g,'×');
  const number='(\\d+(?:\\.\\d+)?)',unit='(毫米|mm|厘米|cm|米|m|像素|点|px)?';
- const pair=new RegExp(number+'\\s*'+unit+'\\s*[x×*]\\s*'+number+'\\s*'+unit,'i').exec(text);
+ const pair=new RegExp('(?<![A-Za-z0-9_.])'+number+'\\s*'+unit+'\\s*[x×*]\\s*'+number+'\\s*'+unit+'(?![A-Za-z0-9_])','i').exec(text);
  const axes=[...text.matchAll(new RegExp('(宽|长|高)\\s*(?:是|为|改为)?\\s*'+number+'\\s*'+unit,'gi'))];
  let values=null,units=[],axisUnits={};
  if(pair){values={width:Number(pair[1]),height:Number(pair[3])};units=[pair[2],pair[4]].filter(Boolean);axisUnits={width:pair[2]||pair[4],height:pair[4]||pair[2]};}

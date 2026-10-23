@@ -5,7 +5,7 @@ const {canonical,evidencePlan}=require('./evidence-plan.cjs');
 // Controlled retrieval vocabulary; these are lexical clues, never diagnoses.
 const {phenomenonWords}=require('../parser/intent-frames.cjs');
 const concepts=[
- {id:'program-send',type:'topic',words:['发送节目','节目发送','发送不了','发不出去']},
+ {id:'program-send',type:'topic',words:['发送节目','节目发送','发布节目','发送失败','发布失败','发送不了','发不出去']},
  {id:'password',type:'topic',words:['密码','口令','password']},
  {id:'power-schedule',type:'topic',words:['定时开关机','开关机时间','定时开关屏']},
  {id:'brightness',type:'topic',words:['亮度','色度']},
@@ -41,7 +41,7 @@ function parseQuickQuery(message,lookup,state={}){
  const task=decideTask(interpretation.query,lookup,state);
  task.original=interpretation.original;
  const context=task.target?.context;
- const scoped={...state,messages:[],currentIntent:task.raw,retrievalHistory:context?[{quickContext:{...context,ordering:task.ordering?task.target.ordering:null}}]:[]};
+ const scoped={...state,messages:[],currentIntent:task.reason==='explicit-analysis-continuation'?chatIntent(task.executionText,lookup):task.raw,retrievalHistory:context?[{quickContext:{...context,ordering:task.ordering?task.target.ordering:null}}]:[]};
  const result=parseScopedQuery(task.executionText,lookup,scoped);
  if(task.ordering){result.intent='ordering';result.models=[];result.chips=[];result.orderingContext=task.target?.ordering||null;result.demand={schemaVersion:'2.0',operation:'ordering',topic:String(message),...task.delta,provenance:{...task.delta.provenance}};result.taskUpdate=task.update;result.decision={...result.decision,intent:'ordering',action:'plan-engineering',orderingKind:task.target?null:task.raw.decision.orderingKind,missing:[],contextUsed:!!task.target};}
  if(task.target&&task.target.type!=='ordering'&&['product','technical'].includes(task.raw.intent)&&['CONTINUE','CORRECT'].includes(task.relation)){
@@ -53,6 +53,7 @@ function parseQuickQuery(message,lookup,state={}){
   result.evidencePlan=evidencePlan(result);
  }
  if(task.relation==='NEW_TOPIC')result.orderingContext=null;
+ result.answerQuestion=task.reason==='explicit-analysis-continuation'?task.target?.context?.query:null;
  result.original=String(message).trim();result.interpretation=interpretation;result.executionText=task.executionText;
  Object.defineProperty(result,'taskPlan',{value:task});result.decision.taskRelation={relation:task.relation,taskId:task.taskId,reason:task.reason};
  if(task.reason==='multiple-actions'){result.decision.missing=[...new Set([...result.decision.missing,'action-priority'])];result.decision.alternatives=task.raw.decision.alternatives?.length?task.raw.decision.alternatives:['plan-engineering',task.raw.decision.action];}
@@ -92,6 +93,7 @@ function parseScopedQuery(message,lookup,state={}){
  const normalized=norm(scope);
  if(!ambiguous&&numericCandidates.length===1&&!chipCandidates.length)models.push(numericCandidates[0].modelId);
  const found=concepts.filter(c=>c.words.some(w=>normalized.includes(norm(w))));
+ if(/(?:控制|带载|带|拖|驱动).{0,8}(?:多少|几).{0,3}(?:点|像素|模组|板)/.test(scope)&&!found.some(c=>c.id==='load'))found.push(concepts.find(c=>c.id==='load'));
  const routed=followup&&previous?{...initial,intent:previous.intent,decision:{...initial.decision,intent:previous.intent,action:previous.intent==='aftersales'?'troubleshoot':initial.decision.action,missing:[]}}:initial;
  const cats=routed.decision.categories;
  const compatibility=routed.intent==='compatibility';
@@ -100,7 +102,7 @@ function parseScopedQuery(message,lookup,state={}){
  const versions=[...active.matchAll(/(?:硬件(?:版本)?|固件(?:版本)?|版本)[：:\s]*V?(\d+(?:[._]\d+)+)/gi)].map(m=>({kind:/硬件/.test(m[0])?'hardware':/固件/.test(m[0])?'firmware':'version',value:m[1]}));
  const chips=[...active.matchAll(/\b(?:ICND?|SM|FM|LS|DP|MBI|TC|RUL|RUC)\d{3,5}[A-Z0-9]*\b/gi)].map(m=>m[0].toUpperCase());
  if(context&&!chips.length)chips.push(...previous?.chips||[]);
- let unknownModels=(active.match(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi)||[]).filter(t=>!isTechnicalToken(t,active)&&!extractKnownModels(t,lookup).length&&!/^(?:P|V|ICND?|SM|FM|LS|DP|MBI|TC|HUB)\d/i.test(t)&&!lookup.isSoftware?.(t)&&!/^(?:HDMI|DP|SDI|USB|HUB)\d/i.test(t));
+ let unknownModels=(active.match(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi)||[]).filter(t=>!isTechnicalToken(t,active)&&!require('../identity/extract-models.cjs').isIdentifierDetail(t,active)&&!extractKnownModels(t,lookup).length&&!/^(?:P|V|ICND?|SM|FM|LS|DP|MBI|TC|HUB)\d/i.test(t)&&!lookup.isSoftware?.(t)&&!/^(?:HDMI|DP|SDI|USB|HUB)\d/i.test(t));
  if(!unknownModels.length&&!models.length&&!currentSoftware.length)unknownModels=[...(initial.unknownModels||[])];
  let free=active.replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*/gi,' ');
  for(const c of found)for(const w of c.words)free=free.split(w).join(' ');
@@ -115,10 +117,11 @@ function parseScopedQuery(message,lookup,state={}){
   for(const c of concepts)if(c.type==='attribute'&&c.words.some(w=>norm(relation.target.text).includes(norm(w)))&&!symptoms.includes(c.id))symptoms.push(c.id);
  }
  if(route.decision.answerNeed==='parameter-overview'&&!attributes.length)attributes.push('load','ports','size','grayscale');
- const operation=route.intent==='operation',selectSoftware=operation&&/(?:用|使用).{0,4}(?:什么|哪个|那个|哪款)软件|调试软件/.test(active),upgrade=operation&&/升级|烧录/.test(active),sendProgram=operation&&/发送.*节目|节目.*发送|(?:更新|发布|拷贝|导出|存入|存到).{0,10}节目|节目.{0,20}(?:更新|发布|拷|导出|存到|存入)/.test(active);
+ const operation=route.intent==='operation',selectSoftware=operation&&(/(?:用|使用|在).{0,4}(?:什么|哪个|那个|哪款)软件|调试软件|配套软件|的软件|手机软件|软件名/.test(active)||/手机.{0,6}(?:APP|软件)/i.test(active)),upgrade=operation&&/升级|烧录/.test(active),sendProgram=operation&&/发送.*节目|节目.*发送|(?:更新|发布|拷贝|导出|存入|存到).{0,10}节目|节目.{0,20}(?:更新|发布|拷|导出|存到|存入)/.test(active);
  const software=[...new Set([...(route.software||[]),...(context&&!currentSoftware.length?previous?.software||[]:[])])];
  const intent=ambiguous?'ambiguous':numeric&&numericCandidates.length===1&&!chipCandidates.length?'product':chipCandidates.length&&['technical','clarify'].includes(route.intent)||chips.length&&['technical','clarify'].includes(route.intent)?'chip':software.length&&route.intent==='parameters'?'software-function':route.intent;
  const decision={...route.decision,intent,original,contextUsed:!!context||route.decision.contextUsed};
+ if(selectSoftware)decision.missing=decision.missing.filter(key=>key!=='operation-object');
  if(intent==='chip'&&route.intent!=='chip')Object.assign(decision,{action:'identify-chip',reasons:[{rule:'registered-chip-identity',text:original,start:0}]});
  if(numeric&&intent==='product')Object.assign(decision,{action:'identify-product',reasons:[{rule:'registered-numeric-model-core',text:original,start:0}]});
  if(ambiguous)Object.assign(decision,{action:'clarify-identity',missing:['identity-choice']});

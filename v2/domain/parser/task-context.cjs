@@ -30,7 +30,7 @@ function decideTask(message,lookup,state={}){
   if(previous){const p=chatIntent(previous.content,lookup);store.tasks.push({id:'task-'+(++store.sequence),type:p.intent,status:'active',revision:0,context:{query:previous.content,intent:p.intent,models:p.models,chips:[],software:p.software||[]}});store.activeId=store.tasks[0].id;}
  }
  const active=store.tasks.find(t=>t.id===store.activeId);
- const reset=/(?:重新|另外|新)(?:.{0,4})(?:配单|配屏)|另一(?:块|面)屏/.test(text);
+ const reset=/(?:重新|另外|新)(?:.{0,4})(?:配单|配屏)|另一(?:块|面)屏|(?:另外(?:一个)?|另一个|换个)新?问题|新问题/.test(text);
  // Resolve the relation and typed changes before allowing a standalone label
  // such as “是分辨率” to claim a new parameter-query task.
  const update=messageUpdate(text,reset?null:active);
@@ -59,8 +59,10 @@ function decideTask(message,lookup,state={}){
  const fieldReply=active?.type==='ordering'&&!explicitQuery&&(hasSlots||update.geometry.values||update.geometry.unit||update.commands.correct||update.commands.revert||update.commands.complete||update.commands.approve);
  const queryAct=!fieldReply&&['query-parameters','find-resources','guide-operation','confirm-compatibility','troubleshoot','ask-software-function','request-service'].includes(decision.action);
  const feedback=active&&!hasSlots&&!raw.models.length&&!queryAct&&/^(?:(?:这个|这|回答|答复|方案|感觉|还是|有点|我觉得)\s*)*(?:(?:不太|不够|不怎么|不|太)(?:行|满意|合适|准确|清楚)|答错了?|没看懂|看不懂)[啊呀呢吧了。！!\s]*$/.test(text);
+ const analysisContinuation=active&&!reset&&!hasSlots&&!raw.models.length&&!raw.software?.length&&/(?:结合上文|沿用.{0,12}(?:条件|信息)|继续(?:分析|排查|查找|解释|回答))/.test(text)&&!/(?:另外|另一个|换个|新问题)/.test(text);
  let relation='NEW_TOPIC',target=null,reason='independent-request',needsInput=false;
  if(raw.intent==='social'){relation='CONTINUE';target=active;reason='social-does-not-change-task';}
+ else if(analysisContinuation){relation='CONTINUE';target=active;reason='explicit-analysis-continuation';}
  else if(cancel){relation='CORRECT';target=active;reason='explicit-cancel';needsInput=!target;}
  else if((resume||update.commands.revert&&active?.type!=='ordering')&&!reset&&!queryAct){
   const candidates=store.tasks.filter(t=>t.type==='ordering'&&['active','suspended'].includes(t.status)&&fields.every(f=>JSON.stringify(valueAt(t.ordering?.confirmed,f.path))===JSON.stringify(f.value)));
@@ -90,7 +92,7 @@ function decideTask(message,lookup,state={}){
  }
  if(ordering&&resolvedUpdate.pending?.geometry&&!resolvedUpdate.clarification){const g=resolvedUpdate.pending.geometry;resolvedUpdate.clarification='还保留着'+Object.values(g.values||{}).join('×')+'，请确认这是'+(g.entity==='module'?'模组':'整屏')+'像素分辨率，还是实际尺寸（毫米或米）？';}
  if(ordering&&resolvedUpdate.clarification){needsInput=true;reason='field-meaning-needed';}
- return {relation,taskId:target?.id||null,reason,needsInput,cancel,ordering,original:text,executionText:ordering?input:text,raw,delta:resolvedUpdate.delta,update:resolvedUpdate,store,target,social:raw.intent==='social'};
+ return {relation,taskId:target?.id||null,reason,needsInput,cancel,ordering,original:text,executionText:reason==='explicit-analysis-continuation'&&target?.context?.query?target.context.query:ordering?input:text,raw,delta:resolvedUpdate.delta,update:resolvedUpdate,store,target,social:raw.intent==='social'};
 }
 function commitTask(plan,context,orderingState){
  const store=clone(plan.store);

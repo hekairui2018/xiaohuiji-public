@@ -57,21 +57,22 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   if(q.taskPlan.cancel)return complete({...base,status:'clarify',answerType:'task-cancelled',reply:q.taskPlan.taskId?'已结束当前任务，聊天记录保留。':'当前没有可结束的任务。'});
   if(q.taskPlan.relation==='FEEDBACK')return complete({...base,intent:'feedback',status:'clarify',answerType:'answer-feedback',reply:'你对上一条答复不满意。是条件理解有误、选型不合适，还是需要换一种解释？已有条件先保留。'});
   if(q.taskPlan.needsInput&&q.taskPlan.reason!=='multiple-actions')return complete({...base,intent:q.taskPlan.ordering?'ordering':'clarify',status:'clarify',answerType:q.taskPlan.ordering?'task-field-clarification':'task-relation-unclear',reply:q.taskPlan.update?.clarification||(q.taskPlan.reason==='multiple-resumable-tasks'?'有多个未完成配单，请说明要继续哪块屏（例如点间距或尺寸）。':q.taskPlan.reason==='no-resumable-task'?'当前没有可恢复的配单，请告诉我要配哪块屏。':'这句话的归属尚不明确，请指出要继续哪个任务，已有条件保留。')});
+  const clarification=require('../../domain/knowledge/question-requirements.cjs').clarificationPlan(q);
+  if(clarification)return complete({...base,status:'clarify',answerType:clarification.reason,reply:clarification.question});
   if(q.social)return complete({...base,intent:'social',reply:/谢|thanks/.test(q.original)?'不客气。':'你好！我可以查询产品参数、资料和历史售后案例，请告诉我型号或问题。'});
   if(q.intent==='aftersales'&&!q.models.length&&!q.software.length&&!q.chips.length&&!q.unknownModels.length){
    const discovery=q.concepts.includes('wifi')&&q.concepts.includes('discovery'),sending=q.concepts.includes('program-send');
    if(discovery||sending)return complete({...base,status:'clarify',answerType:'fault-scope-question',businessStatus:{intent:'identified',evidence:'task-object-needed',answer:'needs-input'},reply:discovery?'你是搜不到控制卡发出的Wi-Fi热点，还是软件连上Wi-Fi后搜不到设备？先确认这一点，再按对应环节排查。':'你现在使用哪款软件发送节目？先确认软件，再区分找不到设备、连接失败和发送失败。',results:[]});
   }
   if(q.intent==='aftersales'&&!q.models.length&&!q.software.length&&!q.chips.length&&q.unknownModels.length===0&&/连不上|连接不上|网口.{0,4}(?:没有输出|无输出)/.test(q.original)&&!q.symptoms.some(x=>!['network','no-output'].includes(x)))return complete({...base,status:'clarify',answerType:'fault-identity-question',reply:'你用的设备型号是什么？连接问题还请说明是网线、Wi-Fi还是USB；先确认这一步，再查对应原因。',results:[]});
-  if(q.intent==='service')return complete({...base,status:'clarify',answerType:'service-needs-confirmation',businessStatus:{intent:'identified',evidence:'service-directory-not-registered',answer:'needs-input'},reply:/保修期|保修政策/.test(q.original)?'你问的是售后保修期限。目前未接入已核实的保修政策，请提供产品型号和购买日期后向售后核对，不能把其他产品的期限直接套用。':/钱|报价|价格/.test(q.original)?'你要咨询'+(q.models.length?q.models.join('、'):'产品')+'的价格。报价需要销售确认；请补充'+(q.models.length?'数量和所在地区':'型号、数量和所在地区')+'。':/上班|工作时间/.test(q.original)?'你问的是技术支持的工作时间。当前没有已核实的排班信息，请通过现有服务联系人确认。':/报修/.test(q.original)?'你需要报修。请先提供设备型号和故障现象，以便整理报修信息；目前尚未创建维修工单。':'你需要联系人工或销售。请告诉我所在地区和要咨询的事项；当前没有已核实的地区联系人，也尚未实际转接。'});
+  if(q.intent==='service')return complete({...base,status:'clarify',answerType:'service-needs-confirmation',businessStatus:{intent:'identified',evidence:'service-directory-not-registered',answer:'needs-input'},reply:/生产日期|出厂日期|序列号查询/.test(q.original)?'已保留你提供的型号及编号。当前没有接入设备出厂记录查询，不能按序列号猜测生产日期；请通过原购买渠道或已有售后联系人核对。':/返厂|返修/.test(q.original)?'你要确认返厂维修地址和联系电话。当前没有已核实的收件地址或维修联系电话记录，请联系原购买渠道或已有售后联系人核对收件信息；目前尚未提交返修申请。':/保修期|保修政策/.test(q.original)?'你问的是售后保修期限。目前未接入已核实的保修政策，请提供产品型号和购买日期后向售后核对，不能把其他产品的期限直接套用。':/钱|报价|价格/.test(q.original)?'你要咨询'+(q.models.length?q.models.join('、'):'产品')+'的价格。报价需要销售确认；请补充'+(q.models.length?'数量和所在地区':'型号、数量和所在地区')+'。':/上班|工作时间/.test(q.original)?'你问的是技术支持的工作时间。当前没有已核实的排班信息，请通过现有服务联系人确认。':/报修/.test(q.original)?'你需要报修。请先提供设备型号和故障现象，以便整理报修信息；目前尚未创建维修工单。':'你需要联系人工或销售。请告诉我所在地区和要咨询的事项；当前没有已核实的地区联系人，也尚未实际转接。'});
   if(q.decision.missing.includes('action-priority')){
    const labels={'query-parameters':'看参数','find-resources':'找说明书','troubleshoot':'排查故障','guide-operation':'看操作步骤','plan-engineering':'配单','confirm-compatibility':'核对兼容性','ask-software-function':'了解软件功能'};
    const goals=q.decision.alternatives.map(a=>labels[a]||'确认具体问题');
    return complete({...base,status:'clarify',answerType:'multiple-actions',businessStatus:{intent:'identified-multiple',evidence:'not-requested-yet',answer:'needs-input'},reply:goals.length===2&&goals.includes('看参数')&&goals.includes('找说明书')?'你同时提出了参数查询和找说明书两个需求，先看参数，还是先找说明书？':'你提出了多个需求，先'+goals.join('，还是先')+'？'});
   }
   if(q.ambiguous)return complete({...base,status:'clarify',answerType:'ambiguous-entity',reply:'这个数字有多个已登记候选：'+[...q.numericCandidates.map(c=>c.modelId),...q.chipCandidates.flatMap(c=>c.models)].join('、')+'。请确认完整型号或芯片名，确认前不套用参数或固件。'});
-  if(q.evidencePlan.purpose==='service-access'&&!q.software.length)return complete({...base,status:'clarify',answerType:'service-object-needed',reply:'是哪款软件、平台或服务显示了到期提示？请先告诉我提示出现的位置，我再核对对应的服务或授权说明。',results:[]});
-  if(q.evidencePlan.purpose==='software-selection'&&!q.models.length)return complete({...base,status:'clarify',answerType:'software-device-needed',reply:'请先告诉我盒子或控制设备的完整型号，我再核对适用的软件；升级教程里提到的软件不能直接当作这台设备的配套软件。',results:[]});
+  if(q.evidencePlan.purpose==='software-selection'&&!q.models.length&&q.unknownModels.length)return complete({...base,status:'clarify',answerType:'software-device-needed',reply:'请先告诉我盒子或控制设备的完整型号，我再核对适用的软件；升级教程里提到的软件不能直接当作这台设备的配套软件。',results:[]});
   if(q.intent==='resources'&&q.models.length>1&&!q.compatibility){
    if(q.models.length>4)return complete({...base,status:'clarify',answerType:'request-budget',reply:'请先选最多四款设备，我会分别核对各自的资料。'});
    const clauses=q.original.split(/[，,。；;！？!?]/).filter(Boolean),replies=[],combined=new Map(),subrequests=[];
@@ -82,23 +83,23 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
    }
    routeLog.subrequests=subrequests;routeLog.candidateCount=subrequests.reduce((s,r)=>s+r.route.candidateCount,0);return complete({...base,status:combined.size?'answer':'not-found',answerType:'multi-resource-answer',reply:replies.join('\n\n'),results:[...combined.values()]});
   }
-  if(q.intent==='resources'&&q.categories.includes('video')&&q.models.length&&localCatalog){
-   const index=await indexedVideos(),rows=q.models.flatMap(id=>index.byModel.get(id)||[]),allowed=await filterEvidence(rows);
+  if(q.intent==='resources'&&q.categories.includes('video')&&(q.models.length||q.software.length)&&localCatalog){
+   const index=await indexedVideos(),rows=q.models.length?q.models.flatMap(id=>index.byModel.get(id)||[]):index.all.filter(r=>q.software.some(s=>norm(r.name).includes(norm(s)))),allowed=await filterEvidence(rows);
    const ranked=rank(q,[{source:'registered-video-index',rows:allowed}],lookup,routeLog.filtered,routeLog.candidates),seen=new Set(),selected=[];
    for(const r of ranked){const key=r.candidate.sha256||r.candidate.resourceVersionId||r.candidate.download;if(!seen.has(key)){seen.add(key);selected.push({...r.candidate,rankingSignals:r.signals});}if(selected.length===4)break;}
    routeLog.videoIndex={registered:index.registeredVideoCount,operation:index.all.length,modelCandidates:rows.length,ranked:ranked.length,displayed:selected.length};routeLog.candidateCount=rows.length;routeLog.retainedCount=selected.length;
-   trace.push({name:'registered-video-index',count:rows.length});return complete({...base,status:selected.length?'answer':'not-found',answerType:selected.length?'model-video-resources':'model-video-not-registered',reply:selected.length?'找到 '+q.models.join('、')+' 的相关操作视频：'+selected.map(r=>r.name).join('；')+'。关联依据为视频名称或已登记来源，不代表已验证所有版本适用。':'已查已登记操作视频，未找到能确认属于 '+q.models.join('、')+' 的对应资料；不会用其他型号或宣传视频替代。',results:selected});
+   trace.push({name:'registered-video-index',count:rows.length});return complete({...base,status:selected.length?'answer':'not-found',answerType:selected.length?'model-video-resources':'model-video-not-registered',reply:selected.length?'找到 '+[...q.models,...q.software].join('、')+' 的相关操作视频：'+selected.map(r=>r.name).join('；')+'。关联依据为视频名称或已登记来源，不代表已验证所有版本适用。':'已查已登记操作视频，未找到能确认属于 '+[...q.models,...q.software].join('、')+' 的对应资料；不会用其他型号或宣传视频替代。',results:selected});
   }
 
   if(q.intent==='ordering'&&q.decision.orderingKind==='accessory')return complete({...base,status:'clarify',answerType:'accessory-scope-question',reply:'你要选通信模块。请提供主控型号和当地运营商，我再查已登记模块的适用资料。',results:[]});
   // Choosing a product by capabilities is not yet a request to calculate an
   // LED screen BOM. Preserve supplied requirements and ask the missing usage
   // condition before invoking the screen-specific deterministic calculator.
-  if(q.intent==='ordering'&&q.decision.orderingKind==='catalog-selection'&&(/LCD/i.test(q.original)?!/独立|复制|同一个画面/.test(q.original):!/同步|异步/.test(q.original)))return complete({...base,status:'clarify',answerType:'product-selection-scope',businessStatus:{intent:'identified',evidence:'usage-condition-needed',answer:'needs-input'},reply:'已保留你的设备能力要求：“'+q.original+'”。'+(/LCD/i.test(q.original)?'多路视频输出需要各路独立播放，还是复制同一个画面？':'你需要同步输入，还是异步播放？')+'确认使用方式后再核对产品适用证据。',results:[]});
+  if(q.intent==='ordering'&&q.decision.orderingKind==='catalog-selection')return complete({...base,status:'clarify',answerType:'product-selection-scope',businessStatus:{intent:'identified',evidence:'usage-condition-needed',answer:'needs-input'},reply:'已保留你的设备能力要求：“'+q.original+'”。'+(/LCD/i.test(q.original)?'多路视频输出需要各路独立播放，还是复制同一个画面？':!/同步|异步/.test(q.original)?'你需要同步输入，还是异步播放？':/RJ45/i.test(q.original)?'RJ45需要用于网络通信，还是LED屏数据输出？':'整屏像素分辨率是多少？')+'确认使用方式后再核对产品适用证据。',results:[]});
   if(q.intent==='ordering'&&q.decision.orderingKind!=='catalog-selection'&&businessAnswer){const data=await businessAnswer({intent:'ordering',query:q.executionText||q.original,models:q.models,demand:q.demand,taskUpdate:q.taskUpdate,unknownModels:q.unknownModels,hardwareRequested:q.versions.some(v=>v.kind==='hardware')||!!facts.hardwareVersions?.length,progressive:true,orderingContext:q.orderingContext},{facts,sessionId:state.id});trace.push(...data.retrievalTrace||[]);return complete({...base,...data,answerType:'engineering'});}
   const add=(source,rows)=>{routeLog.recall.push(...rows.map(r=>({source,name:r.name,type:r.type,sha256:r.sha256,locator:r.locator,beforeRankingTruncated:false})));lists.push({source,rows});trace.push({name:source,count:rows.length,sourceKind:'evidence-list'});};
   async function call(name,fn){onProgress('searching');const at=Date.now();try{const rows=await fn();if(rows.length)onProgress('evidence-found');trace.push({name,elapsedMs:Date.now()-at,count:rows.length});return rows;}catch{failures.push(name);trace.push({name,elapsedMs:Date.now()-at,count:0,unavailable:true});return [];}}
-  async function textSearch(query){const rows=await Promise.all((q.models.length?q.models.slice(0,3):[null]).map(model=>search(query,'text',{limit:24,model:model?.replace(/^HD-/,''),version:q.versions.find(v=>v.kind==='version')?.value})));const candidates=rows.flatMap(d=>d.results||[]).map(r=>{const parts=(r.text||'').split(' | '),faq=/\.csv$/i.test(r.name||'')&&/FAQ|FQA|常见问题|问答/i.test(r.name||'')&&parts.length>=3;return {...r,type:faq?'faq':'passage',...(faq?{standardQuestion:parts[1],standardAnswer:parts[2],faqExact:norm(q.original).replace(/[\s，。！？!?]/g,'')===norm(parts[1]).replace(/[\s，。！？!?]/g,'')}:{} )};});return faqLookup?.hydrate?faqLookup.hydrate(candidates):candidates;}
+  async function textSearch(query){const rows=await Promise.all((q.models.length?q.models.slice(0,3):[null]).map(model=>search(query,'text',{limit:24,question:q.original,purpose:q.intent,model:model?.replace(/^HD-/,''),version:q.versions.find(v=>v.kind==='version')?.value})));const candidates=rows.flatMap(d=>d.results||[]).map(r=>{const parts=(r.text||'').split(' | '),faq=/\.csv$/i.test(r.name||'')&&/FAQ|FQA|常见问题|问答/i.test(r.name||'')&&parts.length>=3;return {...r,type:explicitDocs?'document':faq?'faq':'passage',...(explicitDocs?{text:null}:{}),...(faq?{standardQuestion:parts[1],standardAnswer:parts[2],faqExact:norm(q.original).replace(/[\s，。！？!?]/g,'')===norm(parts[1]).replace(/[\s，。！？!?]/g,'')}:{} )};});return faqLookup?.hydrate?faqLookup.hydrate(candidates):candidates;}
   if(q.evidencePlan.purpose==='component-dependency'&&q.models.length&&!q.versions.length){
    const rows=[];for(const id of q.models)for(const d of originalByModel.get(id)||[])for(const page of d.pages||[]){const text=capabilityExcerpt(page.text,q.evidencePlan);if(text)rows.push({type:'capability',name:d.name,text,modelIds:[id],sha256:d.sha256,locator:{page:page.page},download:'/v2/resources/original/'+d.sha256,evidenceId:d.sha256+'-architecture-'+page.page,sourceRole:'original-component-architecture'});}
    const allowed=await filterEvidence(rows),ranked=rank(q,[{source:'original-architecture',rows:allowed}],lookup,routeLog.filtered,routeLog.candidates);
@@ -117,12 +118,12 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
    if(!q.software.length)return complete({...base,status:'clarify',answerType:'software-choice',reply:'你要下载哪一款软件？请告诉我设备型号，或选择屏掌控、HDPlayer、HDSet、LCD Player；不同软件用途不同。',results:[]});
    const body=await localizeMedia(await quick.software(q.software.join(' '))),items=(body.software?.items||[]).filter(i=>q.software.some(name=>norm(name)===norm(i.name))),rows=[];
    for(const item of items){
-    if(q.categories.includes('video')){for(const v of [item.videos?.primary,...item.videos?.more||[]].filter(Boolean))if(v.url||v.publicUrl)rows.push({type:'document',category:'video',name:v.name,download:v.url||v.publicUrl});}
-    else if(q.categories.includes('manual')||genericSoftwareOperation){for(const m of item.manuals||[])if(m.url||m.publicUrl)rows.push({type:'document',category:'manual',name:m.name||m.label,documentLanguage:m.documentLanguage||m.language,download:m.url||m.publicUrl});}
+    if(q.categories.includes('video')){for(const v of [item.videos?.primary,...item.videos?.more||[]].filter(Boolean))if(v.url||v.publicUrl)rows.push({type:'document',category:'video',sha256:v.sha256,name:v.name,download:v.url||v.publicUrl});}
+    else if(q.categories.includes('manual')||genericSoftwareOperation){for(const m of item.manuals||[])if(m.url||m.publicUrl)rows.push({type:'document',category:'manual',sha256:m.sha256,name:m.name||m.label,documentLanguage:m.documentLanguage||m.language,download:m.url||m.publicUrl});}
     else if(item.downloadUrl)rows.push({type:'document',category:'software',name:item.name,download:item.downloadUrl});
    }
    const allowed=(await filterEvidence(rows)).filter(r=>matchesResourceRequest(q,r));
-   if(allowed.length)return complete({...base,status:'answer',answerType:genericSoftwareOperation?'software-start-directions':'registered-software-resources',reply:genericSoftwareOperation?items.map(i=>i.name+'：'+i.purpose).join('\n')+'\n已列出对应操作资料。你现在要连接设备、编辑发送节目，还是调屏？': '已找到对应的'+(q.categories.includes('video')?'操作视频':q.categories.includes('manual')?'操作说明':'软件下载入口')+'，可从下方打开。',results:allowed.slice(0,8)});
+   if(allowed.length)return complete({...base,status:'answer',answerType:genericSoftwareOperation?'software-start-directions':'registered-software-resources',reply:genericSoftwareOperation?items.map(i=>i.purpose?i.name+'：'+i.purpose:i.name).join('\n')+'\n已列出对应操作资料。你现在要连接设备、编辑发送节目，还是调屏？': '已找到对应的'+(q.categories.includes('video')?'操作视频':q.categories.includes('manual')?'操作说明':'软件下载入口')+'，可从下方打开。',results:allowed.slice(0,8)});
   }
   // An exact existing FAQ question is evidence, never an intent classifier.
   // Present its complete row first rather than burying it under unrelated cases.
@@ -145,7 +146,7 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
    for(const id of q.models)for(const d of originalByModel.get(id)||[]){
     if(!extractKnownModels(d.name,lookup).includes(id))continue;
     for(const page of d.pages||[])for(const line of page.text.split(/\n|(?<=[。；;])/))
-     if(/HDSet|HDPlayer|HDSign|HDShow|LCD.?Player|屏掌控/i.test(line)&&(/制作|编辑|节目/.test(q.original)?/制作|编辑|节目/.test(line):/调试|设置/.test(line))&&line.length<700)
+     if(/HDSet|HDPlayer|HDSign|HDShow|HD2020|HD2018|LCD.?Player|屏掌控|小灰云/i.test(line)&&(/制作|编辑|节目/.test(q.original)?/制作|编辑|节目/.test(line):/调试|设置/.test(line))&&line.length<700)
       rows.push({type:'operation',name:d.name,text:line,sha256:d.sha256,modelIds:[id],locator:{page:page.page},evidenceId:d.sha256+'-software-'+page.page});
    }
    const permitted=await filterEvidence(rows.slice(0,6));
@@ -179,10 +180,16 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
    // A parameter search uses parameter units. A failed claim is not permission
    // to promote a fault report or a FAQ containing arbitrary numbers.
    const terms=parameterSearchTerms(q),models=q.models.map(m=>m.replace(/^HD-/,''));
-   const retrieve=words=>searchContext({query:[...models,...words].join(' '),concepts:words,models,chips:q.chips,version:q.versions.find(v=>v.kind!=='hardware')?.value,role:'parameter'});
+   const retrieve=(words,scope=models)=>searchContext({query:[...scope,...words].join(' '),concepts:words,models:scope,chips:q.chips,version:q.versions.find(v=>v.kind!=='hardware')?.value,role:'parameter'});
    let candidates=await retrieve(terms);
+   // A comparison is a matrix of objects and requested fields, not one combined
+   // keyword query where a single model or an overview can fill every slot.
+   if(models.length>1)for(const model of models.slice(0,3))for(const field of parameterFacets(q)){
+    candidates.push(...await retrieve(parameterSearchTerms(field),[model]));
+   }
+   candidates=[...new Map(candidates.map(r=>[r.sha256+'|'+(r.unitId||r.blockId||r.evidenceId),r])).values()].slice(0,24);
    const alternate=parameterConcepts(q).map(id=>concepts.find(c=>c.id===id)?.words[0]).filter(Boolean);
-   if(!candidates.length&&alternate.join('|')!==terms.join('|'))candidates=await retrieve(alternate);
+   if(!candidates.length&&alternate.length&&alternate.join('|')!==terms.join('|'))candidates=await retrieve(alternate);
    const rows=[];
    for(const r of candidates){
     if(!parameterSourceAllowed(r))continue;
@@ -197,27 +204,40 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   }).then(rows=>add('parameter-originals',rows)));
   if(!explicitDocs&&!q.deniedFault&&q.intent==='aftersales')tasks.push(call('case-index',async()=>{const data=await searchCases(q.query,null,{...scopedFacts,chips:q.chips,...(q.models.length?{modelIds:q.models}:{})});return (data.results||[]).map(r=>({...r,type:'case',name:r.title||r.phenomenon,text:r.sourceExcerpt||r.phenomenon,download:r.sources?.find(s=>s.original)?.original||'/v2/offline/case?id='+encodeURIComponent(r.id),sourceStatus:r.sources?.some(s=>s.original)?'registered-original':'indexed-case-record-not-original-file',evidenceId:r.id}));}).then(rows=>add('cases',rows)));
   if(explicitDocs&&localCatalog&&resolveDocuments&&(!q.models.length||!lists.some(l=>l.source==='catalog'&&l.rows.some(r=>r.available&&r.download))))tasks.push(call('topic-document-catalog',async()=>{
-   const catalog=await localCatalog(),terms=[...q.models.map(m=>m.replace(/^HD-/,'')),...q.software,...(q.decision?.objects||[]).filter(o=>['module','interface'].includes(o.type)).map(o=>o.text),...q.literals.filter(t=>!/搜索|搜不到|找不到|查询|资料|文档|下载/.test(t))];
+   const catalog=await localCatalog(),terms=[...q.models.map(m=>m.replace(/^HD-/,'')),...q.software,...(q.decision?.objects||[]).filter(o=>['module','interface'].includes(o.type)).map(o=>o.text),...q.literals.filter(t=>!/搜索|搜不到|找不到|查询|资料|文档|下载/.test(t)),...(require('../../domain/knowledge/question-requirements.cjs').requirements(q).objectClass==='monochrome'?['单色','单双色']:[])];
    if(!terms.length)return [];
-   const rows=catalog.filter(r=>/\.(pdf|docx?|pptx?|xlsx?)$/i.test(r.name)&&terms.some(t=>norm(r.name).includes(norm(t)))&&(!q.categories.length||q.categories.includes(/说明书|手册|manual/i.test(r.name)?'manual':/规格书|specification|datasheet/i.test(r.name)?'spec':null))).slice(0,12);
-   const resolved=await resolveDocuments(rows);return rows.flatMap((r,i)=>resolved[i]?.available?[{...r,type:'document',category:/说明书|手册|manual/i.test(r.name)?'manual':/规格书|specification|datasheet/i.test(r.name)?'spec':null,download:resolved[i].url,downloadUrl:resolved[i].downloadUrl,available:true,evidenceId:r.sha256||r.resourceId}]:[]);
+   const rows=catalog.filter(r=>require('../../domain/knowledge/question-requirements.cjs').meetsRequirements({...r,type:'document'},q).accepted&&/\.(pdf|docx?|pptx?|xlsx?)$/i.test(r.name)&&terms.some(t=>norm(r.name).includes(norm(t)))&&(!q.software.length||q.software.some(s=>norm(r.name).includes(norm(s))))&&(!q.categories.length||q.categories.includes(/说明书|手册|操作说明|使用说明|manual/i.test(r.name)?'manual':/规格书|specification|datasheet/i.test(r.name)?'spec':null))).slice(0,12);
+   const resolved=await resolveDocuments(rows);return rows.flatMap((r,i)=>resolved[i]?.available?[{...r,resourceSubjectMatch:require('../../domain/knowledge/question-requirements.cjs').requirements(q).objectClass==='monochrome'&&/单色|单双色/.test(r.name),type:'document',category:/说明书|手册|操作说明|使用说明|manual/i.test(r.name)?'manual':/规格书|specification|datasheet/i.test(r.name)?'spec':null,download:resolved[i].url,downloadUrl:resolved[i].downloadUrl,available:true,evidenceId:r.sha256||r.resourceId}]:[]);
   }).then(rows=>add('topic-documents',rows)));
   if(q.chips.length)tasks.push(call('registered-chip-table',async()=>chipEvidence(q.chips.join(' ')||q.original)).then(rows=>add('chip-table',rows)));
   if(q.intent==='chip'&&localCatalog&&resolveDocuments)tasks.push(call('chip-related-originals',async()=>{
    const table=lookup.chipLookup(q.chips.join(' ')||q.original),aliases=[...new Set((table?.items||[]).flatMap(r=>[...r.models,...r.numericAliases||[]]))].filter(s=>/^[A-Z0-9]+$/i.test(s));
    const rows=(await localCatalog()).filter(r=>/\.(pdf|docx?)$/i.test(r.name)&&/调试|手册|说明|芯片|规格/.test(r.name)&&aliases.some(a=>new RegExp('(?<![a-z0-9])'+a+'(?![a-z0-9])','i').test(r.name)));
-   const originals=await resolveDocuments(rows);return rows.flatMap((r,i)=>originals[i]?.available?[{type:'document',category:'manual',name:r.name,sha256:r.sha256,download:originals[i].url,downloadUrl:originals[i].downloadUrl,available:true,chipIdentityLinked:true,chips:q.chips,evidenceId:r.sha256?'file-'+r.sha256:r.versionId}]:[]);
+   const originals=await resolveDocuments(rows);return rows.flatMap((r,i)=>originals[i]?.available?[{resourceSubjectMatch:require('../../domain/knowledge/question-requirements.cjs').requirements(q).objectClass==='monochrome'&&/单色|单双色/.test(r.name),type:'document',category:'manual',name:r.name,sha256:r.sha256,download:originals[i].url,downloadUrl:originals[i].downloadUrl,available:true,chipIdentityLinked:true,chips:q.chips,evidenceId:r.sha256?'file-'+r.sha256:r.versionId}]:[]);
   }).then(rows=>add('chip-originals',rows)));
   if(q.intent==='operation'&&searchContext&&localCatalog)tasks.push(call('operation-original-context',async()=>{
    const receiverUpgrade=q.operation.upgrade&&(q.models.length?q.models.every(m=>/^HD-R/.test(m)||lookup.findProducts(m).some(p=>/接收卡|receiver/i.test(p.parameters?.productSeries||p.displayName||''))):/接收卡/.test(q.original));
    const catalog=await localCatalog(),software=q.software.length?q.software:q.operation.upgrade&&q.models.some(m=>lookup.findProducts(m).some(p=>/接收卡|receiv/i.test(p.parameters?.productSeries||p.displayName||'')||/^HD-R/.test(m)))?['HDSet']:[];
-   const documents=catalog.filter(r=>/\.(?:pdf|docx?)$/i.test(r.name)&&((software.some(s=>norm(r.name).includes(norm(s)))&&/手册|说明|manual|instruction|新手指引/i.test(r.name))||(q.models.length&&q.models.some(m=>extractKnownModels(r.name,lookup).includes(m))&&/手册|说明|规格|specification|manual/i.test(r.name))||(receiverUpgrade&&/接收卡固件升级说明|升级接收卡固件/.test(r.name)))).map(r=>r.name);
+   let documents=catalog.filter(r=>/\.(?:pdf|docx?)$/i.test(r.name)&&((software.some(s=>norm(r.name).includes(norm(s)))&&/手册|说明|manual|instruction|新手指引/i.test(r.name))||(q.models.length&&q.models.some(m=>extractKnownModels(r.name,lookup).includes(m))&&/手册|说明|规格|specification|manual/i.test(r.name))||(q.operation.selectSoftware&&!q.models.length&&/手册|说明|manual/i.test(r.name)&&(!/手机|APP/i.test(q.original)||/屏掌控|小灰云|手机/.test(r.name)))||(!q.models.length&&/接收卡/.test(q.original)&&/HDSet|接收卡.*(?:升级|操作|说明)/i.test(r.name))||(receiverUpgrade&&/接收卡固件升级说明|升级接收卡固件/.test(r.name)))).map(r=>r.name);
+   if(!q.models.length&&/接收卡/.test(q.original))documents=documents.filter(n=>/HDSet|接收卡/i.test(n));
    routeLog.operationManualCount=documents.length;
    if(!documents.length)return [];
    const request=operationRequest(q);if(!request.terms.length)return [];
+   if(q.operation.selectSoftware){const required=require('../../domain/knowledge/question-requirements.cjs').requirements(q);request.terms=required.terms.length?required.terms:/手机|APP/i.test(q.original)?['手机控屏','APP']:q.operation.upgrade?['接收卡','固件升级']:q.models.length?['应用软件','软件']:['软件','接收卡'];request.query=request.terms.join(' ');}
    routeLog.operationRequest={terms:request.terms,groups:request.groups};
-   const uniqueDocuments=[...new Set(documents)],candidates=[];for(let offset=0;offset<uniqueDocuments.length;offset+=4)candidates.push(...await searchContext({query:request.query,concepts:request.terms,documents:uniqueDocuments.slice(offset,offset+4),models:[],chips:q.chips,version:q.versions.find(v=>v.kind!=='hardware')?.value}));
-   const rows=[],seen=new Set();for(const r of candidates){const context=readContext?await readContext(r):null;if(!context?.text)continue;const section=operationSection(context,r,request),legacy=()=>operationExcerpt(context.text,{...q.operation,terms:request.terms});let excerpt=q.operation.sendProgram&&!q.evidencePlan.scenario.media.length?legacy()||section:section||legacy();if(excerpt&&!operationCovers(excerpt.text,request.groups))excerpt=null;if(q.operation.selectSoftware){const documented=extractKnownModels(r.name+' '+context.text,lookup);if(q.models.length&&!q.models.every(id=>documented.includes(id)))continue;const lines=context.text.split(/\n|(?<=[。；;])/).filter(line=>{const ids=extractKnownModels(line,lookup);return !q.models.length||!ids.length||q.models.some(id=>ids.includes(id));}).filter(line=>/HDSet|HDPlayer|HDSign|HDShow|LCD.?Player|屏掌控/i.test(line)&&/软件|调试|设置|应用|端[:：]|software|application/i.test(line)&&line.length<700&&/调试|配置|屏参|节目|发送|播放|电脑端软件|手机APP|application/i.test(line));excerpt=lines.length?{text:[...new Set(lines)].slice(0,3).join('\n'),sectionFocused:true}:null;}if(!excerpt)continue;const key=r.sha256+'|'+excerpt.text;if(seen.has(key))continue;seen.add(key);rows.push({...r,...context,...excerpt,type:'operation',softwareAssociation:q.operation.selectSoftware&&/电脑端|手机端|手机APP|配套软件|调试软件|应用软件|软件为|软件是|software/i.test(excerpt.text),genericOperation:!q.software.length&&!q.models.some(id=>extractKnownModels(r.name,lookup).includes(id)),software,modelIds:[],evidenceId:r.unitId||r.evidenceId||'operation-'+r.blockId});}
+   const uniqueDocuments=[...new Set(documents)],candidates=[];
+   for(let offset=0;offset<uniqueDocuments.length;offset+=4){
+    const scoped={query:request.query,concepts:request.terms,documents:uniqueDocuments.slice(offset,offset+4),models:[],chips:q.chips,version:q.versions.find(v=>v.kind!=='hardware')?.value,...(q.operation.selectSoftware?{role:'text'}:{})};
+    let found=await searchContext(scoped);
+    // Synonyms recall native wording, while the complete task groups below still
+    // have to match a read section. Text fallback stays inside the same manuals.
+    if((!found.length||request.groups.length>1)&&!q.operation.selectSoftware){
+     const aliases=[...new Set(request.groups.flat())];
+     for(let start=0;start<Math.min(aliases.length,18);start+=6){const words=aliases.slice(start,start+6);found.push(...await searchContext({...scoped,query:words.join(' ').slice(0,240),concepts:words,role:'text'}));}
+    }
+    candidates.push(...found);
+   }
+   const rows=[],seen=new Set();for(const r of [...new Map(candidates.map(r=>[r.sha256+'|'+(r.unitId||r.blockId||r.evidenceId),r])).values()].slice(0,16)){const context=readContext?await readContext(r):null;if(!context?.text)continue;const section=operationSection(context,r,request),legacy=()=>operationExcerpt(context.text,{...q.operation,terms:request.terms});let excerpt=q.operation.sendProgram&&!q.evidencePlan.scenario.media.length?legacy()||section:section||legacy();if(!excerpt||excerpt.operationVisualOnly){const focused=focusedTaskExcerpt(context,request);if(focused)excerpt=focused;}if(excerpt&&request.groups.length>1&&!section?.operationHeadingMatches&&!excerpt.taskActionExcerpt)excerpt=focusedTaskExcerpt(context,request);if(excerpt&&!operationCovers(excerpt.text,request.groups))excerpt=null;if(q.operation.selectSoftware){const documented=extractKnownModels(r.name+' '+context.text,lookup);if(q.models.length&&!q.models.every(id=>documented.includes(id)))continue;excerpt=require('../../domain/knowledge/question-requirements.cjs').softwareAssociationExcerpt(context.text,q,r)||null;}if(!excerpt)continue;const key=r.sha256+'|'+excerpt.text;if(seen.has(key))continue;seen.add(key);rows.push({...r,...context,...excerpt,applicabilityText:context.text,type:'operation',softwareAssociation:q.operation.selectSoftware&&/电脑端|手机端|手机APP|配套软件|调试软件|应用软件|软件为|软件是|software/i.test(excerpt.text),genericOperation:!q.software.length&&!q.models.some(id=>extractKnownModels(r.name,lookup).includes(id)),software,modelIds:[],evidenceId:r.unitId||r.evidenceId||'operation-'+r.blockId});}
    return rows;
   }).then(rows=>add('operation-originals',rows)));
   if(quick&&(q.categories.includes('software')||q.intent==='software-function'))tasks.push(call('software-catalog',async()=>{const d=await quick.software(q.query);return (d.software?.items||[]).map(r=>({type:q.intent==='software-function'?'software':'document',sourceKind:'registered-software-purpose',category:'software',name:r.sourceName||r.name,software:[r.name],sha256:r.sha256,text:r.purpose,download:r.url||r.downloadUrl}));}).then(rows=>add('catalog',rows)));
@@ -233,7 +253,9 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   let ranked=rank(q,lists,lookup,routeLog.filtered,routeLog.candidates);
   // One bounded synonym retry, never dropping exact models/category/version constraints.
   if(!ranked.length&&!explicitDocs&&q.concepts.length){const alternate=[...q.models.map(m=>m.replace(/^HD-/,'')),...q.concepts.filter(id=>!['local','cable'].includes(id)).slice(0,3).map(id=>concepts.find(c=>c.id===id).words[1]||concepts.find(c=>c.id===id).words[0])].join(' ');if(alternate&&alternate!==lexical){const rows=await call('fts5-synonym',()=>textSearch(alternate));add('text-expanded',rows);ranked=rank(q,lists,lookup,routeLog.filtered,routeLog.candidates);}}
-  const results=ranked.slice(0,q.intent==='aftersales'?3:4).map(({candidate,signals})=>{
+  const modelFirst=[];if(q.models.length>1)for(const model of q.models){const matches=ranked.filter(item=>(item.candidate.modelIds||[]).includes(model)||extractKnownModels(item.candidate.name||'',lookup).includes(model));for(const field of parameterFacets(q)){const attribute=field.attributes[0];const qualified=matches.filter(item=>parameterValue(field,item.candidate.text||'')&&matchesParameter(field,item.candidate.text||''));const best=(attribute==='load'?qualified.find(item=>/(?:^|\n)\s*(?:\d+[.、]\s*)?(?:单卡|带载|控制范围|最大带载|maximum load|control range)/i.test(item.candidate.text)):null)||qualified[0];if(best&&!modelFirst.includes(best))modelFirst.push(best);}if(!modelFirst.some(item=>matches.includes(item)))for(const item of matches.slice(0,2))if(!modelFirst.includes(item))modelFirst.push(item);}
+  const ordered=[...modelFirst,...ranked.filter(item=>!modelFirst.includes(item))];
+  const results=ordered.slice(0,q.intent==='aftersales'?3:Math.max(4,Math.min(8,q.models.length*3))).map(({candidate,signals})=>{
    const row={...candidate,rankingSignals:signals};
    if(q.intent==='parameters'&&parameterRowNumberGap(row)){row.requiresOriginalNumberCheck=true;row.quickSummary='此资料含数字断空格；短答只采用可核对部分，请打开原件核对。';}
    return q.intent==='aftersales'?aftersalesEvidence(q,row,facts):row;
@@ -269,7 +291,7 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
   if(q.intent==='parameters'){if(parameter.length)reply.push(...require('../../domain/knowledge/answer-guidance.cjs').conciseParameters(parameter).map(r=>`${(r.modelIds?.length?r.modelIds:q.models).join('、')}：${r.text}${r.conditions?.length?'\n条件：'+r.conditions.join('；'):''}\n来源：${r.name}${r.locator?' · '+require('../../domain/knowledge/answer-guidance.cjs').sourceLocation(r.locator):''}`));else reply.push('未找到能核验所问参数的结构字段或原文，不以文件名或未核验数值代替答案。');}
   if(q.intent==='parameters'&&!q.models.length)reply.push(q.decision.objects.some(o=>o.type==='module')?'你问的是单块模组尺寸或参数。不同模组不能套用同一尺寸；请给出模组完整型号或已知规格，以便核对。':'已按所问主题查找参数依据；还需要明确查询对象，不能把其他设备的参数当作答案。');
   const software=results.filter(r=>r.type==='software');if(q.intent==='software-function'){if(software.length)reply.push(...software.map(r=>r.name+'：'+r.text+'\n来源：现有软件登记说明。'));else reply.push('已查询软件登记及资料，尚无足够证据确认这项功能；请补充软件版本和具体功能。');if(software.length&&q.decision.answerNeed==='specific-software-capability')reply.push('以上仅是已登记用途，尚不足以确认你问的具体能力；请补充软件版本后核对操作手册。');}
-  const operations=results.filter(r=>r.type==='operation');if(operations.length){for(const r of operations.slice(0,1)){reply.push((q.operation?.selectSoftware?'软件及其用途原文：':r.genericOperation?'以下是软件手册的通用操作，尚未确认现场固件适用性：':'操作原文：')+'\n'+r.text+'\n来源：'+r.name+' · '+require('../../domain/knowledge/answer-guidance.cjs').sourceLocation(r.locator));if(r.operationVisualOnly)reply.push('这一节的具体界面在原文插图中，当前文字未包含完整点击步骤，请打开下方原件核对。');}if(q.operation.upgrade)reply.push('升级前请提供当前接收卡实读版本、硬件/芯片和所用软件版本，以核对固件；不能仅凭R系列型号或目录选择固件。');if(q.operation.sendProgram&&!q.evidencePlan.scenario.media.length)reply.push('你使用网线/Wi-Fi发送，还是U盘更新？请补充设备型号，以继续核对适用条件。');}
+  const operations=results.filter(r=>r.type==='operation');if(operations.length){for(const r of operations.slice(0,1)){reply.push((q.operation?.selectSoftware?'软件及其用途原文：':r.genericOperation?'以下是软件手册的通用操作，尚未确认现场固件适用性：':'操作原文：')+'\n'+require('../../domain/knowledge/question-requirements.cjs').conciseOperation(r.text,q)+'\n来源：'+r.name+' · '+require('../../domain/knowledge/answer-guidance.cjs').sourceLocation(r.locator));if(r.operationVisualOnly)reply.push('这一节的具体界面在原文插图中，当前文字未包含完整点击步骤，请打开下方原件核对。');}if(q.operation.upgrade)reply.push('升级前请提供当前接收卡实读版本、硬件/芯片和所用软件版本，以核对固件；不能仅凭R系列型号或目录选择固件。');if(q.operation.sendProgram&&!q.evidencePlan.scenario.media.length)reply.push('你使用网线/Wi-Fi发送，还是U盘更新？请补充设备型号，以继续核对适用条件。');}
   for(const r of results.filter(r=>r.type==='chip'))reply.push(r.text+'\n来源：'+r.name+' · 第'+r.locator.page+'页。这里只是选型表原记录，不代表已确认现场兼容；请继续提供接收卡型号、芯片完整后缀及当前版本。');
   if(parameter.length>1&&new Set(parameter.map(r=>r.documentVersion).filter(Boolean)).size>1)reply.push('以上资料版次不同，数值不合并；请核对所用设备和资料版次。');
   const cases=results.filter(r=>r.type==='case');
@@ -300,17 +322,26 @@ const parameterNote=text=>/^\s*(?:注(?:意|释)?(?:[：:\s]|$)|备注[：:]|not
 const resolutionRequest=q=>/分辨率|resolution/i.test(q.interpretation?.query||q.executionText||q.original);
 const numericParameterRequest=q=>q.intent==='parameters'&&/多少|多大|最大|最高|上限|最宽|最窄|最小|几级|几个|几组|几路|数量|数目|minimum|maximum|how many/i.test(q.interpretation?.query||q.executionText||q.original);
 const documentEdition=name=>String(name||'').match(/\bV\s*(\d+(?:\.\d+)+)/i)?.[0].replace(/\s+/g,'')||null;
-const parameterLines=text=>String(text||'').split(/\n|(?<=[。；;])/).map(s=>s.trim()).filter(Boolean);
+const parameterLines=text=>require('../../domain/knowledge/native-lines.cjs').nativeLines(text||'').flatMap(s=>s.split(/(?<=[。；;])/)).map(s=>s.trim()).filter(Boolean);
+function parameterFacets(q){
+ return q.attributes.flatMap(attribute=>{
+  const terms=attribute==='ports'?['网口','HUB75','HDMI','USB'].filter(term=>term==='网口'?/网口|ethernet|rj.?45|\bLAN\b/i.test(q.original):q.original.toUpperCase().includes(term)):[];
+  return terms.length?terms.map(term=>({...q,attributes:[attribute],original:term,executionText:term,interpretation:{query:term}})):[{...q,attributes:[attribute]}];
+ }).slice(0,3);
+}
 const uniqueParameterConditions=rows=>[...new Map(rows.map(s=>[canonical(s).replace(/\s+/g,''),s])).values()];
 function parameterSourceAllowed(row){
  const kind=row.knowledgeUnit?.kind||row.role;
  if(['faq','case','operation','firmware','software','video'].includes(kind)||['faq','case','chip','operation'].includes(row.type))return false;
  if(/FAQ|FQA|常见问题|问答|案例|问题总结|问题汇总/i.test(row.name||''))return false;
  if(kind==='parameter')return true;
- return row.type==='parameter'||/规格书|specification|datasheet|说明书|手册|manual/i.test(row.name||'');
+ return row.type==='parameter'||/规格书|specification|datasheet|说明书|手册|操作说明|使用说明|manual/i.test(row.name||'');
 }
 function parameterConcepts(q){return resolutionRequest(q)?[...new Set([...q.attributes,'load'])]:q.attributes;}
 function parameterSearchTerms(q){
+ const required=require('../../domain/knowledge/question-requirements.cjs').requirements(q);
+ if(!q.attributes.length&&required.terms.length)return required.terms.slice(0,6);
+ if(required.interfaces.length&&q.attributes.length===1&&q.attributes[0]==='ports')return [...required.interfaces,...(/网口|RJ45/i.test(q.original)?['网口']:[]),...required.terms].slice(0,6);
  if(resolutionRequest(q))return ['带载'];
  const question=q.interpretation?.query||q.executionText||q.original;
  if(q.attributes.length===1&&q.attributes.includes('ports')){
@@ -325,11 +356,12 @@ function parameterConceptMatch(id,text){
 }
 function matchesParameter(q,text){
  const value=norm(text).replace(/\s+/g,'');
+ if(!q.attributes.length&&require('../../domain/knowledge/question-requirements.cjs').requirements(q).tasks.length)return require('../../domain/knowledge/question-requirements.cjs').meetsRequirements({text},q).accepted;
  if(!q.attributes.length)return (q.literals||[]).some(term=>{
   const literal=norm(term).replace(/\s+/g,'');
   if(/^[a-z0-9_.+-]+$/i.test(literal))return value.includes(literal);
   const grams=[...new Set(literal.match(/[\u3400-\u9fff]+/g)?.flatMap(word=>Array.from({length:Math.max(0,word.length-1)},(_,i)=>word.slice(i,i+2)))||[])];
-  return grams.filter(g=>value.includes(g)).length>=2;
+  return grams.length>0&&grams.filter(g=>value.includes(g)).length>=Math.min(2,grams.length);
  });
  // Resolution is a pixel/load question. A board's physical dimensions are a
  // different field even though the parser groups both under "size".
@@ -367,6 +399,7 @@ function parameterValue(q,text){
    if(id==='size')return /尺寸|大小|外形|dimensions?|size/i.test(compact)&&physical.test(value);
    if(id==='load')return parameterConceptMatch(id,value)&&pixels.test(value);
    if(id==='width')return parameterConceptMatch(id,value)&&(pixels.test(value)||physical.test(value));
+   if(id==='battery')return /(?:CR|BR|ML|LIR|ER|LR)\s*\d{3,5}|\d+(?:\.\d+)?\s*(?:V|伏).{0,12}(?:电池|battery)|电池.{0,12}\d+(?:\.\d+)?\s*(?:V|伏)/i.test(value);
    if(id==='ports')return matchesParameter({...q,attributes:['ports']},value)&&counts.test(value);
    return parameterConceptMatch(id,value)&&/\d/.test(value);
   });
@@ -475,7 +508,7 @@ function matchesResourceRequest(q,r){
  if(c.extension&&!new RegExp('\\.'+c.extension+'(?:$|[?#])','i').test(name)&&!new RegExp('\\.'+c.extension+'(?:$|[?#])','i').test(r.download||''))return false;
  if(c.language){
   const declared=String(r.documentLanguage||r.language||'').toLowerCase();
-  const language=/^(?:zh|cn|chinese)/.test(declared)?'zh':/^(?:en|english)/.test(declared)?'en':/中文版|中文/.test(name)?'zh':/英文版|english/i.test(name)?'en':null;
+  const language=/^(?:zh|cn|chinese)/.test(declared)?'zh':/^(?:en|english)/.test(declared)?'en':/中文版|中文/.test(name)?'zh':/英文版|english|\bspecification\b|user[ _-]*manual/i.test(name)?'en':null;
   if(language!==c.language)return false;
  }
  return true;
@@ -489,16 +522,36 @@ function operationRequest(q){
  const add=words=>{words=[...new Set(words.filter(Boolean))];if(words.length&&!groups.some(g=>g.some(w=>words.includes(w))))groups.push(words);};
  if(q.operation.selectSoftware||q.operation.upgrade){for(const term of q.operation.terms||[])add([term]);}
  else{
+  for(const group of require('../../domain/knowledge/question-requirements.cjs').requirements(q).groups)add(group);
+  for(const id of q.concepts||[]){const c=concepts.find(c=>c.id===id);if(c?.type==='attribute')add(c.words);}
   for(const id of q.concepts||[]){const concept=concepts.find(c=>c.id===id);if(concept?.type==='topic'&&!['wifi','usb','program-send'].includes(id))add(concept.words);}
   if(q.operation.sendProgram||programTerms.some(t=>compactOperation(q.decision?.focusText||q.original).includes(compactOperation(t))))add(programTerms);
   // Media constrains the task; it does not replace a specific task phrase.
   for(const term of q.evidencePlan?.terms||[])if(/^(?:U盘|Wi-Fi|网线|USB|网络)$/i.test(term))add([term]);
-  if(!groups.length)for(const term of q.operation.terms||[])if(!/^(?:控制|播放|软件|设置|使用|操作)$/.test(term)&&!(q.software||[]).some(s=>compactOperation(s)===compactOperation(term)))add([term]);
+  if(!groups.length)for(const term of [...require('../../domain/knowledge/question-requirements.cjs').requirements(q).terms,...q.operation.terms||[]])if(!/^(?:控制|播放|软件|设置|使用|操作)$/.test(term)&&!(q.software||[]).some(s=>compactOperation(s)===compactOperation(term)))add([term]);
  }
  const selected=groups.slice(0,6),terms=selected.map(g=>g[0]);
  return {groups:selected,terms,query:selected.flat().join(' ').slice(0,240)};
 }
 function operationCovers(text,groups){const body=compactOperation(text);return groups.every(words=>words.some(word=>body.includes(compactOperation(word))));}
+// Read a bounded contiguous paragraph around an actual action. A figure label
+// or chapter contents list cannot outrank the task's native instruction.
+function focusedTaskExcerpt(context,request){
+ const text=context.text,lines=[];let at=0;
+ for(const line of text.split('\n')){lines.push({text:line,start:at});at+=line.length+1;}
+ const choices=lines.map((line,index)=>({...line,index,hits:request.groups.filter(g=>operationCovers(line.text,[g])).length}))
+  .filter(line=>line.hits===request.groups.length&&/点击|选择|打开|进入|按下|勾选|单击|导出|保存到文件|新建|创建|添加/.test(line.text)&&!/^\s*图\s*\d/.test(line.text))
+  .sort((a,b)=>b.hits-a.hits||a.index-b.index);
+ for(const hit of choices){
+  const low=Math.max(0,hit.index-1);let high=Math.min(lines.length,hit.index+7);
+  for(let n=hit.index+1;n<high;n++)if(/^\s*(?:第.{1,10}[章节]|\d+[)）、]\s*[^，。]{2,30}$)/.test(lines[n].text)){high=n;break;}
+  const end=high<lines.length?lines[high].start:text.length,part=text.slice(lines[low].start,end).trim();
+  if(part.length>1100||!operationCovers(part,request.groups))continue;
+  let position=0;const source=context.contextParts?.find(p=>{const start=position;position+=p.charEnd-p.charStart+1;return hit.start>=start&&hit.start<position;});
+  return {text:part,sectionFocused:true,taskActionExcerpt:true,operationPartial:true,...(source?.locator?{locator:source.locator}:{})};
+ }
+ return null;
+}
 function operationSection(context,candidate,request){
  const unit=context.knowledgeUnit||candidate.knowledgeUnit;
  if(!candidate.unitId||unit?.id!==candidate.unitId||unit.kind!=='operation'||!unit.sourceSpans?.length||context.contextComplete!==true||!/^(?:explicit-heading-continuous-section|native-section-task)/.test(context.contextBoundary||unit.boundaryBasis||''))return null;
@@ -546,12 +599,14 @@ function rank(q,lists,lookup,filtered={},audit=[]){
   if(q.intent==='operation'&&r.type!=='operation'&&r.type!=='faq'){reject('not-operation-evidence');continue;}
   if(q.intent==='parameters'&&!parameterSourceAllowed(r)){reject('not-parameter-source');continue;}
   if(q.attributes.length&&r.type==='case'){reject('case-not-parameter-proof');continue;}
-  if(q.intent==='resources'&&q.categories.length&&!q.compatibility&&!q.symptoms.length&&!['operation','software-function'].includes(q.intent)){if(r.type==='case'){reject('case-not-requested-resource');continue;}const cat=r.category||(/说明书|手册|manual/i.test(title)?'manual':/规格书|specification|datasheet/i.test(title)?'spec':/\.bin\b|固件/i.test(title)?'firmware':null);if(!q.categories.includes(cat)){reject('different-resource-category');continue;}}
+  if(q.intent==='resources'&&q.categories.length&&!q.compatibility&&!q.symptoms.length&&!['operation','software-function'].includes(q.intent)){if(r.type==='case'){reject('case-not-requested-resource');continue;}const cat=r.category||(/说明书|手册|操作说明|使用说明|manual/i.test(title)?'manual':/规格书|specification|datasheet/i.test(title)?'spec':/\.bin\b|固件/i.test(title)?'firmware':null);if(!q.categories.includes(cat)){reject('different-resource-category');continue;}}
   if(q.deniedFault&&r.type==='case'){reject('negated-fault-request');continue;}
   if(q.versions.length&&!q.versions.every(v=>{const known=v.kind==='hardware'?r.scope?.hardwareVersions||[]:v.kind==='firmware'?r.scope?.firmwareVersions||[]:v.kind==='software'?r.scope?.softwareVersions||[]:[...(r.versions||[]),r.documentVersion].filter(Boolean);return known.some(x=>norm(x).replace(/^v/,'')===norm(v.value).replace(/^v/,''));})){reject('unverified-version-constraint');continue;}
   const sourceChips=r.chips||r.scope?.chips||(all.match(/\b(?:ICND?|SM|FM|LS|DP|MBI|TC|RUL|RUC)\d{3,5}[A-Z0-9]*\b/gi)||[]);
   if(q.intent==='aftersales'&&q.symptoms.includes('red-dots')&&!matchesConcept('red-dots',r.phenomenon||r.standardQuestion||body)){reject('different-distinctive-symptom');continue;}
   if(q.intent==='aftersales'&&/屏|模组|区域|几行|几排|右边|左边/.test(q.original)&&!/指示灯|状态灯|运行灯|GPS|\bRUN\b/i.test(q.original)&&/指示灯|运行灯|GPS\s*指示|\bRUN\b/i.test(body)&&!/(?:屏幕|屏体|模组|显示屏).{0,15}(?:闪|黑|异常|发绿|不亮)/.test(body)){reject('indicator-not-screen-symptom');continue;}
+  const requirement=require('../../domain/knowledge/question-requirements.cjs').meetsRequirements(r,q);if(!requirement.accepted){reject(requirement.reason);continue;}
+  if(q.intent==='resources'&&q.software.length&&!q.software.some(s=>norm(title).includes(norm(s)))){reject('requested-software-document-title');continue;}
   if(q.chips.length&&sourceChips.length&&!q.chips.some(c=>sourceChips.some(k=>norm(k)===norm(c)))){reject('different-chip');continue;}
   if(q.intent==='aftersales'&&q.chips.length&&!sourceChips.length&&r.type==='passage'&&!r.referenceOnly){reject('chip-scope-not-established');continue;}
   if(r.type==='faq'&&q.intent==='operation'&&q.operation?.terms?.length){const question=norm(r.standardQuestion||'');const taskConcepts=q.concepts.filter(id=>['password','power-schedule','brightness','usb','program-cycle'].includes(id));if(taskConcepts.length&&!taskConcepts.every(id=>matchesConcept(id,question))){reject('faq-other-task');continue;}}
@@ -562,7 +617,7 @@ function rank(q,lists,lookup,filtered={},audit=[]){
   if(q.intent==='parameters'&&parameterNote(body)){reject('parameter-note-only');continue;}
   if(q.intent==='aftersales'&&r.type!=='case'&&q.symptoms.length&&!q.symptoms.some(id=>matchesConcept(id,r.type==='faq'?r.standardQuestion||title:body))){reject('fault-topic-not-supported');continue;}
   const literalHits=q.literals.filter(w=>/^[a-z0-9]+$/i.test(w)?new RegExp('(?<![a-z0-9])'+w+'(?![a-z0-9])','i').test(all):norm(all).includes(norm(w)));
-  if(q.intent==='technical'&&q.literals.length&&!literalHits.length&&!matched.length&&!modelMatch.length){reject('missing-question-topic');continue;}
+  if(q.intent==='technical'&&q.literals.length&&!literalHits.length&&!matched.length){reject('missing-question-topic');continue;}
   // Specific discovery + wifi is a conjunction, not a generic network match.
   if(core.includes('wifi')&&core.includes('discovery')&&q.discoveryTarget!=='device'){
    const focus=norm(r.type==='case'?r.phenomenon:body);
@@ -572,22 +627,22 @@ function rank(q,lists,lookup,filtered={},audit=[]){
   if(core.length&&!matched.length&&!modelMatch.length&&!literalHits.length&&!['operation','software','capability'].includes(r.type)){reject('no-topic-evidence');continue;}
   if(r.type==='case'&&q.models.length&&!named.length&&q.symptoms.length>1&&q.symptoms.some(id=>!matched.includes(id))){reject('case-object-and-symptoms-not-established');continue;}
   const atomicNumber=q.literals.some(w=>/^\d+$/.test(w)&&new RegExp('(?<![a-z0-9])'+w+'(?![a-z0-9])','i').test(all));
-  if(!core.length&&!q.models.length&&!['chip','operation','software'].includes(r.type)&&literalHits.length<2&&!literalHits.some(w=>w.length>=4)&&!atomicNumber){reject('insufficient-literal-evidence');continue;}
+  if(!core.length&&!q.models.length&&!['chip','operation','software'].includes(r.type)&&literalHits.length<2&&!literalHits.some(w=>w.length>=4)&&!atomicNumber&&!r.resourceSubjectMatch&&!(q.intent==='resources'&&q.software.some(s=>norm(title).includes(norm(s))))){reject('insufficient-literal-evidence');continue;}
   if(q.attributes.length&&r.type==='passage'&&!matchesParameter(q,body)){reject('parameter-field-not-supported');continue;}
   if(r.type==='document'&&!r.download){reject('no-accessible-original');continue;}
   if(q.compatibility&&r.type==='case'&&!/兼容|通用|互刷/.test(all)){reject('no-compatibility-evidence');continue;}
   if(q.compatibility&&r.type==='passage'&&!/兼容|通用|互刷|firmware|固件/i.test(body)){reject('no-compatibility-evidence');continue;}
   const caseKey=r.type==='case'?JSON.stringify([named.toSorted(),r.scope?.firmwareVersions||[],canonical(r.historicalMeasure||'').replace(/[\s，。；：]/g,''),canonical((r.phenomenon||r.name).split('\n').toSorted((a,b)=>b.length-a.length)[0]).replace(/自定义画布的限制[:：]?|[\s，。；：]/g,'')]):null;
-  const key=caseKey||(q.intent==='chip'&&r.type==='passage'?(r.sha256||r.name):r.evidenceId||r.sha256||r.download||JSON.stringify([title,body]));
+  const key=caseKey||(r.type==='document'?(r.sha256||r.download||r.name):null)||(q.intent==='chip'&&r.type==='passage'?(r.sha256||r.name):r.evidenceId||r.sha256||r.download||JSON.stringify([title,body]));
   const sceneSignals=compareScene((q.evidencePlan||evidencePlan(q)).scenario,r.phenomenon||r.text||'');
   if(['case','operation'].includes(r.type)&&sceneSignals.conflicts.length){reject('scene-contradiction');continue;}
   const signals={scene:sceneSignals,exactModel:modelMatch.length,modelUnknown:r.type==='case'&&!named.length,coverage:core.length?matched.length/core.length:0,titleMatches:titleHits.length,categoryMatch:q.categories.includes(r.category),structured:r.type==='parameter',matchedConcepts:matched,literalMatches:literalHits};
   const videoTask=r.category==='video'?compareScene((q.evidencePlan||evidencePlan(q)).scenario,r.name):null;
   const languagePreference=r.type==='parameter'?(/英文|english/i.test(q.original)?(!/[\u4e00-\u9fff]/.test(r.text)?4:0):/[\u4e00-\u9fff]/.test(r.text)?4:0):r.category==='video'?(/英文|english/i.test(q.original)?(/英文|english|\(英\)/i.test(r.name)?4:0):!/英文|english|印尼|西班牙|葡萄牙|\(英\)/i.test(r.name)?4:0):0;
   if(videoTask)signals.videoTask=videoTask;
-  const score=(r.softwareAssociation?30:0)+languagePreference+(videoTask?videoTask.score:0)+modelMatch.length*12+(signals.structured?12:0)+signals.coverage*10+titleHits.length*2+(signals.categoryMatch?8:0)+literalHits.length+(r.type==='case'&&q.symptoms.length?5:0)+(r.faqExact?20:0)+(['chip','operation'].includes(r.type)?40:0)+(r.sectionFocused?20:0)+(r.operationSectionMatch?20:0)+(r.chipIdentityLinked?8:0)+(['case','operation','passage'].includes(r.type)?sceneSignals.score:0);
+  const score=(r.softwareAssociation?30:0)+languagePreference+(videoTask?videoTask.score:0)+modelMatch.length*12+(signals.structured?12:0)+signals.coverage*10+titleHits.length*2+(signals.categoryMatch?8:0)+literalHits.length+(r.type==='case'&&q.symptoms.length?5:0)+(r.faqExact?20:0)+(['chip','operation'].includes(r.type)?40:0)+(r.sectionFocused?20:0)+(r.operationSectionMatch?20:0)+(r.taskActionExcerpt?25:0)+(r.chipIdentityLinked?8:0)+(['case','operation','passage'].includes(r.type)?sceneSignals.score:0);
   audit.push({...current,disposition:'ranked',score,signals});const existing=merged.get(key);if(existing){existing.rrf+=1/(60+i+1);existing.sources.add(list.source);if(score>existing.score){existing.candidate=r;existing.signals=signals;existing.score=score;}}else merged.set(key,{candidate:r,signals,score,rrf:1/(60+i+1),sources:new Set([list.source])});
  }
  return [...merged.values()].sort((a,b)=>b.score-a.score||b.rrf-a.rrf||a.candidate.name.localeCompare(b.candidate.name));
 }
-module.exports={createQuickRetrieval,rank};
+module.exports={createQuickRetrieval,rank,parameterAnswerExcerpt,parameterFacets};

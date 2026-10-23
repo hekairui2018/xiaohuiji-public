@@ -13,7 +13,7 @@ function scene(text){
  if(/离线|不联网/.test(value)&&!negative.includes('network'))negative.push('network');
  const tasks=taskWords.filter(([,re])=>re.test(value)).map(([id])=>id);
  const phases=[['after-upgrade',/升级(?:完|完成)?后/],['after-restart',/重启(?:完)?后|断电.*重启/],['media-insert',/插(?:入|上)?u盘/],['after-change',/换(?:了|完)?(?:电脑|卡|设备)|更换.*后/],['during-send',/发送(?:中|时|过程中)/],['during-play',/播放(?:中|时|过程中)/]].filter(([,re])=>re.test(value)).map(([id])=>id);
- const scope=[['local',/局部|右边|左边|单箱体|单个/],['whole',/整屏|全部|所有设备/]].filter(([,re])=>re.test(value)).map(([id])=>id);
+ const scope=[['local',/局部|部分|几排|几行|右边|左边|单箱体|单个/],['whole',/整屏|全部|所有设备/]].filter(([,re])=>re.test(value)).map(([id])=>id);
  const exclusions=(value.match(/(?:已排除|确认不是|不是因为)[^，。；]{1,25}/g)||[]);
  return {media:positive,deniedMedia:negative,knownNormal:normal,tasks,phases,scope,exclusions};
 }
@@ -21,7 +21,7 @@ function evidencePlan(q){
  const text=canonical(q.decision?.focusText||q.original),scenario=scene(text);
  const dependency=/(?:必须|一定|需要|要不要|不用|不配|不接|是否要)/.test(text)&&/接收卡|接收能力/.test(text);
  const purpose=dependency?'component-dependency':q.operation?.selectSoftware?'software-selection':/服务.{0,8}到期|授权.{0,8}到期|未授权|未激活|权限不足/.test(text)?'service-access':q.intent;
- const terms=purpose==='component-dependency'?['接收卡','板载','HUB75']:purpose==='software-selection'?['软件']:q.operation?.upgrade?['升级','接收卡']:q.operation?.sendProgram?['节目更新']:[...scenario.media.map(id=>({'usb-disk':'U盘',wifi:'Wi-Fi',ethernet:'网线','usb-link':'USB',network:'网络'}[id])),...scenario.tasks.includes('play')?['播放']:[],...scenario.tasks.includes('control')?['控制']:[],...(q.operation?.terms||[]).filter(t=>t.length<=4)];
+ const terms=purpose==='component-dependency'?['接收卡','板载','HUB75']:purpose==='software-selection'?['软件']:q.operation?.upgrade?['升级','接收卡']:q.operation?.sendProgram?['节目更新',...scenario.media.map(id=>({'usb-disk':'U盘',wifi:'Wi-Fi',ethernet:'网线','usb-link':'USB',network:'网络'}[id]))]:[...scenario.media.map(id=>({'usb-disk':'U盘',wifi:'Wi-Fi',ethernet:'网线','usb-link':'USB',network:'网络'}[id])),...scenario.tasks.includes('play')?['播放']:[],...scenario.tasks.includes('control')?['控制']:[],...(q.operation?.terms||[]).filter(t=>t.length<=4)];
  return {purpose,scenario,terms:terms.length?terms:q.operation?.terms||[],hardConstraints:{models:q.models,chips:q.chips,versions:q.versions,resource:q.resourceConstraints},requiredEvidence:purpose==='component-dependency'?'original-component-architecture':purpose==='software-selection'?'model-software-association':q.intent==='operation'?'task-steps-with-prerequisites':q.intent==='aftersales'?'same-symptom-with-scene-conditions':'relevant-original'};
 }
 function compareScene(expected,candidate){
