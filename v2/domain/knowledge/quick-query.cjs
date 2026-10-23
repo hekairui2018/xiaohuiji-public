@@ -36,7 +36,9 @@ const concepts=[
 const norm=canonical;
 function parseQuickQuery(message,lookup,state={}){
  const {decideTask}=require('../parser/task-context.cjs');
- const task=decideTask(message,lookup,state);
+ const interpretation=require('../parser/customer-language.cjs').interpretCustomerText(message);
+ const task=decideTask(interpretation.query,lookup,state);
+ task.original=interpretation.original;
  const context=task.target?.context;
  const scoped={...state,messages:[],currentIntent:task.raw,retrievalHistory:context?[{quickContext:{...context,ordering:task.ordering?task.target.ordering:null}}]:[]};
  const result=parseScopedQuery(task.executionText,lookup,scoped);
@@ -50,7 +52,7 @@ function parseQuickQuery(message,lookup,state={}){
   result.evidencePlan=evidencePlan(result);
  }
  if(task.relation==='NEW_TOPIC')result.orderingContext=null;
- result.original=String(message).trim();result.executionText=task.executionText;
+ result.original=String(message).trim();result.interpretation=interpretation;result.executionText=task.executionText;
  Object.defineProperty(result,'taskPlan',{value:task});result.decision.taskRelation={relation:task.relation,taskId:task.taskId,reason:task.reason};
  if(task.reason==='multiple-actions'){result.decision.missing=[...new Set([...result.decision.missing,'action-priority'])];result.decision.alternatives=task.raw.decision.alternatives?.length?task.raw.decision.alternatives:['plan-engineering',task.raw.decision.action];}
  if(task.ordering)result.decision.reasons=[{rule:'task-owned-engineering-update',text:result.original,start:0,taskId:task.taskId,operations:task.update.operations.map(o=>({op:o.op,path:o.path}))}];
@@ -97,7 +99,8 @@ function parseScopedQuery(message,lookup,state={}){
  const versions=[...active.matchAll(/(?:硬件(?:版本)?|固件(?:版本)?|版本)[：:\s]*V?(\d+(?:[._]\d+)+)/gi)].map(m=>({kind:/硬件/.test(m[0])?'hardware':/固件/.test(m[0])?'firmware':'version',value:m[1]}));
  const chips=[...active.matchAll(/\b(?:ICND?|SM|FM|LS|DP|MBI|TC|RUL|RUC)\d{3,5}[A-Z0-9]*\b/gi)].map(m=>m[0].toUpperCase());
  if(context&&!chips.length)chips.push(...previous?.chips||[]);
- const unknownModels=(active.match(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi)||[]).filter(t=>!isTechnicalToken(t,active)&&!extractKnownModels(t,lookup).length&&!/^(?:P|V|ICND?|SM|FM|LS|DP|MBI|TC|HUB)\d/i.test(t)&&!lookup.isSoftware?.(t)&&!/^(?:HDMI|DP|SDI|USB|HUB)\d/i.test(t));
+ let unknownModels=(active.match(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*/gi)||[]).filter(t=>!isTechnicalToken(t,active)&&!extractKnownModels(t,lookup).length&&!/^(?:P|V|ICND?|SM|FM|LS|DP|MBI|TC|HUB)\d/i.test(t)&&!lookup.isSoftware?.(t)&&!/^(?:HDMI|DP|SDI|USB|HUB)\d/i.test(t));
+ if(!unknownModels.length&&!models.length&&!currentSoftware.length)unknownModels=[...(initial.unknownModels||[])];
  let free=active.replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*/gi,' ');
  for(const c of found)for(const w of c.words)free=free.split(w).join(' ');
  free=free.replace(/请问|请|帮我|我只要|不要|只要|想要|查询|资料|说明书|规格书|固件|技术|问题|多少|最大|可以|怎么|如何|什么|有没有|完全|对应|没有|的|了|吗|我|是|这|个|公司|屏幕|显示屏|LED|控制卡|接收卡|发送卡|正常|但|并|和|还|一直|本次反馈/gi,' ');

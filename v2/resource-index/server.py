@@ -23,7 +23,7 @@ el('form').onsubmit=async e=>{e.preventDefault();el('results').replaceChildren()
 </script></html>'''
 
 
-def create_server(work, port=0):
+def create_server(work, port=0, role_index=None):
     work=Path(work).resolve()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
@@ -32,6 +32,26 @@ def create_server(work, port=0):
             self.send_response(code);self.send_header('Content-Type',content_type);self.send_header('Content-Length',str(len(b)));self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(b)
         def do_POST(self):
             route=urlsplit(self.path).path
+            if route in ('/role/search','/role/read'):
+                if role_index is None:return self.send(503,{'error':'role-index-unavailable'})
+                try:
+                    length=int(self.headers.get('Content-Length','0'))
+                    if length<1 or length>4*1024*1024:return self.send(413,{'error':'invalid-body-size'})
+                    body=json.loads(self.rfile.read(length))
+                    if not isinstance(body,dict):raise ValueError('invalid-request')
+                    import role_index as role_engine
+                    if route=='/role/search':
+                        result=role_engine.search(work,role_index,query=body.get('q',''),role=body.get('role','all'),
+                            concepts=body.get('concepts'),models=body.get('models'),documents=body.get('documents'),
+                            authorized_keys=body.get('authorized_keys'),limit=body.get('limit',4),version=body.get('version'))
+                    else:
+                        result=role_engine.read(work,role_index,unit=body.get('unit',''),offset=body.get('offset',0),authorized_keys=body.get('authorized_keys'))
+                    return self.send(200,result)
+                except PermissionError:return self.send(403,{'error':'role-unit-outside-authorized-scope'})
+                except FileNotFoundError:return self.send(503,{'error':'role-index-unavailable'})
+                except ValueError as exc:return self.send(503 if str(exc)=='role-index-stale' else 400,{'error':str(exc)})
+                except KeyError:return self.send(404,{'error':'unknown-role-unit'})
+                except Exception:return self.send(503,{'error':'role-index-query-failed'})
             if route not in ('/resolve-documents','/resolve-assets'):return self.send(404,{'error':'not-found'})
             try:
                 length=int(self.headers.get('Content-Length','0'))
@@ -45,7 +65,21 @@ def create_server(work, port=0):
             u=urlsplit(self.path);q=parse_qs(u.query);first=lambda k,d='':q.get(k,[d])[0]
             try:
                 if u.path=='/':return self.send(200,PAGE,'text/html; charset=utf-8')
-                if u.path=='/health':return self.send(200,{'ok':True,'mode':'isolated-resource-candidate','aiEnabled':False,'pid':os.getpid()})
+                if u.path=='/health':
+                    role_health=None
+                    if role_index is not None:
+                        import role_index as role_engine
+                        role_health=role_engine.health(work,role_index)
+                    return self.send(200,{'ok':True,'mode':'isolated-resource-candidate','aiEnabled':False,'pid':os.getpid(),**({'roleIndex':role_health} if role_health is not None else {})})
+                if u.path in ('/role/search','/role/read'):
+                    if role_index is None:return self.send(503,{'error':'role-index-unavailable'})
+                    import role_index as role_engine
+                    keys=json.loads(first('authorized_keys','null'))
+                    if u.path=='/role/search':
+                        result=role_engine.search(work,role_index,query=first('q'),role=first('role','all'),concepts=json.loads(first('concepts','null')),
+                            models=json.loads(first('models','[]')),documents=json.loads(first('documents','null')),authorized_keys=keys,limit=int(first('limit','4')),version=first('version') or None)
+                    else:result=role_engine.read(work,role_index,unit=first('unit'),offset=int(first('offset','0')),authorized_keys=keys)
+                    return self.send(200,result)
                 if u.path=='/resource-info':
                     # Exact registered identity only; no scan, parsing or file reads.
                     db=engine.connect(work,True)
@@ -119,7 +153,9 @@ def create_server(work, port=0):
                             self.wfile.write(chunk);remaining-=len(chunk)
                     return
                 return self.send(404,{'error':'not-found'})
-            except (KeyError,ValueError):return self.send(400,{'error':'invalid-request'})
+            except PermissionError:return self.send(403,{'error':'role-unit-outside-authorized-scope'})
+            except FileNotFoundError:return self.send(503,{'error':'role-index-unavailable' if u.path.startswith('/role/') else 'resource-unavailable'})
+            except (KeyError,ValueError) as exc:return self.send(503 if str(exc)=='role-index-stale' else 400,{'error':'role-index-stale' if str(exc)=='role-index-stale' else 'invalid-request'})
             except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):return
             except OSError:return self.send(503,{'error':'resource-unavailable'})
             except Exception:return self.send(500,{'error':'query-failed'})
@@ -127,5 +163,5 @@ def create_server(work, port=0):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--work',default=str(engine.DEFAULT_WORK));p.add_argument('--port',type=int,default=4510);a=p.parse_args()
-    server=create_server(a.work,a.port);print('Local candidate: http://127.0.0.1:'+str(server.server_port),flush=True);server.serve_forever()
+    p=argparse.ArgumentParser();p.add_argument('--work',default=str(engine.DEFAULT_WORK));p.add_argument('--port',type=int,default=4510);p.add_argument('--role-index');a=p.parse_args()
+    server=create_server(a.work,a.port,a.role_index);print('Local candidate: http://127.0.0.1:'+str(server.server_port),flush=True);server.serve_forever()

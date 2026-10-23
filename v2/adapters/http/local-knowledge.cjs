@@ -12,7 +12,7 @@ function createLocalKnowledge({resourceBase='http://127.0.0.1:4510',toolBase='ht
   const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));return true;};
   if(req.headers.origin&&req.headers.origin!=='http://127.0.0.1:'+req.socket.localPort)return send(403,{error:'origin-not-allowed'});
   try{
-   if(req.method==='GET'&&p==='/v2/local-knowledge/client.js'){res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'public/local-knowledge.js')));return true;}
+   if(req.method==='GET'&&p==='/v2/local-knowledge/client.js'){res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});res.end(fs.readFileSync(path.join(__dirname,'../../frontend/local-knowledge.js')));return true;}
    if(req.method==='GET'&&p==='/v2/local-knowledge/cases')return send(200,await request(toolBase,'/experiment/cases'));
    if(req.method==='GET'&&p==='/v2/local-knowledge/search'){
     const q=u.searchParams.get('q')||'',mode=u.searchParams.get('mode')||'all';if(q.length>240||!['all','files','text'].includes(mode))return send(400,{error:'invalid-query'});

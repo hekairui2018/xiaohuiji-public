@@ -4,7 +4,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
  const fetchOriginal=window.fetch.bind(window);
  const {state,getSessionId:getSid,clearImage:clearOcrImage}=ui;
- async function json(url,init){const response=await fetchOriginal(url,init);let data;try{data=await response.json();}catch{throw Error('服务返回格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
+ async function json(url,init){const response=await fetchOriginal(url,init);let data;try{data=await response.json();}catch{throw Error('服务返回格式异常，请稍后重试。');}if((!response.ok||data.error)&&!(data.actualMode==='expert'&&data.reply))throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
 
  const place=l=>typeof l==='string'?l:Object.entries(l||{}).map(([k,v])=>({page:'页',paragraph:'段',row:'行',sheet:'工作表',slide:'幻灯片',table:'表',section:'章节',part:'位置',line:'行'}[k]||k)+'：'+v).join(' · ');
  const labels={chips:'芯片',pitches:'点间距',scans:'扫描方式',softwareVersions:'软件版本',firmwareVersions:'固件版本',hardwareVersions:'硬件版本',additionalConditions:'其他条件'};
@@ -20,11 +20,12 @@ window.OfflineClient = Object.freeze({create(ui) {
  function card(r,isCase=false){
   const box=make('article');box.className='v2-record';box.append(make('strong',isCase?r.title:r.name));
   if(isCase){
-   box.append(make('small',(r.modelIds||[]).join(' / ')||'适用型号未明确'),make('p',r.phenomenon));
+   box.append(make('small',(r.modelIds||[]).join(' / ')||'适用型号未明确'),make('p',r.quickSummary||r.phenomenon));
+   if(r.applicabilityNote)box.append(make('small',r.applicabilityNote));
    const scope=Object.entries(r.scope||{}).filter(([,v])=>Array.isArray(v)&&v.length).map(([k,v])=>(labels[k]||k)+'：'+v.join('、')).join('\n');
    box.append(make('pre','适用条件\n'+(scope||'原记录未完整记载，请核对型号、软硬件版本及现场条件。')));
    if(r.checks?.length){const d=make('details');d.append(make('summary','参考排查（原记录）'),make('pre',r.checks.map(x=>x.text).join('\n')));box.append(d);}
-   if(r.historicalMeasure)box.append(make('pre','历史处理措施（不代表当前已解决）\n'+r.historicalMeasure));
+   if(r.historicalMeasure){const details=make('details');details.append(make('summary','历史处理措施（需核对适用条件）'),make('pre',r.historicalMeasure));box.append(details);}
    if(r.facts?.checkResults?.length)box.append(make('pre','原记录的检查结果\n'+r.facts.checkResults.join('\n')));
    if(r.facts?.engineeringJudgement)box.append(make('pre','原记录的工程判断（限当时条件）\n'+r.facts.engineeringJudgement));
    if(r.facts?.recordedResult?.length)box.append(make('pre','原记录的结果栏（按原文保留）\n'+r.facts.recordedResult.join('\n')));
@@ -35,12 +36,16 @@ window.OfflineClient = Object.freeze({create(ui) {
    if(r.missingEvidence)box.append(make('small','仍需核对：'+r.missingEvidence));
   }else{
    box.append(make('small',[place(r.locator),(r.versions||[]).join('、')].filter(Boolean).join(' · ')));
-   if(r.text){const excerpt=make('pre',r.text);if(r.text.length>360){const details=make('details');details.append(make('summary','查看正文摘录'),excerpt);box.append(details);}else box.append(excerpt);}
+   if(r.applicabilityNote)box.append(make('small',r.applicabilityNote));
+   if(r.quickSummary)box.append(make('p',r.quickSummary));
+   if(r.text){const excerpt=make('pre',r.text);if(r.text.length>360||r.requiresExpertReview||r.quickSummary){const details=make('details');details.append(make('summary','查看正文摘录'),excerpt);box.append(details);}else box.append(excerpt);}
    if(r.mentionedModels?.length)box.append(make('small','正文提及：'+r.mentionedModels.join('、')+'（不代表兼容性确认）'));
    link(box,r.download,'打开原文件');link(box,r.download,'下载文件',r.name||'');
    if(!safeUrl(r.download))box.append(make('small','原文件链接暂未提供'));
    if(safeUrl(r.readUrl)){const button=make('button','阅读上下文');button.type='button';button.onclick=()=>read(r);box.append(button);}
-  }return box;
+  }
+  if(isCase&&r.quickSummary){const details=make('details');details.append(make('summary','查看案例条件与原文'));for(const node of [...box.children].slice(r.applicabilityNote?4:3))details.append(node);box.append(details);}
+  return box;
  }
  const toolbar=make('div');toolbar.className='v2-toolbar';const mode=make('select');mode.id='v2WorkMode';
  for(const [value,label]of [['all','资料与操作检索'],['cases','历史售后案例'],['ordering','工程配单']]){const o=make('option',label);o.value=value;mode.append(o);}
@@ -69,7 +74,7 @@ window.OfflineClient = Object.freeze({create(ui) {
   try{const capability=await json('/v2/offline/capabilities');modelAvailable=capability.expert?.available===true;
    pending.textContent=modelAvailable?(capability.expert?.trial?'0.8B检索试用 · 16K · 最近5轮':'本地模型已连接'):'本地模型未连接';pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
    expert.textContent=capability.expert?.trial?'0.8B 检索试用':'专家模式';
-   if(modelAvailable&&!modeChosen)responseMode='expert';
+   // Keep the customer's selected mode; connecting a model never silently switches it.
   }catch{modelAvailable=false;pending.textContent='本地模型连接失败';}
   updateResponseMode();
  }
@@ -114,6 +119,9 @@ window.OfflineClient = Object.freeze({create(ui) {
   if(data.result?.plan&&(data.result.bom||data.result.previewBom)&&typeof renderV2Ordering==='function')bubble.append(renderV2Ordering(data.result));
   for(const r of data.results||[])bubble.append(card(r,data.kind==='cases'));
   if(data.rawEvidence?.length){bubble.append(make('h4','相关原始资料（不等于已核验案例）'));for(const r of data.rawEvidence)bubble.append(card(r));}
+  if(data.interpretation?.corrections?.length)bubble.append(make('small','按以下词义检索：'+data.interpretation.corrections.map(c=>c.from+' → '+c.to).join('、')+'；原话已保留。'));
+  if(data.expertSuggestion?.recommended){const notice=make('p',data.expertSuggestion.reason),button=make('button',data.expertSuggestion.label);button.type='button';button.className='v2-expert-handoff';
+   const sourceSession=getSid();button.onclick=async()=>{if(queryBusy||getSid()!==sourceSession)return;await refreshModel();if(!modelAvailable){notice.textContent='专家模型暂未连接，已有问题和资料已保留；连接后可继续。';return;}responseMode='expert';modeChosen=true;updateResponseMode();await window.FrontendApp.chat.send(data.expertSuggestion.message,'请专家结合上文继续分析');};bubble.append(notice,button);}
   row.append(bubble);const messages=document.getElementById('aiMessages');ui.appendChatMessage(row);window.__v2LastReply=data;return true;
  };
  const moreButton=document.getElementById('quickMoreDocsBtn');
@@ -197,9 +205,9 @@ window.OfflineClient = Object.freeze({create(ui) {
  document.getElementById('quickSearchBtn').addEventListener('click',e=>{if(products)return;e.preventDefault();e.stopImmediatePropagation();search();},true);
  searchInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&!products){e.preventDefault();e.stopImmediatePropagation();search();}},true);
  return {request,render,legacy:false,mode,reset,setMode:modeChange,setConversationType(value){conversationType=value;},releaseGuest(sessionId){fetchOriginal('/v2/offline/session/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId}),keepalive:true}).catch(()=>{});},
-  validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return false;}return true;},
+  validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>8000){feedback.textContent='问题最多8000字，请精简后重试。';conditions.hidden=false;conditions.open=true;return false;}return true;},
   allowImages:()=>responseMode==='expert'&&modelAvailable&&mode.value!=='ordering',
   beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;queryBusy=busy;updateResponseMode();},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':responseMode==='expert'?'正在阅读资料并思考…':'检索资料…',
-  acceptOcr(result){if(result.text.length<=240)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
+  acceptOcr(result){if(result.text.length<=8000)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
  };
 }});

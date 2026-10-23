@@ -19,14 +19,14 @@ function documentLabel(name){
 }
 const {selectedDeviceName}=require('../../domain/knowledge/device-name.cjs');
 const link=d=>{const url=d.url||d.publicUrl||null,name=d.name||d.file,clean=(d.kind==='firmware'?name:documentLabel(name))+(d.displayQualifier?' · '+d.displayQualifier:'');return {name,url,deviceName:d.deviceName||null,deviceNameBasis:d.deviceNameBasis||null,sha256:d.sha256||null,sourceDirectory:d.sourceDirectory||null,downloadUrl:d.downloadUrl||null,documentEdition:d.documentEdition||null,documentDate:d.documentDate||null,dateBasis:d.dateBasis||null,dateEvidence:d.dateEvidence||null,clean:clean,btn:clean,verificationStatus:d.verificationStatus||'unknown',resourceOnly:!!d.resourceOnly,sameNameDifferentContent:!!d.sameNameDifferentContent,kind:d.kind,resourceId:d.resourceId||null,resourceVersionId:d.resourceVersionId||null,classificationBasis:d.classificationBasis||null,classificationConflict:d.classificationConflict||null,sourceGroup:d.sourceGroup||null,sourceRole:d.sourceRole||null,detectedKind:d.detectedKind||null,classificationEvidence:d.documentMetadata?.evidence||[],parseStatus:d.parseStatus||null,applicableModels:d.documentMetadata?.coverModels||[],scopeEvidence:d.documentMetadata?.scopeEvidence||[],associationStatus:d.associationStatus||'snapshot-association',versionBasis:d.versionBasis||null,documentVersion:d.documentVersion||null,documentLanguage:d.documentLanguage||null,versionSelection:d.versionSelection||null,historyStatus:d.historyStatus||null,historyBasis:d.historyBasis||null,historyDirectories:d.historyDirectories||[],available:Boolean(url),unavailableReason:url?null:'original-not-registered'};};
-function productView(p,{local=false,facts=null}={}){
- const documents=selectQuickDocuments(p.documents||[],{local}).selected;
+function productView(p,{local=false,facts=null,documentPolicy=selectQuickDocuments}={}){
+ const documents=documentPolicy(p.documents||[],{local}).selected;
  const groups=['spec','manual','other','pending'].map(kind=>({key:kind,label:labels[kind],items:documents.filter(d=>d.kind===kind).map(link).sort(newestFirst)})).filter(g=>g.items.length);
  const fw=(p.firmware||[]).filter(f=>['uploaded','local-indexed'].includes(f.status)&&f.publicUrl);if(fw.length)groups.push({key:'firmware',label:'固件',items:fw.map(link)});
  const features=require('../../domain/knowledge/product-table-facts.cjs').applyTableFacts(productCardFeatures(p),facts,p);
  return {name:p.displayName||p.model,deviceName:selectedDeviceName(documents),modelId:p.modelId||null,aliases:p.aliases||[],features,specGroups:groups.filter(g=>g.key!=='firmware'),firmwareGroup:groups.find(g=>g.key==='firmware')||null,docGroups:groups,specFiles:documents.map(d=>d.name),specLinks:documents.map(d=>d.url)};
 }
-function createQuickService(app,{resolveDocuments,localCatalog,productFacts}={}){
+function createQuickService(app,{resolveDocuments,localCatalog,productFacts,documentPolicy=selectQuickDocuments}={}){
  const assets=app.quickResources();
  // Empty search is deliberately not a wildcard; browse uses known product identities.
  const all=()=>app.quickSearch('').records.length?app.quickSearch('').records:app.quickBrowse();
@@ -35,14 +35,14 @@ function createQuickService(app,{resolveDocuments,localCatalog,productFacts}={})
  const versions=(product,websiteOnly,historyOnly,includeHistory)=>{
   let cache=versionSelections.get(product);if(!cache){cache=new Map();versionSelections.set(product,cache);}
   const key=JSON.stringify([!!(websiteOnly||historyOnly),!!(includeHistory||historyOnly)]);
-  if(!cache.has(key))cache.set(key,selectQuickDocuments(product.documents||[],{local:!!localCatalog,websiteOnly,includeHistory,historyOnly}));
+  if(!cache.has(key))cache.set(key,documentPolicy(product.documents||[],{local:!!localCatalog,websiteOnly,includeHistory,historyOnly}));
   return cache.get(key);
  };
  const localProducts=async()=>{const resources=await localCatalog();if(augmentedSource!==resources){augmentedProducts=augmentProducts(all(),resources,{includeSigned:true});augmentedSource=resources;}return augmentedProducts;};
  return {
-  async search(q){let records=app.quickSearch(q).records;if(localCatalog){const augmented=await localProducts();const ids=new Set(records.map(p=>p.modelId).filter(Boolean)),names=new Set(records.map(p=>p.displayName));records=augmented.filter(p=>(p.modelId&&ids.has(p.modelId))||names.has(p.displayName)||String(p.displayName).toUpperCase()===String(q).toUpperCase()||String(p.modelId).replace(/^HD-/,'')===String(q).toUpperCase());}const facts=productFacts&&records.length?await productFacts(records):[],results=records.map((p,i)=>productView(p,{local:!!localCatalog,facts:facts[i]})),chip=app.chipLookup(q,records.map(p=>({modelId:p.modelId}))),series=new Set(records.map(p=>p.parameters?.productSeries).filter(Boolean)),seen=new Set(records.map(p=>p.modelId));
+  async search(q){let records=app.quickSearch(q).records;if(localCatalog){const augmented=await localProducts();const ids=new Set(records.map(p=>p.modelId).filter(Boolean)),names=new Set(records.map(p=>p.displayName));records=augmented.filter(p=>(p.modelId&&ids.has(p.modelId))||names.has(p.displayName)||String(p.displayName).toUpperCase()===String(q).toUpperCase()||String(p.modelId).replace(/^HD-/,'')===String(q).toUpperCase());}const facts=productFacts&&records.length?await productFacts(records):[],results=records.map((p,i)=>productView(p,{local:!!localCatalog,facts:facts[i],documentPolicy})),chip=app.chipLookup(q,records.map(p=>({modelId:p.modelId}))),series=new Set(records.map(p=>p.parameters?.productSeries).filter(Boolean)),seen=new Set(records.map(p=>p.modelId));
    if(resolveDocuments){
-    const documents=records.flatMap(p=>{const docs=selectQuickDocuments(p.documents||[],{local:!!localCatalog}).selected;return ['spec','manual','other','pending'].flatMap(kind=>docs.filter(d=>d.kind===kind).sort(newestFirst));}),views=results.flatMap(p=>p.specGroups.flatMap(g=>g.items));
+    const documents=records.flatMap(p=>{const docs=documentPolicy(p.documents||[],{local:!!localCatalog}).selected;return ['spec','manual','other','pending'].flatMap(kind=>docs.filter(d=>d.kind===kind).sort(newestFirst));}),views=results.flatMap(p=>p.specGroups.flatMap(g=>g.items));
     const positions=documents.map((d,i)=>d.detectedKind||d.documentEdition==='signed'&&d.sourceLocationId?-1:i).filter(i=>i>=0),resolutions=await resolveDocuments(positions.map(i=>documents[i]));
     for(let n=0;n<positions.length;n++){const i=positions[n];Object.assign(views[i],resolutions[n]||{url:null,available:false,unavailableReason:'resource-resolution-unavailable'});views[i].unavailableMessage=views[i].available?null:unavailableMessages[views[i].unavailableReason]||'暂无法提供已确认的原件';}
     for(const p of results){for(const g of p.specGroups)g.items=g.items.filter(d=>d.unavailableReason!=='signed-edition-hidden');p.specGroups=p.specGroups.filter(g=>g.items.length);p.docGroups=p.docGroups.filter(g=>g.items.length);const docs=p.specGroups.flatMap(g=>g.items);p.specFiles=docs.map(d=>d.name);p.specLinks=docs.map(d=>d.url);}

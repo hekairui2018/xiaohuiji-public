@@ -19,7 +19,9 @@ async function startOffline(options={}){
  for(const protectedDir of ['backend','frontend','data','v2/data'].map(p=>path.join(root,p)))if(dataDirectory===protectedDir||dataDirectory.startsWith(protectedDir+path.sep))throw Error('V2 runtime data must not use V1 or knowledge directories');
  const logs=require('../external-services/feishu-logs.cjs').createFeishuLogs({directory:path.join(dataDirectory,'logs'),configFile:options['feishu-config']||path.join(dataDirectory,'feishu.env')});
  const images=require('../external-services/local-images.cjs').createLocalImages(path.join(dataDirectory,'images'));
- const child=spawn(options.python||process.env.XHJ_PYTHON||'python',[path.join(root,'v2/resource-index/server.py'),'--port',String(resourcePort),'--work',index],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});
+ const roleIndex=options['role-index']?path.resolve(options['role-index']):null;
+ if(roleIndex&&!fs.existsSync(roleIndex))throw Error('Requested role index is missing');
+ const child=spawn(options.python||process.env.XHJ_PYTHON||'python',[path.join(root,'v2/resource-index/server.py'),'--port',String(resourcePort),'--work',index,...(roleIndex?['--role-index',roleIndex]:[])],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});
  let childError;child.on('error',e=>{childError=e;});child.stderr.on('data',d=>process.stderr.write(d));
  let ready=false;
  for(let i=0;i<60;i++){
@@ -32,17 +34,17 @@ async function startOffline(options={}){
  const capture=options['bonsai-monitor']===true?require('../dev-monitor/capture.cjs').createCapture({enabled:true}):null;
  const createExpert=capture?settings=>require('../dev-monitor/expert.cjs').createMonitoredExpert({capture,...settings}):require('../model-adapter/evidence-expert.cjs').createEvidenceExpert;
  const developmentMonitor=capture?require('../dev-monitor/http.cjs').createMonitorHttp(capture):null;
- const expert=createExpert({baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
+ const expert=createExpert({autoReadCandidates:2,baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
   fs.appendFileSync(path.join(dataDirectory,'expert-model-calls.private.jsonl'),JSON.stringify({at:new Date().toISOString(),...entry})+'\n');
  }});
- const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert});
+ const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert,roleIndexEnabled:!!roleIndex});
  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
  const accessGuard=lan?require('../adapters/http/lan-access.cjs').createLanGuard({...lan,port,publicOrigin:options['public-origin']||null}):null;
  const publicEvidenceFile=path.join(dataDirectory,'public-evidence-verified.private.json');
  const verifiedDocuments=fs.existsSync(publicEvidenceFile)?JSON.parse(fs.readFileSync(publicEvidenceFile,'utf8')).documents:[];
  const publicChat=publicCatalog?require('../adapters/http/public-chat.cjs').createPublicChat({app,knowledge,catalog:publicCatalog,expert,verifiedDocuments}):null;
- const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor});
+ const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'expert-opt-in',roleIndexEnabled:!!roleIndex,knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor});
  const preparationStarted=Date.now();
  try{await server.prepareCatalogs();console.log(JSON.stringify({event:'catalog-prepared',elapsedMs:Date.now()-preparationStarted}));await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});}catch(e){child.kill();logs.close();throw e;}
  const runtime={instance:'v2-offline',host,lan,port,resourcePort,publicOrigin:options['public-origin']||null,publicScope:publicCatalog?'product-quick-and-approved-cloud-documents':null,pid:process.pid,indexPid:child.pid,knowledgeVersion:knowledge.version,startedAt:new Date().toISOString()};
@@ -54,5 +56,5 @@ async function startOffline(options={}){
  console.log(JSON.stringify({instance:'v2-offline',url:'http://'+(lan?.address||'127.0.0.1')+':'+port,wiki:'/wiki',consultation:'/huiai',knowledgeVersion:knowledge.version,modelCalls:0,resourcePort,pid:process.pid,indexPid:child.pid}));
  return {server,close};
 }
-if(require.main===module){const {values}=parseArgs({options:{...Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config','lan-address','expert-model-url','public-origin','public-allowlist','oss-config'].map(k=>[k,{type:'string'}])),lan:{type:'boolean',default:false},'bonsai-monitor':{type:'boolean',default:false}}});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
+if(require.main===module){const {values}=parseArgs({options:{...Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config','lan-address','expert-model-url','role-index','public-origin','public-allowlist','oss-config'].map(k=>[k,{type:'string'}])),lan:{type:'boolean',default:false},'bonsai-monitor':{type:'boolean',default:false}}});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
 module.exports={startOffline};

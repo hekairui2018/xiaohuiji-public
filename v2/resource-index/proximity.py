@@ -8,7 +8,8 @@ import engine
 # Text equivalences only; these neither select a business route nor infer a model.
 ALIASES = [('闪烁', '闪屏', '频闪'), ('颜色异常', '颜色不正常', '偏色', '花屏'),
            ('模组', '模块'), ('排线', '扁平线'), ('Wi-Fi', 'WIFI', '无线'),
-           ('搜不到', '搜索不到', '找不到'), ('带载', '像素负载')]
+           ('搜不到', '搜索不到', '找不到'), ('带载', '像素负载'),
+           ('灰阶', '灰度等级', '灰度级', 'Gray scale', 'Grey scale', 'Grayscale', 'Gray level', 'Grey level')]
 CASE_START = re.compile(r'(?m)^\s*(?:案例\s*[一二三四五六七八九十\d]+|\d+(?:\.\d+)+\s+[^\n]+|\d+[、.]\s*[^\n]{0,45}(?:芯片|模组|问题|异常|闪烁|花屏|黑屏)[^\n]*|(?:故障现象|问题现象|客户反馈)\s*[:：])')
 MODEL_START = re.compile(r'(?mi)^\s*(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9]*(?:-[A-Z0-9]+)*(?:[ \t]*(?:控标点|技术参数|规格书|产品参数|用户手册)[^\n]*|[ \t]*$)')
 

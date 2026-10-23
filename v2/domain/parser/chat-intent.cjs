@@ -13,7 +13,7 @@ function decideClause(text,{models=[],software=[],orderingContext=null,relations
  const categories=resourceCategories.filter(([,re])=>re.test(positive)).map(([k])=>k);
  for(const [type,re]of [['document',/说明书|说名书|说明数|手册|规格书|资料|文档|教程|固件|\.pdf|\.bin/i],['interface',/HDMI|HUB75|USB|DVI|网口/i],['software',/软件|APP|云平台/i],['module',/模组|单元板/],['device',/设备|控制卡|接收卡|发送卡|屏幕|显示屏/]]){const m=re.exec(positive);if(m)objects.push({type,text:m[0]});}
  for(const id of models)objects.push({type:'product',id});for(const name of software)objects.push({type:'software',id:name});
- for(const [id,re]of [['grayscale',/灰阶|灰度级/],['load',/带载|带得|带几|带多少/],['size',/尺寸|宽高|宽|高|分辨率/],['function',/功能|用途|支持|能干啥|有什么用/],['firmware',/固件|刷|烧录|升级/]]){const m=re.exec(positive);if(m)topics.push({id,text:m[0]});}
+ for(const [id,re]of [['grayscale',/灰阶|灰度(?:等级|级)/],['load',/带载|带得|带几|带多少/],['size',/尺寸|宽高|宽|高|分辨率/],['function',/功能|用途|支持|能干啥|有什么用/],['firmware',/固件|刷|烧录|升级/]]){const m=re.exec(positive);if(m)topics.push({id,text:m[0]});}
  const deictic=/这个|那个|刚才|上一款|上一个|它的?|这份/.exec(positive);
  const observedPhenomenon=relations.find(r=>r.role!=='negated'&&r.predicate.type==='observation'&&r.target?.type==='phenomenon');
  const fault=reportSignal?[reportSignal.text]:/(?:(?:发现|出现|发生|存在)[^，。；]{0,6}异常|(?:屏|卡|设备|软件)[^，。；]{0,6}(?:坏了|不工作|没反应)|(?:灰阶|显示|亮度|颜色|画面)[^，。；]{0,6}(?:异常|不正常)|(?:升级|刷(?:入|机|固件)?|烧录|发送|联网|连接|安装)[^，。；]{0,8}(?:失败|报错|不成功)|黑屏|花屏|灰阶异常|闪烁|闪屏|闪点|偏色|色差|颜色异常|颜色不正常|颜色不对|变色|色块|连不上|掉线|不开机|水波纹|摩尔纹|鬼影|拖影|横线|竖线|死机|卡死|不亮|无显示|(?:无|没(?:有)?)信号|闪退|崩溃|无响应|打不开|升级失败|刷机失败|刷不上|烧录失败|(?:设备|控制卡|接收卡|Wi-?Fi|SSID|热点)[^，。；]{0,12}(?:搜不到|搜索不到|搜索不到|找不到|异常)|(?:搜不到|搜索不到|找不到)[^，。；]{0,10}(?:设备|控制卡|Wi-?Fi|SSID|热点)|(?:一直|局部|右边|左边)[^，。；]{0,8}(?:闪|异常)|故障)/i.exec(positive)||(observedPhenomenon?[observedPhenomenon.predicate.text+observedPhenomenon.target.text]:null);
@@ -30,8 +30,8 @@ function decideClause(text,{models=[],software=[],orderingContext=null,relations
  if(fastSemantics&&how&&lexicalSpans.some(t=>t.type==='document'&&t.start<=how.index&&t.end>=how.index+how[0].length))how=null;
  const documentInquiry=relations.find(r=>r.role!=='negated'&&r.target?.type==='document'&&r.predicate.type==='question'&&['吗','有没有','有无','哪些'].includes(r.predicate.text));
  const attributeQuestion=relations.find(r=>r.role!=='negated'&&r.predicate.type==='question'&&r.target?.type==='attribute');
- const capabilityInquiry=(/支持|有没有|有无|什么是|是什么意思|什么叫/.test(positive)||fastSemantics&&/(?<!不|未)(?:能否|可以|能|可否).{1,35}[吗么?？]?$/.test(positive))&&!/(?:我这|我的|我们|突然|一直|出现|发生|现在).{0,20}(?:黑屏|花屏|异常|无信号|没信号|闪|失败)/.test(positive);
- const parameter=/数量|(?:参数|带载|灰阶|尺寸|接口|网口|分辨率|宽高)[？?\s]*$|多少|多大|多宽|多高|几路|几个|几口|几块|几张|几级|几种|参数|规格参数|电池|代载|接口规格|缩放|尺寸是|什么尺寸|什么分辨率|有什么接口|哪些接口|最大(?:带载|宽|高)|带载是|带得动|支持|功能|用途|能干啥|有什么用/i.exec(positive)||(attributeQuestion?[attributeQuestion.predicate.text]:fastSemantics&&(capabilityInquiry||/(?:最薄|最厚)|(?:是|为).{1,30}[吗么?？]$/.test(positive))&&!document&&!find?[query]:null);
+ const capabilityInquiry=(/支持|有没有|有无|什么是|是什么意思|什么叫/.test(positive)||fastSemantics&&/(?:(?<!不|未)(?:能否|可否)[^，。；;！？!?\n]{1,35}|(?<!不|未)(?:可以|能)[^，。；;！？!?\n]{1,35}[吗么?？])$/.test(positive))&&!/(?:我这|我的|我们|突然|一直|出现|发生|现在).{0,20}(?:黑屏|花屏|异常|无信号|没信号|闪|失败)/.test(positive);
+ const parameter=/数量|(?:参数|带载|灰阶|灰度等级|灰度级|尺寸|接口|网口|分辨率|宽高)[？?\s]*$|多少|多大|多宽|多高|几路|几个|几口|几块|几张|几级|几种|参数|规格参数|电池|代载|接口规格|缩放|尺寸是|什么尺寸|什么分辨率|有什么接口|哪些接口|最大(?:带载|宽|高)|带载是|带得动|支持|功能|用途|能干啥|有什么用/i.exec(positive)||(attributeQuestion?[attributeQuestion.predicate.text]:fastSemantics&&(capabilityInquiry||/(?:最薄|最厚)|(?:是|为).{1,30}[吗么?？]$/.test(positive))&&!document&&!find?[query]:null);
  if(fastSemantics&&capabilityInquiry&&!requestOperation&&!/(?:怎么|如何|步骤|教我)/.test(positive))how=null;
  if(fastSemantics&&document&&/操作手册|操作视频|调试说明书|使用教程/.test(document.input)&&!/(?:怎么|如何|步骤|教我)/.test(positive))how=null;
  const propertyInquiry=fastSemantics&&/(?:多长|叫什么|是啥|是什么|名称|全称|需不需要|是否需要|必须(?:需要|配)?)/.test(positive)&&!/怎么|如何|步骤|步奏|注意|方式|方法/.test(positive);

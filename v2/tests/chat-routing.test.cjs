@@ -29,7 +29,7 @@ test('Strata receives its supported schema envelope with expanded visible output
  const transport=f.transport;f.transport=(url,init)=>url.pathname==='/v1/models'?Promise.resolve({ok:true,json:async()=>({data:[{id:'qwen3.8-flash-next-coder-iq1_m'}]})}):transport(url,init);
  const r=await createEvidenceExpert(f).answer({message:'C16L闪烁',route:{intent:'technical'},execute:async()=>({evidence:[{evidenceId:'source',name:'案例',text:'历史记录'}]})});
  assert.equal(r.status,'answer');assert.equal(f.calls.length,3);
- for(const call of f.calls){assert.equal(call.response_format.type,'json_schema');assert.equal(call.response_format.json_schema.strict,true);assert.equal(call.max_tokens,call===f.calls.at(-1)?8192:512);assert.equal(call.chat_template_kwargs.enable_thinking,false);}
+ for(const call of f.calls){assert.equal(call.response_format.type,'json_schema');assert.equal(call.response_format.json_schema.strict,true);assert.equal(call.max_tokens,call===f.calls.at(-1)?2048:512);assert.equal(call.chat_template_kwargs.enable_thinking,false);}
  const branches=f.calls[2].response_format.json_schema.schema.oneOf;assert.ok(branches.some(s=>s.properties.action.const==='search'));assert.deepEqual(branches.find(s=>s.properties.action.const==='answer').properties.claims.items.properties.evidenceIds.items.enum,['source']);
 });
 test('Read choices enumerate only evidence-backed blocks; no original is offered when no block exists',async()=>{
@@ -47,7 +47,7 @@ test('Decision JSON length recovery increases only the decision budget without e
   calls.push(JSON.parse(init.body));if(calls.length===1)return {ok:false,status:502,json:async()=>({error:{code:'structured_output_failed',message:'finish_reason=length'}})};
   return {ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls.length===2?{action:'finish'}:{action:'answer',claims:[],generalAdvice:['核对条件。'],question:''})}}]})};
  }});const r=await expert.answer({message:'技术问题',execute:async()=>{tools++;return {};}});
- assert.equal(r.status,'answer');assert.equal(tools,0);assert.deepEqual(calls.map(c=>c.max_tokens),[512,2048,8192]);assert.ok(calls.every(c=>c.chat_template_kwargs.enable_thinking===false));assert.equal(r.modelCalls[0].recovery,'decision-json-budget');
+ assert.equal(r.status,'answer');assert.equal(tools,0);assert.deepEqual(calls.map(c=>c.max_tokens),[512,2048,2048]);assert.ok(calls.every(c=>c.chat_template_kwargs.enable_thinking===false));assert.equal(r.modelCalls[0].recovery,'decision-json-budget');
 });
 
 test('Expert social replies genuinely call the model, use plain text and never invoke retrieval',async()=>{
@@ -89,12 +89,12 @@ test('Compatibility denials pass while affirmative claims in later clauses still
 test('A legacy analyze action transitions to final answer without enabling Thinking',async()=>{
  const f=fake([{action:'analyze',reason:'对照分支'},{action:'answer',claims:[],generalAdvice:['核对现场。'],question:''}]);
  const r=await createEvidenceExpert(f).answer({message:'复杂LED问题'});
- assert.equal(r.status,'answer');assert.deepEqual(f.calls.map(c=>c.max_tokens),[512,8192]);assert.ok(f.calls.every(c=>!c.chat_template_kwargs.enable_thinking));
+ assert.equal(r.status,'answer');assert.deepEqual(f.calls.map(c=>c.max_tokens),[512,2048]);assert.ok(f.calls.every(c=>!c.chat_template_kwargs.enable_thinking));
 });
 test('A complete original read skips finish confirmation but still permits necessary supplementary evidence',async()=>{
  const f=fake([{action:'search',query:'故障',kind:'cases'},{action:'read',blockId:7},{action:'search',query:'版本边界',kind:'text',reason:'核对原文未覆盖的版本条件'},{action:'answer',claims:[{text:'原文检查记录',evidenceIds:['source']}],generalAdvice:[],question:''}]);
  const r=await createEvidenceExpert(f).answer({message:'故障及版本条件',execute:async name=>({evidence:[{evidenceId:'source',blockId:7,text:'原文检查记录',readPerformed:name==='read_document'}]})});
- assert.equal(r.status,'answer');assert.equal(r.modelCallCount,4);assert.equal(f.calls[2].max_tokens,8192);
+ assert.equal(r.status,'answer');assert.equal(r.modelCallCount,4);assert.equal(f.calls[2].max_tokens,2048);
  assert.ok(f.calls[2].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));
  assert.equal(r.modelCalls[2].action.action,'search');
 });
@@ -114,13 +114,13 @@ test('An explicit single-model capacity question reuses product retrieval withou
   tools++;assert.equal(name,'search_evidence');assert.equal(args.kind,'products');assert.equal(f.calls.length,0);
   return {evidence:[{evidenceId:'product',name:'HD-A5L产品索引',modelIds:['HD-A5L'],text:'HD-A5L控制范围130万像素。'}]};
  }});
- assert.equal(r.status,'answer');assert.equal(tools,1);assert.equal(r.modelCallCount,1);assert.equal(f.calls[0].max_tokens,8192);assert.equal(r.claims[0].evidenceIds[0],'product');
+ assert.equal(r.status,'answer');assert.equal(tools,1);assert.equal(r.modelCallCount,1);assert.equal(f.calls[0].max_tokens,2048);assert.equal(r.claims[0].evidenceIds[0],'product');
 });
 test('Only explicit simple resources can preload evidence; candidate preparation does not remove search',async()=>{
  const f=fake([{action:'answer',claims:[{text:'历史记录提供排线检查经验，不能直接认定当前原因。',evidenceIds:['source']}],generalAdvice:['已换过排线仍固定异常，下一步记录对应接口接触情况，逐项验证。'],question:'接收卡与芯片型号是什么？'}]);let retrieves=0;
  const r=await createEvidenceExpert(f).answer({message:'C16L局部异常，换过排线无变化',route:{intent:'resources',simpleResource:true,models:['HD-C16L']},sessionState:{facts:{knownNormal:['其他区域正常']}},execute:async(name,args)=>{assert.equal(f.calls.length,0);assert.equal(name,'search_evidence');assert.equal(args.kind,'resources');retrieves++;return {evidence:[{evidenceId:'source',name:'现场案例索引',locator:{paragraph:12},text:'排线检查的历史经验'}]};}});
  assert.equal(r.status,'answer');assert.equal(retrieves,1);assert.equal(f.calls.length,1);assert.equal(f.calls[0].chat_template_kwargs.enable_thinking,false);const input=JSON.parse(f.calls[0].messages[1].content);assert.equal(input.preparedEvidence.evidence.length,1);assert.deepEqual(input.facts.knownNormal,['其他区域正常']);assert.match(r.reply,/段 12/);assert.equal(r.modelCalls[0].purpose,'final-answer');
- assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='answer'));assert.equal(f.calls[0].max_tokens,8192);
+ assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='search'));assert.ok(f.calls[0].response_format.schema.oneOf.some(s=>s.properties.action.const==='answer'));assert.equal(f.calls[0].max_tokens,2048);
 });
 test('Additional original reading is allowed only when needed; valid fenced JSON never causes regeneration',async()=>{
  const f=fake([{action:'read',blockId:7},'```json\n'+JSON.stringify({action:'answer',claims:[{text:'原文检查记录',evidenceIds:['block-8']}],generalAdvice:[],question:''})+'\n```']);const seen=[];

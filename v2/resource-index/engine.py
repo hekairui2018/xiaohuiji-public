@@ -25,6 +25,9 @@ from xml.etree import ElementTree as ET
 
 VERSION = 'resource-parser-1'
 PROJECT = Path(__file__).resolve().parents[2]
+# An isolated source copy can read the already-authorized catalogue under its
+# enclosing checkout. Writable index creation still stays in PROJECT/tmp.
+SOURCE_PROJECT = next((p for p in PROJECT.parents if (p / '.git').exists()), PROJECT)
 DEFAULT_WORK = PROJECT / 'tmp/resource-index-stage1-20261016'
 SUPPORTED = {'.pdf', '.docx', '.pptx', '.xlsx', '.txt', '.md', '.csv', '.html', '.htm', '.log', '.rtf'}
 LEGACY = {'.doc', '.ppt', '.xls', '.wps', '.chm'}
@@ -109,7 +112,8 @@ def safe_work(work, root):
 def connect(work, readonly=False):
     work = Path(work).resolve()
     allowed=(PROJECT/'tmp').resolve()
-    if work!=allowed and allowed not in work.parents:
+    source_allowed=(SOURCE_PROJECT/'tmp').resolve()
+    if work!=allowed and allowed not in work.parents and not (readonly and (work==source_allowed or source_allowed in work.parents)):
         raise ValueError('Candidate index must stay under project tmp, never in original roots')
     if not readonly:
         work.mkdir(parents=True, exist_ok=True)

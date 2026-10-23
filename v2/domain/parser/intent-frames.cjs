@@ -59,7 +59,10 @@ function analyzeFrames(text){
  // requests remain together so the existing multi-goal policy can ask priority.
  const requests=active.filter(c=>c.role==='request');
  const corrected=active.filter(c=>c.corrected);
- const selected=corrected.length?[corrected.at(-1)]:requests.length?requests:active;
+ // A request without its own object (e.g. asking what to check next) refers
+ // to the preceding report. Dropping those clauses discards the actual fault.
+ const selfContained=requests.some(c=>c.tokens.some(t=>['document','device','attribute','engineering','phenomenon'].includes(t.type))||/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*|HDPlayer|HDSet|屏掌控|软件|模组/i.test(c.text));
+ const selected=corrected.length?[corrected.at(-1)]:requests.length&&selfContained?requests:active;
  const changed=!String(text).includes('本次反馈：')&&selected.length>0&&(selected.length!==clauses.length||clauses.some(c=>c.role==='negated'));
  const focusText=changed?selected.map(c=>c.text).join('；'):String(text);
  const relations=clauses.flatMap(c=>{

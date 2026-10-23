@@ -1,3 +1,10 @@
+## 2026-10-23：V2 客服检索与诊断可靠性
+
+- 按参数、操作、案例及文件线索建立只读派生索引；保留原文身份、条件及分页，修复参数误引案例、操作章节丢失、错字解释和跨轮条件接续。
+- 专家诊断状态跨轮保留，下一步对照使用模型选择与受控模板，区分重插/已完成对照、真实/假设拓扑及软件/屏体故障；不直接确诊。
+- 定向 Node 333 项、Python 47 项通过；公开无私有数据子集 147/21 项。首次上线专家失败后恢复原版，修正后再次上线，最终九轮快速问答及一轮真实专家验收通过，专家该题约 12.9 秒。开发回归不是客户盲测。
+- V2 核心和索引已切换并核验本机/公网，原始索引哈希不变；仅同步可公开源码、合成测试与脱敏报告，一代未参与。报告：docs/v2/reports/2026-10-23-customer-service-reliability.md。
+
 ## 2026-10-22: experimental quick routing source checkpoint
 
 Unified action/entity handling, progressive ordering integration, registered FAQ row retention and necessary access/grouping dependencies. 217 targeted controlled-data checks passed; customer answer acceptance remains incomplete. See reports/2026-10-22-quick-routing-candidate-review.md. Source sync only, no deployment; private datasets and question bank excluded.
