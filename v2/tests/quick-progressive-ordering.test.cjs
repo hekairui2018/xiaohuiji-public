@@ -24,7 +24,7 @@ test('Physical targets are not silently rounded; explicit approval is recorded s
  assert.equal(r.quickContext.ordering.gridProposal.widthMm,6144);assert.match(r.reply,/允许调整尺寸/);
  r=await c.say('允许调整尺寸');const s=r.quickContext.ordering;
  assert.equal(r.intent,'ordering');assert.equal(s.confirmed.screen.physicalWidthMm,6144);assert.equal(s.confirmed.screen.moduleColumns,32);assert.equal(s.acceptedProposal.originalTarget.physicalWidthMm,6000);assert.equal(s.confirmed.provenance['/screen/moduleColumns'].kind,'user-approved-proposal');
- assert.equal(s.stage,'provisional');assert(!s.confirmed.module.scan);assert(!r.result.bom);
+ assert.equal(s.stage,'conditional');assert(!s.confirmed.module.scan);assert(!r.result.bom);assert(r.result.previewBom.length);
 });
 
 test('One condition updates only that condition; software/fault/firmware detours do not erase ordering',async()=>{
@@ -36,7 +36,7 @@ test('One condition updates only that condition; software/fault/firmware detours
 
 test('Source candidates and validated conditional calculations never become confirmed customer fields or a formal BOM',async()=>{
  const c=conversation();await c.say('模组横着20张，竖着10张');await c.say('P3');await c.say('室内');const r=await c.say('异步'),s=r.quickContext.ordering;
- assert.equal(s.stage,'provisional');assert(s.simulations.length);assert(s.simulations.every(v=>v.validation.passed&&v.source.sha256&&v.assumptions.includes('/module/scan')));assert(!s.confirmed.module.scan);assert(!s.confirmed.module.interface);assert(!s.confirmed.architecture);assert(!r.result.bom);assert.match(r.reply,/不是正式BOM/);assert.match(r.reply,/A5L/);assert.equal(r.routeLog.businessStatus.answer,'provisional');assert(s.pending.length);assert.equal(r.routeLog.ordering.simulationCount,s.simulations.length);
+ assert.equal(s.stage,'conditional');assert(s.simulations.length);assert(s.simulations.every(v=>v.validation.passed&&v.source.sha256&&v.assumptions.includes('/module/scan')));assert(!s.confirmed.module.scan);assert(!s.confirmed.module.interface);assert(!s.confirmed.architecture);assert(!r.result.bom);assert(r.result.previewBom.length);assert.match(r.reply,/条件配单/);assert.match(r.reply,/A5L/);assert.equal(r.routeLog.businessStatus.answer,'conditional');assert(s.pending.length);assert.equal(r.routeLog.ordering.simulationCount,s.simulations.length);
 });
 
 test('Complete demand still passes the original validator; subsequent grid changes reuse all confirmed module fields',async()=>{
@@ -47,7 +47,7 @@ test('Complete demand still passes the original validator; subsequent grid chang
 
 test('Only exact arithmetic on explicit module sizes can derive a formal grid',async()=>{
  const r=await progressiveOrdering(app,'配单P2.5 模组128x64，32扫，HUB75，全彩，室内，同步，接收卡，整屏1280×640');
- assert.equal(r.orderingState.stage,'formal');assert.equal(r.result.bom[0].quantity,100);assert(!r.orderingState.confirmed.screen.moduleColumns);assert(r.orderingState.derived.length===2);
+ assert.equal(r.orderingState.stage,'formal');assert.equal(r.result.bom[0].quantity,100);assert(!r.orderingState.confirmed.screen.moduleColumns);assert.equal(r.orderingState.derived.filter(d=>d.field.startsWith('/screen/')).length,2);assert.equal(r.orderingState.derived.find(d=>d.field==='/module/physicalWidthMm').value,320);
  const notDivisible=await progressiveOrdering(app,'配单P2.5 模组128x64，32扫，HUB75，全彩，室内，同步，接收卡，整屏1280×641');assert.notEqual(notDivisible.orderingState.stage,'formal');assert(!notDivisible.result.bom);
 });
 

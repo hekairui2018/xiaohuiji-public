@@ -7,6 +7,7 @@ function parseOrderingFields(text){
  const fields={},module={},screen={},provenance={},requirements={};
  const set=(target,key,value,match,prefix)=>{target[key]=value;provenance[prefix+'/'+key]={kind:'user-stated',text:match[0]};};
  let m=text.match(/\bP\s*(\d+(?:\.\d+)?)/i);if(m)set(module,'pitchMm',Number(m[1]),m,'/module');
+ m=text.match(/模组(?:的)?(?:物理)?尺寸\s*(?:是|为)?\s*[:：]?\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|毫米|cm|厘米)/i);if(m){const factor=/cm|厘米/i.test(m[3])?10:1;set(module,'physicalWidthMm',Number(m[1])*factor,m,'/module');set(module,'physicalHeightMm',Number(m[2])*factor,m,'/module');}
  m=text.match(/模组(?:的)?(?:分辨率|像素)?\s*(?:是|为|改为|调整为)?\s*[:：]?\s*(\d+)\s*[x×*]\s*(\d+)(?![\d.]|\s*(?:mm|毫米|米|m\b))/i);if(m){set(module,'pixelWidth',Number(m[1]),m,'/module');set(module,'pixelHeight',Number(m[2]),m,'/module');}
  m=text.match(/(?:^|[^A-Z0-9_-])(?:(\d+)\s*\/\s*)?(\d+)\s*(?:扫|S\b)/i);if(m)set(module,'scan',{numerator:m[1]?Number(m[1]):1,denominator:Number(m[2])},m,'/module');
  m=text.match(/\bHUB(?:75E?|12|08|320|50)\b/i);if(m)set(module,'interface',m[0].toUpperCase(),m,'/module');

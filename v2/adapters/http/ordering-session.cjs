@@ -33,6 +33,7 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
   delta.providedDevices=[...previous.confirmed.providedDevices.filter(d=>role(d)&&!changed.has(role(d))),...delta.providedDevices];
  }
  let acceptedProposal=previous?.acceptedProposal||null;
+ if(delta.screen||delta.module)acceptedProposal=null;
  if(previous?.gridProposal&&/允许调整尺寸|可以调整尺寸|按整拼尺寸|按这个尺寸/.test(text)&&!/不允许|不可以|不要|不能/.test(text)){
   const p=previous.gridProposal;delta.screen={physicalWidthMm:p.widthMm,physicalHeightMm:p.heightMm,moduleColumns:p.columns,moduleRows:p.rows};
   for(const k of Object.keys(delta.screen))delta.provenance['/screen/'+k]={kind:'user-approved-proposal',text,source:p.source};
@@ -43,9 +44,13 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
   const parts=operation.path.split('/').filter(Boolean),last=parts.pop();let parent=demand;for(const part of parts)parent=parent?.[part];if(parent)delete parent[last];
   demand.provenance??={};demand.provenance[operation.path]=operation.source;
  }
- const refs=app.orderingReferences?.(demand),negated=Object.values(demand.provenance||{}).some(p=>p.kind==='user-negated');
+ const inference=require('../../domain/ordering/planning-inference.cjs').inferModuleGeometry(demand.module);
+ const calculatedDemand={...structuredClone(demand),module:inference.module};
+ const preference=update?.planningPreference||require('../../domain/ordering/planning-inference.cjs').planningPreference(text);
+ const planningPolicy={useCatalog:preference.useCatalog??previous?.planningPolicy?.useCatalog??false,quote:preference.useCatalog!==null?preference.quote:previous?.planningPolicy?.quote||null};
+ const refs=app.orderingReferences?.(calculatedDemand),negated=Object.values(demand.provenance||{}).some(p=>p.kind==='user-negated');
  const modules=(refs?.modules||[]).filter(row=>demand.provenance?.['/module/color']?.kind!=='user-negated'||!(row.color.R&&row.color.G&&row.color.B));
- const known=[],s=demand.screen||{},m=demand.module||{};
+ const known=[],s=demand.screen||{},m=calculatedDemand.module||{};
  if(m.pitchMm)known.push('P'+m.pitchMm);
  if(s.physicalWidthMm&&s.physicalHeightMm)known.push('宽'+s.physicalWidthMm/1000+'米、高'+s.physicalHeightMm/1000+'米');
  if(s.pixelWidth&&s.pixelHeight)known.push('整屏'+s.pixelWidth+'×'+s.pixelHeight+'像素');
@@ -58,7 +63,7 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
  if(!m.pitchMm)pending.push({path:'/module/pitchMm',question:'这块屏是 P 几？'});
  if(!demand.controlMode)pending.push({path:'/controlMode',question:'要实时显示电脑画面（同步），还是发送节目后脱机播放（异步）？'});
  if(!demand.environment)pending.push({path:'/environment',question:'这块屏用于室内还是户外？'});
- const derivedDemand=structuredClone(demand),derived=[];
+ const derivedDemand=structuredClone(calculatedDemand),derived=[...inference.derived];
  // Only exact geometry from explicitly supplied module dimensions may enter a formal calculation.
  function deriveGrid(input,module){
   const screen=input.screen||{},out={...screen},basis=[];
@@ -74,17 +79,18 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
   if(grid.basis.length){derivedDemand.screen=grid.screen;derived.push(...grid.basis);}
  }
  const strict=await app.dialogue(derivedDemand);
- let stage=strict.status==='ready'&&strict.exportAllowed!==false?'formal':strict.status==='conflict'?'conflict':'needs-input';
- const simulations=[];
+ let stage=inference.conflicts.length?'conflict':strict.status==='ready'&&strict.exportAllowed!==false?'formal':strict.status==='conflict'?'conflict':'needs-input';
+ const simulations=[],simulationFailures=[];
+ const preferred=[...modules].sort((a,b)=>Number(b.size[0]===320&&b.size[1]===160&&b.interface==='HUB75')-Number(a.size[0]===320&&a.size[1]===160&&a.interface==='HUB75'));
  const evidence=modules.slice(0,3).map(row=>({moduleId:row.id,pitchMm:row.dotPitch.spacing,pixels:row.resolution,scan:row.scanningMethod,interface:row.interface,source:row.source}));
  // A requested product is a constraint, not proof that it can drive this screen.
  const id=require('../../domain/identity/model-id.cjs').modelId;
  const missingDevice=(demand.providedDevices||[]).some(d=>![...refs?.devices||[],...refs?.receivers||[]].some(r=>id(r.model)===d.modelId));
  const multi=/主屏.*副屏|副屏.*主屏|[两二三四五六七八九十2-9]\s*(?:块|面)(?:独立)?屏|多块屏|异形屏/.test(text)||previous?.scope==='multiple-or-irregular';
  if(stage!=='formal'&&stage!=='conflict'&&!missingDevice&&!multi&&!negated&&m.pitchMm&&Object.keys(s).length){
-  for(const row of [...modules].sort((a,b)=>Number(b.size[0]===320&&b.size[1]===160&&b.interface==='HUB75')-Number(a.size[0]===320&&a.size[1]===160&&a.interface==='HUB75')).slice(0,3)){
+  for(const row of preferred.filter(r=>!acceptedProposal||r.id===acceptedProposal.moduleId).slice(0,3)){
    for(const mode of demand.controlMode?[demand.controlMode]:['sync','async']){
-   const hypothesis=structuredClone(demand),assumptions=[];
+   const hypothesis=structuredClone(calculatedDemand),assumptions=[];
    const sourceModule={pitchMm:row.dotPitch.spacing,pixelWidth:row.resolution[0],pixelHeight:row.resolution[1],physicalWidthMm:row.size[0],physicalHeightMm:row.size[1],scan:{numerator:1,denominator:Number(row.scanningMethod.replace(/S$/,''))},interface:row.interface,color:{r:row.color.R,g:row.color.G,b:row.color.B}};
    for(const [key,value]of Object.entries(sourceModule))if(hypothesis.module[key]===undefined){hypothesis.module[key]=value;assumptions.push('/module/'+key);}
    if(!hypothesis.environment){hypothesis.environment=row.indoor?'indoor':'outdoor';assumptions.push('/environment');}
@@ -97,27 +103,32 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
    const geometry=deriveGrid(hypothesis,row);hypothesis.screen=geometry.screen;
    if(!geometry.screen.moduleColumns||!geometry.screen.moduleRows)continue;
    const result=await app.dialogue(hypothesis);
+   if(!['ready'].includes(result.status)&&!result.plan?.specialCanvas)simulationFailures.push({moduleId:row.id,status:result.status,reason:result.reason,screen:geometry.screen});
    if(result.status==='ready'||result.exportAllowed===false&&result.plan?.specialCanvas)simulations.push({moduleId:row.id,assumptions,source:row.source,inputs:hypothesis,derived:geometry.basis,controller:result.plan.controller.model,receiver:result.bom.find(b=>b.kind==='receiver'),validation:result.validation,datasetVersion:result.datasetVersion,preview:{plan:result.plan,topology:result.topology,topologySvg:result.topologySvg,hdsetSvg:result.hdsetSvg,previewBom:result.bom,exportAllowed:false}});
   }
   }
  }
  if(stage!=='formal'&&stage!=='conflict'&&Object.keys(s).length&&(evidence.length||simulations.length))stage='provisional';
  let gridProposal=null;
- const sample=modules[0];
+ const sample=preferred[0];
  if(sample&&s.physicalWidthMm&&s.physicalHeightMm&&!simulations.length){
   const cols=s.physicalWidthMm/sample.size[0],rows=s.physicalHeightMm/sample.size[1];
   if(!Number.isInteger(cols)||!Number.isInteger(rows)){
    const c=Math.ceil(cols),r=Math.ceil(rows);gridProposal={moduleId:sample.id,columns:c,rows:r,widthMm:c*sample.size[0],heightMm:r*sample.size[1],source:sample.source,requiresConfirmation:true};
   }
  }
+ if(!pending.length&&simulations.length&&preference.useCatalog!==false&&!(previous?.planningPolicy?.useCatalog===false&&previous.planningPolicy.quote))planningPolicy.useCatalog=true;
  if(!pending.length&&stage!=='formal'){
   if(missingDevice)pending.push({path:'/providedDevices',question:'指定设备的选型适用条件尚未建立；可以先不限定设备型号评估吗？'});
   else if(gridProposal)pending.push({path:'/screen',question:'若采用该候选模组，整拼需调整为'+gridProposal.widthMm/1000+'米×'+gridProposal.heightMm/1000+'米（'+gridProposal.columns+'×'+gridProposal.rows+'张）。允许调整尺寸，还是按现场实际张数核对？'});
-  else if(!m.pixelWidth||!m.pixelHeight)pending.push({path:'/module',question:'能提供单块模组的完整型号或规格文字吗？用来确认候选，其他已知条件不用重填。'});
+  else if(simulationFailures.length)pending.push({path:'/requirements',question:'已按候选模组计算，但当前求解器没有找到通过校验的单台主控与布线方案；这不证明所有设备都无法实现。需要另做多机分区设计，或调整分辨率，已有屏体条件会保留。'});
+  else if(planningPolicy.useCatalog&&simulations.length)pending.push({path:'/planning',question:'这份按库中规格计算的方案已列出；现场模组不同可直接补充，我会沿用屏幕条件重新计算。'});
+  else if(!m.pixelWidth||!m.pixelHeight)pending.push({path:'/module',question:'能提供单块模组的完整型号或规格文字吗？不知道也可以回复“按常规模组配”，先给出带假设的清单和连接图。'});
   else{const first=strict.missing_parameters?.[0];pending.push({path:first?.path||'/module',question:first?.reason||'请提供模组完整规格，核对当前条件与选型库不一致的地方。'});}
  }
  if(chosen){const index=simulations.findIndex(s=>s.moduleId===chosen.moduleId&&s.inputs.controlMode===chosen.inputs.controlMode&&s.controller===chosen.controller);if(index>=0)simulations.unshift(...simulations.splice(index,1));}
- const orderingState={confirmed:demand,derived,pending,candidates:evidence,simulations,gridProposal,acceptedProposal,stage,scope:multi?'multiple-or-irregular':'single-screen',datasetVersion:refs?.datasetVersion||strict.datasetVersion};
+ if(stage==='provisional'&&planningPolicy.useCatalog&&simulations.length&&demand.controlMode&&demand.environment&&!multi)stage='conditional';
+ const orderingState={confirmed:demand,derived,pending,candidates:evidence,simulations,simulationFailures,gridProposal,acceptedProposal,planningPolicy,stage,scope:multi?'multiple-or-irregular':'single-screen',datasetVersion:refs?.datasetVersion||strict.datasetVersion};
  const header=known.length?'已记下：'+known.join('；')+'。':'可以，我先帮你确定配单方向。';
  let reply;
  if(multi){stage='needs-input';orderingState.stage=stage;orderingState.candidates=[];orderingState.simulations=[];pending.splice(0,pending.length,{path:'/screen',question:'这是多屏或异形工程；请用“另一块屏”开始，说明其中一块独立矩形屏的宽高，可以吗？'});reply=header+'\n多屏不能合并成单屏配单。\n'+pending[0].question;}
@@ -126,7 +137,7 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
  else{
   const lines=[header];
   if(evidence.length&&m.pitchMm&&Object.keys(s).length&&!simulations.length)lines.push('选型库有'+modules.length+'种符合已知条件的模组候选，现场规格尚待确认。');
-  if(simulations.length){const first=simulations[0],row=modules.find(m=>m.id===first.moduleId);lines.push('暂定方向（不是正式BOM）：若采用库中'+row.resolution.join('×')+'点、'+row.scanningMethod+'、'+row.interface+'的'+(row.indoor?'室内':'户外')+'模组，按'+(first.inputs.requirements.controllerFamily==='playBox'?'播放盒':'主控')+'＋接收卡架构预核算，可选'+first.controller+(first.receiver?'，'+first.receiver.modelId+'约'+first.receiver.quantity+'张':'')+'。模组未确认项及架构均为假设，现场不同必须重算。');}
+  if(simulations.length){const first=simulations[0],row=modules.find(m=>m.id===first.moduleId);lines.push((planningPolicy.useCatalog?'采用库中候选：':'暂定方向（不是正式BOM）：若采用库中')+row.resolution.join('×')+'点、'+row.scanningMethod+'、'+row.interface+'的'+(row.indoor?'室内':'户外')+'模组，'+(planningPolicy.useCatalog?'按下方条件计算。':'按'+(first.inputs.requirements.controllerFamily==='playBox'?'播放盒':'主控')+'＋接收卡架构预核算，可选'+first.controller+(first.receiver?'，'+first.receiver.modelId+'约'+first.receiver.quantity+'张':'')+'。模组未确认项及架构均为假设，现场不同必须重算。'));}
   else if(m.pitchMm&&s.physicalWidthMm&&s.physicalHeightMm)lines.push('按标称P'+m.pitchMm+'换算约'+Math.round(s.physicalWidthMm/m.pitchMm)+'×'+Math.round(s.physicalHeightMm/m.pitchMm)+'点，只作尺寸方向；模组整拼与实际分辨率尚未确认，暂不定设备数量。');
   else if(s.pixelWidth&&s.pixelHeight){
    lines.push('整屏共'+(s.pixelWidth*s.pixelHeight).toLocaleString('en-US')+'像素。');
@@ -136,13 +147,15 @@ async function progressiveOrdering(app,text,previous,{delta:resolvedDelta,update
     orderingState.controllerPreviews=previews;
    }
   }
-  if(simulations.length)lines.push('依据：现有选型库对应模组记录及条件计算；候选原记录已保留。');
+  if(simulations.length&&!planningPolicy.useCatalog)lines.push('依据：现有选型库对应模组记录及条件计算；候选原记录已保留。');
+  if(planningPolicy.useCatalog&&simulations.length){const first=simulations[0],p=first.preview.plan;lines.push('按常规模组的条件配单：整屏'+p.screen.pixelWidth+'×'+p.screen.pixelHeight+'像素；模组'+p.screen.columns+'列×'+p.screen.rows+'行，共'+p.screen.columns*p.screen.rows+'块；'+first.controller+' 1台；'+(first.receiver?first.receiver.modelId+' '+first.receiver.quantity+'张；':'')+'使用'+p.ports.length+'个输出网口。下方清单和连接图按这些条件计算，未知扫描/接口只作选型假设，不据此生成现场配置。');}
+  if(inference.derived.length)lines.push('由已知尺寸、像素和点间距推算：'+inference.derived.map(d=>d.field.split('/').at(-1).replace('physicalWidthMm','模组宽(mm)').replace('physicalHeightMm','模组高(mm)').replace('pixelWidth','模组宽像素').replace('pixelHeight','模组高像素').replace('pitchMm','点间距(mm)')+'='+d.value).join('；')+'。');
   if(simulations.length&&/按暂定|按当前方案/.test(text))lines.push('已保留这份暂定方向；确认现场模组完整规格后，再转正式配单。');
   else if(pending[0])lines.push(pending[0].question);reply=lines.join('\n');
  }
  const preview=orderingState.simulations[0]?.preview;
  if(preview){preview.options=simulations.map((s,i)=>({id:i+1,moduleId:s.moduleId,controller:s.controller,receiver:s.receiver,controlMode:s.inputs.controlMode}));preview.assumptions=simulations[0].assumptions;}
  if(preview)reply+='\n暂定预览：'+preview.plan.module.size.join('×')+'mm、'+preview.plan.module.interface+'；未确认条件只用于预览，现场规格不同须重算。';
- return {reply,status:stage==='formal'?'answer':'clarify',result:stage==='formal'?strict:{...(preview||{}),exportAllowed:false,status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
+ return {reply,status:['formal','conditional'].includes(stage)?'answer':'clarify',result:stage==='formal'?strict:{...(preview||{}),exportAllowed:false,planningStatus:stage,status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
 }
 module.exports={createOrderingSessions,mergeOrderingDemand,progressiveOrdering};

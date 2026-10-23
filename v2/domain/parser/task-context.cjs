@@ -34,6 +34,8 @@ function decideTask(message,lookup,state={}){
  // Resolve the relation and typed changes before allowing a standalone label
  // such as “是分辨率” to claim a new parameter-query task.
  const update=messageUpdate(text,reset?null:active);
+ const planning=require('../ordering/planning-inference.cjs').planningPreference(text);
+ update.planningPreference=planning;
  const raw=chatIntent(text,lookup),decision=raw.decision;
  const resume=/(?:继续|恢复|接着|回到)/.test(text)&&/(?:配|屏|方案|刚才|之前|上次)/.test(text);
  const cancel=/^(?:取消|结束|停止|放弃)(?:当前|这个|刚才的)?(?:配单|任务|方案)[。！!\s]*$/.test(text);
@@ -69,6 +71,7 @@ function decideTask(message,lookup,state={}){
  else if(active&&raw.intent==='product'&&!active.context?.models?.length&&(active.context?.chips?.length||active.context?.missing?.includes('query-object'))){relation='CONTINUE';target=active;reason='fill-requested-identity';}
  else if(correction&&active?.type!=='ordering'&&active&&raw.models.length&&!queryAct){relation='CORRECT';target=active;reason='replace-task-object';}
  else if(active?.type==='ordering'&&/^配单方案[:：]\s*\d+$/.test(text)){relation='CONTINUE';target=active;reason='select-generated-plan';}
+ else if(!reset&&active?.type==='ordering'&&planning.related&&!raw.models.length&&!raw.software?.length){relation='CONTINUE';target=active;reason='ordering-planning-preference';}
  else if(!reset&&active?.type==='ordering'&&!queryAct&&(hasSlots||fieldReply||update.pending||raw.intent==='ordering')){
   relation=correction||fields.some(f=>valueAt(active.ordering?.confirmed,f.path)!==undefined&&JSON.stringify(valueAt(active.ordering.confirmed,f.path))!==JSON.stringify(f.value))?'CORRECT':'CONTINUE';target=active;reason='typed-slot-update';
  }else if(!reset&&active&&active.type!=='ordering'&&independent&&(!raw.models.length||raw.models.every(m=>(active.context?.models||[]).includes(m)))&&decision.reference){relation=correction?'CORRECT':'CONTINUE';target=active;reason='explicit-task-reference';}

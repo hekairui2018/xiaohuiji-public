@@ -352,9 +352,14 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
      // Apply customer-origin engineering edits through the same deterministic
      // task update used by quick mode; assistant/model prose never changes slots.
      const taskPlan=quickRetrieval.plan(input.message,state).taskPlan;
-     if(taskPlan.ordering&&['CONTINUE','CORRECT'].includes(taskPlan.relation)){
+     if(taskPlan.ordering){
       const update=await quickRetrieval.answer(input.message,{state,facts:state.facts,currentFacts:input.facts||{},onProgress});
       state=sessions.recordResult(state.id,{kind:'all',query:input.message,intent:update.intent,quickContext:update.quickContext,evidenceIds:[]});
+      if(update.result?.planningStatus==='conditional'){
+       const {routeLog,quickContext,queryPlan,retrievalTrace,...customerData}=update;
+       const output={...customerData,requestedMode,actualMode:'quick',modelStatus:'not-used',model:'v2-ordering-calculator',modelCallCount:0,executionReason:'validated-conditional-ordering',results:customerData.results||[]};
+       state=sessions.recordAnswer(state.id,output);progressCompleted=true;onProgress('completed');return send(200,{...output,sessionState:state});
+      }
      }
      state=sessions.expertState(state.id);
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
