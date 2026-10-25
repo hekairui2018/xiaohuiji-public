@@ -43,8 +43,17 @@ window.ChatController = Object.freeze({create(ui, channel = {}) {
   const elapsed=Number.isFinite(data.clientElapsedMs)?data.clientElapsedMs:data.elapsedMs;
   if(Number.isFinite(elapsed)&&elapsed>=0){const time=document.createElement('div');time.className='v2-answer-time';time.textContent='耗时 '+(elapsed/1000).toFixed(1)+' s';bubble.append(time);}
  }
- let clock;
- function startClock(){clearInterval(clock);const started=performance.now();const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-started)/1000).toFixed(1)+' s';};update();clock=setInterval(update,100);}
+ let clock,clockStarted=0,clockSession;
+ function recordProgress(label){
+  if(!sending||clockSession!==ui.getSessionId()||typeof label!=='string')return;
+  const loading=document.getElementById('aiLoading');if(!loading)return;
+  let details=loading.querySelector('.v2-loading-process');
+  if(!details){details=document.createElement('details');details.className='v2-answer-process v2-loading-process';details.open=true;const summary=document.createElement('summary');summary.textContent='处理进度';details.append(summary,document.createElement('ol'));loading.append(details);}
+  const list=details.querySelector('ol');if(list.lastElementChild?.dataset.label===label)return;
+  const row=document.createElement('li');row.dataset.label=label;row.textContent=label+' · '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';list.append(row);
+ }
+ window.addEventListener('v2-answer-progress',event=>{if(event.detail?.sessionId===clockSession)recordProgress(event.detail.label);});
+ function startClock(){clearInterval(clock);clockStarted=performance.now();clockSession=ui.getSessionId();const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';};update();recordProgress('请求已发送');clock=setInterval(update,100);}
  async function send(value, display) {
   let text = typeof value==='string'?value:ui.input.value;
   if (legacy) text=text.trim();

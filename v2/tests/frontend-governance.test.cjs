@@ -2,10 +2,10 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../frontend/chat-controller.js'),'utf8');
 function fixture(request,fetchImpl){
- const context={window:{},fetch:fetchImpl};vm.runInNewContext(source,context);
+ const context={window:{addEventListener(){}},fetch:fetchImpl,performance,document:{getElementById:()=>null},setInterval,clearInterval};vm.runInNewContext(source,context);
  const listeners=new Map();
  const turns=[],ui={input:{value:'R708',disabled:false,focus(){},addEventListener(type,listener){listeners.set(type,listener);}},sendButton:{disabled:false},state:{history:[]},getSessionId:()=>ui.sid,sid:'session-one',addUserMessage:(...args)=>turns.push(['user',...args]),addAssistantMessage:data=>turns.push(['assistant',data]),addLoading(){},removeLoading(){},setImageState(value){ui.image=value;},assistantTextOf:data=>data.reply,prepareLegacyMessage:()=>true,isSelftestEnv:()=>false};
- const controller=context.window.ChatController.create(ui,{legacy:false,request});return {ui,turns,controller,listeners};
+ ui.messages={querySelectorAll:()=>[]};const controller=context.window.ChatController.create(ui,{legacy:false,request});return {ui,turns,controller,listeners};
 }
 test('one send lifecycle rejects duplicate sends and keeps channel payload explicit',async()=>{
  let release;const calls=[];const f=fixture(body=>{calls.push(body);return new Promise(r=>release=r);});const pending=f.controller.send();await f.controller.send('duplicate');assert.equal(calls.length,1);assert.equal(f.ui.sendButton.disabled,true);assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),{message:'R708',sessionId:'session-one'});release({reply:'answer'});await pending;assert.equal(f.ui.sendButton.disabled,false);assert.equal(f.ui.state.history.length,2);assert.equal(f.turns.length,2);

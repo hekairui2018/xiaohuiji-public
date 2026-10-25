@@ -1,0 +1,70 @@
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -12,7 +12,7 @@
+   <meta property="og:title" content="小灰机 · 灰度LED显示屏智能客服与选型助手">
+   <meta property="og:description" content="速查LED显示屏控制设备的参数规格书、固件与软件，附操作视频、故障排查案例，支持按屏体尺寸智能配单选型。">
+   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23174f9e'/><path d='M37 6L17 36H29L25 58L47 26H34Z' fill='%23ffffff'/></svg>">
+-  <link rel="stylesheet" href="styles.css?v=20261022-lazy-complete">
++  <link rel="stylesheet" href="styles.css?v=20261026-process-clock">
+ </head>
+ <body data-client="rules" data-view="quick">
+   <header class="site-header">
+@@ -88,8 +88,8 @@
+   <script src="product-resources.js?v=20261021-video-nature"></script>
+   <script src="product-card.js?v=20261020-video-scope-review"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261021-quick-composer"></script>
+-  <script src="offline-client.js?v=20261021-quick-composer"></script>
++  <script src="chat-controller.js?v=20261026-process-clock"></script>
++  <script src="offline-client.js?v=20261026-process-clock"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -43,8 +43,17 @@
+   const elapsed=Number.isFinite(data.clientElapsedMs)?data.clientElapsedMs:data.elapsedMs;
+   if(Number.isFinite(elapsed)&&elapsed>=0){const time=document.createElement('div');time.className='v2-answer-time';time.textContent='耗时 '+(elapsed/1000).toFixed(1)+' s';bubble.append(time);}
+  }
+- let clock;
+- function startClock(){clearInterval(clock);const started=performance.now();const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-started)/1000).toFixed(1)+' s';};update();clock=setInterval(update,100);}
++ let clock,clockStarted=0,clockSession;
++ function recordProgress(label){
++  if(!sending||clockSession!==ui.getSessionId()||typeof label!=='string')return;
++  const loading=document.getElementById('aiLoading');if(!loading)return;
++  let details=loading.querySelector('.v2-loading-process');
++  if(!details){details=document.createElement('details');details.className='v2-answer-process v2-loading-process';details.open=true;const summary=document.createElement('summary');summary.textContent='处理进度';details.append(summary,document.createElement('ol'));loading.append(details);}
++  const list=details.querySelector('ol');if(list.lastElementChild?.dataset.label===label)return;
++  const row=document.createElement('li');row.dataset.label=label;row.textContent=label+' · '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';list.append(row);
++ }
++ window.addEventListener('v2-answer-progress',event=>{if(event.detail?.sessionId===clockSession)recordProgress(event.detail.label);});
++ function startClock(){clearInterval(clock);clockStarted=performance.now();clockSession=ui.getSessionId();const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';};update();recordProgress('请求已发送');clock=setInterval(update,100);}
+  async function send(value, display) {
+   let text = typeof value==='string'?value:ui.input.value;
+   if (legacy) text=text.trim();
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -102,7 +102,7 @@
+   const stages={understanding:'正在理解问题',searching:'正在检索资料',reading:'正在阅读原文','evidence-found':'已找到相关依据',composing:'正在整理回答',completed:'回答已完成',failed:'本次处理未完成'};
+   const poll=async()=>{if(done||getSid()!==sessionId)return;pollController=new AbortController();try{
+    const response=await fetchOriginal('/v2/offline/progress?session='+encodeURIComponent(sessionId)+'&request='+encodeURIComponent(requestId),{signal:pollController.signal});
+-   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');}}}
++   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');window.dispatchEvent(new CustomEvent('v2-answer-progress',{detail:{sessionId,label:stages[event.stage]}}));}}}
+   }catch{}finally{if(!done)timer=setTimeout(poll,300);}};
+   if(!ordering)poll();
+   try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});}
+--- a/v2/adapters/http/static-service.cjs
++++ b/v2/adapters/http/static-service.cjs
+@@ -4,10 +4,10 @@
+ function serveStatic(req,res,root=path.resolve(__dirname,'../../frontend'),{localKnowledge=false,offlineKnowledge=false,publicView=false}={}){
+  let route;try{route=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{return false;}
+  if(route==='/wiki/'){const url=new URL(req.url,'http://localhost');res.writeHead(302,{Location:'/wiki'+url.search});res.end();return true;}
+- if(route==='/v2-site-compat.js'){res.writeHead(200,{'Content-Type':types['.js'],'X-Content-Type-Options':'nosniff'});fs.createReadStream(path.join(root,'site-compat.js')).pipe(res);return true;}
++ if(route==='/v2-site-compat.js'){res.writeHead(200,{'Content-Type':types['.js'],'X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});fs.createReadStream(path.join(root,'site-compat.js')).pipe(res);return true;}
+  if(['/wiki','/huiai','/'].includes(route))route='/index.html';
+  const file=path.resolve(root,'.'+route);if(!file.startsWith(path.resolve(root)+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()||!types[path.extname(file)])return false;
+- res.writeHead(200,{'Content-Type':types[path.extname(file)],'X-Content-Type-Options':'nosniff',...(publicView&&route==='/index.html'?{'Cache-Control':'no-store'}:{})});
++ res.writeHead(200,{'Content-Type':types[path.extname(file)],'X-Content-Type-Options':'nosniff',...(['.html','.js','.css'].includes(path.extname(file))?{'Cache-Control':path.extname(file)==='.html'?'no-store':'no-cache'}:{})});
+  if(route==='/index.html'){
+   let html=fs.readFileSync(file,'utf8').replace(/<body(?: data-client="rules")?/, '<body'+(publicView?' data-audience="public"':'')+' data-client="'+(publicView?'public':offlineKnowledge?'offline':localKnowledge?'local':'rules')+'"');
+   if(publicView){
