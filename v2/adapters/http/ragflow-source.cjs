@@ -28,8 +28,10 @@ function createRagflowSource({configFile,authorize=()=>false,transport=fetch,tim
   for(const chunk of data.data.chunks){
    const source=registered.get(chunk.document_id);
    if(!source||!ids.has(chunk.document_id)||authorize(source)!==true||typeof chunk.content!=='string'||!chunk.content.trim())continue;
+   const position=chunk.positions?.[0]?.length?chunk.positions[0][0]:null;
+   const originalLocator=Number.isInteger(position)&&position>=0?/\.pdf$/i.test(source.name)?{page:position+1}:/\.pptx?$/i.test(source.name)?{slide:position+1}:undefined:undefined;
    const row={name:source.name,sha256:source.sha256,text:chunk.content.slice(0,12000),modelIds:source.modelIds||[],category:source.category,evidenceId:'rag-'+crypto.createHash('sha256').update(source.sha256+'|'+chunk.id).digest('hex'),sourceKind:source.access==='public'?'ragflow-public-original':'ragflow-internal-original',verificationStatus:'authorized-ragflow-chunk',readPerformed:true,readAvailable:false,contextComplete:false,knowledgeUnit:{kind:source.category==='manual'?'operation':'parameter',complete:false},locator:chunk.positions?.[0]?.length?{page:chunk.positions[0][0]+1}:undefined,ragflowDocumentId:source.documentId};
-   results.push(row);
+   row.locator=originalLocator;results.push(row);
   }
   return {results,scope:'authorized-documents',absenceConfirmed:false};
  }
