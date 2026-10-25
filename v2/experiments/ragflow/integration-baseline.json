@@ -9,17 +9,17 @@
     {
       "path": "v2/adapters/http/public-chat.cjs",
       "baselineSHA256": "f692ee0f5039d4fe5d1ccf1ace9d35472a2d5fed447a5a07322ab98fde30f136",
-      "candidateSHA256": "ca5bb9402c5e586326023eda7d3b2cb3e0a28b09a7334c9df64d5de36cd3f9bb"
+      "candidateSHA256": "0b1724ce0e0571f76223c9f080a12626b199a2bf365354f42190dd1ae36192d5"
     },
     {
       "path": "v2/adapters/http/offline-knowledge.cjs",
       "baselineSHA256": "9f5c9b107938441a58f9049a9e9d6248e2c7d28e0123403221446803bdfcfd59",
-      "candidateSHA256": "1900671e98108cdb0bd594a3014e8f765877e7c184297ce9c7b3d0a5e5cf62f4"
+      "candidateSHA256": "caa45baa5c2a56a107dab11f1e99c02503f43d8cffb881d9c649e7bf2f74cc51"
     },
     {
       "path": "v2/model-adapter/evidence-expert.cjs",
       "baselineSHA256": "29210e4ad6c5283c09a7ecf5e0f08ad5f1b37341920a4d1c39563b9dac1590a8",
-      "candidateSHA256": "42b276658d0d2f5f825aa6e63f0b0575bc00af9cdd2ff65851ef053b3f1b86aa"
+      "candidateSHA256": "0a0e5be9541a59ba7f873282ad89eec61cc04bb6ae4284b8fdcd67c26022f28d"
     },
     {
       "path": "v2/model-adapter/expert-context.cjs",
@@ -29,7 +29,7 @@
     {
       "path": "v2/tests/ragflow-expert.test.cjs",
       "baselineSHA256": null,
-      "candidateSHA256": "7e52cdc90b7c5edecc13c1966a97cd888c1a21ef25d1f2b6951d7c90c1005e91"
+      "candidateSHA256": "4ad97fb2bdbfc4d4ab33d88384c7347a3d7c7cd0bc801639a0177cb541e39107"
     }
   ]
 }

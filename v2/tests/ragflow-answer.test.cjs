@@ -21,3 +21,7 @@ test('Incomplete requested fields fall back instead of labelling a partial param
  const api=createRagflowAnswers({knowledge,source:{search:async()=>({results:[{name:'X1规格书.pdf',text:'支持256~65536级灰度等级',modelIds:['HD-X1'],evidenceId:'x'}]})}});
  assert.equal(await api.quick('X1带载和灰度等级分别是多少'),null);
 });
+test('A loading-capacity question retrieves total output capacity before per-port or input limits',async()=>{
+ const api=createRagflowAnswers({knowledge,source:{search:async(query)=>({results:query.includes('最大控制')?[{name:'X1规格书.pdf',text:'最大控制2600万像素，最大宽度32768像素',modelIds:['HD-X1'],evidenceId:'total'}]:[{name:'X1规格书.pdf',text:'每个网口控制范围65万像素\n最大输入分辨率4096×2160像素',modelIds:['HD-X1'],evidenceId:'port'}]})}});
+ const result=await api.quick('X1带载能力多少');assert.match(result.reply,/^最大控制2600万像素/);assert.doesNotMatch(result.reply,/4096/);
+});

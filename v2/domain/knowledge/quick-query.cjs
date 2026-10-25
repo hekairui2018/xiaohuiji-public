@@ -70,16 +70,16 @@ function parseScopedQuery(message,lookup,state={}){
  // Task ownership has already been resolved. Inherit typed identities only;
  // do not concatenate old chat and run another intent classification over it.
  let context=null;
- const numeric=/^\d+$/.test(original),numericCandidates=numeric?numericModelCandidates(original,lookup.products?.()||[]):[];
+ const numeric=/^\d+$/.test(original),numericCandidates=numeric?numericModelCandidates(original,lookup.products?.()||[]):initial.intent==='parameters'&&!initial.models.length?require('../identity/extract-models.cjs').numericQuestionCandidates(original,lookup.products?.()||[]):[];
  const chipRecord=lookup.chipLookup?.(original),chipCandidates=chipRecord?.items||[];
- const ambiguous=numeric&&(numericCandidates.length+new Set(chipCandidates.flatMap(c=>c.models)).size>1);
+ const ambiguous=(numeric||numericCandidates.length>0)&&(numericCandidates.length+new Set(chipCandidates.flatMap(c=>c.models)).size>1);
  const currentSoftware=lookup.softwareItems?.(original)||[];
  if(followup&&previous?.query)context=previous.query;
  if(initial.intent==='product'&&previous?.intent==='resources'&&previous.chips?.length&&!previous.models?.length&&/固件|升级包/.test(previous.query||''))context=[...previous.chips,previous.query].join(' ');
  const entityCorrection=initial.models.length&&/说错|不是.{0,20}[，,].{0,4}是|型号改为/.test(original)&&['technical','product'].includes(initial.intent)&&['parameters','resources','operation','compatibility','software-function'].includes(previous?.intent);
  if(entityCorrection)context=previous.query.replace(/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+.-]*/gi,' ');
  const newTopicObject=!initial.decision.reference&&initial.decision.objects.some(o=>['interface','module'].includes(o.type)||o.type==='software'&&previous?.models?.length);
- if(!context&&!newTopicObject&&!initial.models.length&&!initial.unknownModels?.length&&!numeric&&!chipCandidates.length&&!currentSoftware.length){
+ if(!context&&!newTopicObject&&!initial.models.length&&!initial.unknownModels?.length&&!numeric&&!numericCandidates.length&&!chipCandidates.length&&!currentSoftware.length){
   const last=previous;
   if(last&&(last.models?.length||last.software?.length||last.chips?.length))context=[...(last.models||[]),...(last.software||[]),...(last.chips||[])].join(' ');
  }

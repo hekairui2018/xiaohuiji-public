@@ -23,12 +23,28 @@ window.ChatController = Object.freeze({create(ui, channel = {}) {
   return {message:text, sessionId, ...(legacy ? {history:ui.state.history.slice(-8),source:ui.isSelftestEnv()?'web-selftest':'quick-site'} : {}), ...(imageId ? {images:[imageId]} : {})};
  }
  async function query(text, sessionId, imageId) {
+  const started=performance.now();
   const response = await request(payload(text, sessionId, imageId));
+  response.clientElapsedMs=performance.now()-started;
   if (ui.getSessionId() !== sessionId) return false;
   ui.removeLoading();ui.addAssistantMessage(response);
+  appendDetails(response);
   ui.state.history.push({role:'user',content:text},{role:'assistant',content:legacy?ui.assistantTextOf(response):response.reply||''});
   return true;
  }
+ function appendDetails(data){
+  const rows=ui.messages.querySelectorAll('.ai-msg-assistant');const bubble=rows[rows.length-1]?.querySelector('.ai-msg-bubble');if(!bubble)return;
+  const summary=data.processingSummary;
+  if(data.actualMode==='expert'&&summary?.version===1&&Array.isArray(summary.steps)&&summary.steps.length){
+   const details=document.createElement('details');details.className='v2-answer-process';
+   const title=document.createElement('summary');title.textContent='查看处理过程';details.append(title);
+   const list=document.createElement('ol');for(const step of summary.steps.slice(0,8)){if(typeof step.label!=='string'||typeof step.detail!=='string')continue;const item=document.createElement('li');const label=document.createElement('strong');label.textContent=step.label+'：';item.append(label,document.createTextNode(step.detail));list.append(item);}details.append(list);bubble.append(details);
+  }
+  const elapsed=Number.isFinite(data.clientElapsedMs)?data.clientElapsedMs:data.elapsedMs;
+  if(Number.isFinite(elapsed)&&elapsed>=0){const time=document.createElement('div');time.className='v2-answer-time';time.textContent='耗时 '+(elapsed/1000).toFixed(1)+' s';bubble.append(time);}
+ }
+ let clock;
+ function startClock(){clearInterval(clock);const started=performance.now();const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-started)/1000).toFixed(1)+' s';};update();clock=setInterval(update,100);}
  async function send(value, display) {
   let text = typeof value==='string'?value:ui.input.value;
   if (legacy) text=text.trim();
@@ -37,15 +53,15 @@ window.ChatController = Object.freeze({create(ui, channel = {}) {
   if (channel.validate?.(text)===false) return;
   channel.beforeSend?.();const sessionId=ui.getSessionId();
   const displayText=legacy?(display!==undefined?display:text.replace(/\[[A-Z_]+\]/g,'')).trim():display||text;
-  ui.input.value='';ui.resizeInput?.();busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());
+  ui.input.value='';ui.resizeInput?.();busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());startClock();const started=performance.now();
   try {await query(text,sessionId);}
   catch(error) {
    if (ui.getSessionId()!==sessionId) return;
    ui.removeLoading();
    ui.input.value=text;ui.resizeInput?.();
-   if (!legacy) {ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});}
+   if (!legacy) {ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});appendDetails({clientElapsedMs:performance.now()-started});}
    else {const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.style.color='#c00';bubble.textContent='请求失败：'+error.message;row.append(bubble);ui.messages.append(row);}
-  } finally {busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}
+  } finally {clearInterval(clock);busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}
  }
  async function sendImage(dataUrl) {
   if(channel.allowImages?.()===false)return;
@@ -61,11 +77,11 @@ window.ChatController = Object.freeze({create(ui, channel = {}) {
     ui.addAssistantMessage({model:'v2-offline-search',reply:result.message||'图片未识别到文字，请输入文字。'});return;
    }
    if (channel.acceptOcr?.(result)===false) return;
-   ui.addLoading(legacy?'思考中…':'检索资料…');await query(result.text,sessionId,result.imageId);
+   ui.addLoading(legacy?'思考中…':'检索资料…');startClock();await query(result.text,sessionId,result.imageId);
   } catch {
    if(ui.getSessionId()!==sessionId)return;
    ui.removeLoading();ui.addAssistantMessage({model:'v2-offline-search',reply:'本地图片识别未完成，可继续文字查询。'});
-  } finally {ui.setImageState({dataUrl:null,text:'',busy:false});busy(false);}
+  } finally {clearInterval(clock);ui.setImageState({dataUrl:null,text:'',busy:false});busy(false);}
  }
  return Object.freeze({send,sendImage});
 }});
