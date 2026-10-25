@@ -1,0 +1,357 @@
+--- a/v2/tools/start-offline.cjs
++++ b/v2/tools/start-offline.cjs
+@@ -22,10 +22,10 @@
+  const child=spawn(options.python||process.env.XHJ_PYTHON||'python',[path.join(root,'v2/resource-index/server.py'),'--port',String(resourcePort),'--work',index],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe']});
+  let childError;child.on('error',e=>{childError=e;});child.stderr.on('data',d=>process.stderr.write(d));
+  let ready=false;
+- for(let i=0;i<60;i++){
++ for(let i=0;i<300;i++){
+   if(childError)throw childError;if(child.exitCode!==null)throw Error('Read-only index process exited; check port and Python runtime');
+   try{const r=await fetch(resourceBase+'/health',{signal:AbortSignal.timeout(500)});if(r.ok&&(await r.json()).pid===child.pid){ready=true;break;}}catch{}
+-  await new Promise(r=>setTimeout(r,100));
++  await new Promise(r=>setTimeout(r,200));
+  }
+  if(!ready){child.kill();throw Error('Local index did not become ready');}
+  // Opt-in observer shares the existing expert and tool executor; it adds no separate question flow.
+@@ -35,14 +35,16 @@
+  const expert=createExpert({baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
+   fs.appendFileSync(path.join(dataDirectory,'expert-model-calls.private.jsonl'),JSON.stringify({at:new Date().toISOString(),...entry})+'\n');
+  }});
+- const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert});
++ const ragflowConfigFile=options['ragflow-config']||process.env.XHJ_RAGFLOW_CONFIG||null;
++ const driveInventoryFile=options['drive-inventory']||null;
++ const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert,ragflowConfigFile,driveInventoryFile});
+  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
+  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
+  const accessGuard=lan?require('../adapters/http/lan-access.cjs').createLanGuard({...lan,port,publicOrigin:options['public-origin']||null}):null;
+  const publicEvidenceFile=path.join(dataDirectory,'public-evidence-verified.private.json');
+  const verifiedDocuments=fs.existsSync(publicEvidenceFile)?JSON.parse(fs.readFileSync(publicEvidenceFile,'utf8')).documents:[];
+- const publicChat=publicCatalog?require('../adapters/http/public-chat.cjs').createPublicChat({app,knowledge,catalog:publicCatalog,expert,verifiedDocuments}):null;
+- const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'disabled',knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor});
++ const publicChat=publicCatalog?require('../adapters/http/public-chat.cjs').createPublicChat({app,knowledge,catalog:publicCatalog,expert,verifiedDocuments,ragflowConfigFile}):null;
++ const server=createServer({...app,health:()=>({...app.health(),feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'expert-opt-in',ragflowConfigured:!!ragflowConfigFile,driveCatalogConfigured:!!driveInventoryFile,knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor});
+  const preparationStarted=Date.now();
+  try{await server.prepareCatalogs();console.log(JSON.stringify({event:'catalog-prepared',elapsedMs:Date.now()-preparationStarted}));await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});}catch(e){child.kill();logs.close();throw e;}
+  const runtime={instance:'v2-offline',host,lan,port,resourcePort,publicOrigin:options['public-origin']||null,publicScope:publicCatalog?'product-quick-and-approved-cloud-documents':null,pid:process.pid,indexPid:child.pid,knowledgeVersion:knowledge.version,startedAt:new Date().toISOString()};
+@@ -54,5 +56,5 @@
+  console.log(JSON.stringify({instance:'v2-offline',url:'http://'+(lan?.address||'127.0.0.1')+':'+port,wiki:'/wiki',consultation:'/huiai',knowledgeVersion:knowledge.version,modelCalls:0,resourcePort,pid:process.pid,indexPid:child.pid}));
+  return {server,close};
+ }
+-if(require.main===module){const {values}=parseArgs({options:{...Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config','lan-address','expert-model-url','public-origin','public-allowlist','oss-config'].map(k=>[k,{type:'string'}])),lan:{type:'boolean',default:false},'bonsai-monitor':{type:'boolean',default:false}}});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
++if(require.main===module){const {values}=parseArgs({options:{...Object.fromEntries(['port','resource-port','index','knowledge','manifest','python','data','feishu-config','lan-address','expert-model-url','public-origin','public-allowlist','oss-config','ragflow-config','drive-inventory'].map(k=>[k,{type:'string'}])),lan:{type:'boolean',default:false},'bonsai-monitor':{type:'boolean',default:false}}});startOffline(values).catch(e=>{console.error(e.message);process.exitCode=1;});}
+ module.exports={startOffline};
+--- a/v2/adapters/http/public-chat.cjs
++++ b/v2/adapters/http/public-chat.cjs
+@@ -4,14 +4,15 @@
+ const {createQuickRetrieval}=require('./quick-retrieval.cjs');
+ const {parseQuickQuery,matchesConcept}=require('../../domain/knowledge/quick-query.cjs');
+ const {extractKnownModels}=require('../../domain/identity/extract-models.cjs');
+-function createPublicChat({app,knowledge,catalog,expert,verifiedDocuments=[]}){
++function createPublicChat({app,knowledge,catalog,expert,verifiedDocuments=[],ragflowConfigFile}){
+  const approved=new Map(catalog.approvedResources().map(r=>[r.name,r]));
+  const hashes=new Map(verifiedDocuments.map(r=>[r.name,r.sha256]));
+- const allowed=(name,hash)=>approved.has(name)&&hashes.get(name)===hash&&/^[a-f0-9]{64}$/.test(hash||'');
++ const restricted=new Set((knowledge.evidenceDocuments?.()||[]).filter(({document:d})=>d.accessRestricted).map(({document:d})=>d.name));
++ const allowed=(name,hash)=>!restricted.has(name)&&approved.has(name)&&hashes.get(name)===hash&&/^[a-f0-9]{64}$/.test(hash||'');
+  const originals=(knowledge.evidenceDocuments?.()||[]).filter(({document:d})=>allowed(d.name,d.sha256));
+  const reference=r=>r&&allowed(r.originalName,r.originalSha256);
+  const products=app.quickBrowse().map(p=>({modelId:p.modelId,displayName:p.displayName,aliases:p.aliases||[],parameters:{},documentCategory:p.documentCategory,
+-  documents:(p.documents||[]).filter(d=>approved.has(d.name)&&!d.accessRestricted).map(d=>({name:d.name,kind:d.kind,url:approved.get(d.name).url})),firmware:[],
++  documents:(p.documents||[]).filter(d=>approved.has(d.name)&&!d.accessRestricted&&!restricted.has(d.name)&&(!d.sha256||allowed(d.name,d.sha256))).map(d=>({name:d.name,kind:d.kind,url:approved.get(d.name).url})),firmware:[],
+   claims:(p.claims||[]).filter(c=>(c.sourceReferences||[c.sourceReference]).some(reference)).map(c=>({...c,sourceReferences:(c.sourceReferences||[c.sourceReference]).filter(reference),sourceReference:(c.sourceReferences||[c.sourceReference]).find(reference)}))
+  })).filter(p=>p.documents.length||p.claims.length);
+  const normalize=s=>String(s||'').normalize('NFKC').toUpperCase().replace(/^HD[-_ ]?/,'').replace(/\s/g,'');
+@@ -20,25 +21,27 @@
+  const scoped={quickBrowse:()=>products,quickSearch:q=>({records:q?findProducts(q):products}),quickResources:()=>({}),chipLookup:()=>null,
+   resourceMedia:{softwareItems:()=>[],videoCategory:()=>({groups:[],topicGroups:[],total:0})},resourceLookup:()=>({items:[]})};
+  const lookup={...publicKnowledge,chipLookup:()=>null,softwareItems:()=>[],isSoftware:()=>false};
++ const ragflow=ragflowConfigFile?require('./ragflow-answer.cjs').createRagflowAnswers({source:require('./ragflow-source.cjs').createRagflowSource({configFile:ragflowConfigFile,authorize:d=>d.access==='public'&&allowed(d.name,d.sha256)}),knowledge:publicKnowledge,lookup}):null;
+  const pages=originals.flatMap(({document:d})=>(d.pages||[]).map(p=>({name:d.name,sha256:d.sha256,text:p.text,locator:{page:p.page},modelIds:extractKnownModels(d.name,lookup),evidenceId:d.sha256+'-public-page-'+p.page,download:approved.get(d.name).url})));
+  const claimEvidence=products.flatMap(p=>p.claims.flatMap(c=>(c.sourceReferences||[]).map(r=>({name:r.originalName,sha256:r.originalSha256,text:c.text,
+-  locator:r.page?{page:r.page}:null,modelIds:[p.modelId],evidenceId:c.claimId,download:approved.get(r.originalName).url,readPerformed:true,readAvailable:false,verificationStatus:'public-original-hash-verified'}))));
++  locator:r.page?{page:r.page}:null,modelIds:[p.modelId],evidenceId:c.claimId,download:approved.get(r.originalName).url,readPerformed:false,readAvailable:true,verificationStatus:'indexed-not-content-verified'}))));
+  const evidenceById=new Map(pages.map((r,i)=>[i+1,{...r,blockId:i+1}]));
+  async function search(query,kind,options={}){
+   const q=parseQuickQuery(query,lookup),models=options.model?[normalize(options.model)]:q.models.map(normalize);
++  if(ragflow&&!['files','resources','firmware'].includes(kind)){try{const found=await ragflow.retrieve(query,{kind,models:q.models});if(found.results.length)return {results:found.results.map(r=>({...r,download:approved.get(r.name).url}))};}catch{ /* Existing authorized search remains available on RAG failure. */ }}
+   const words=query.match(/[a-z0-9]+|[\u4e00-\u9fff]{2,}/gi)||[];
+   const source=kind==='products'&&claimEvidence.length?claimEvidence:[...evidenceById.values()];
+   const results=source.filter(r=>!models.length||r.modelIds.some(m=>models.includes(normalize(m))))
+    .map(r=>({r,score:q.concepts.filter(c=>matchesConcept(c,r.text)).length*10+words.filter(w=>normalize(r.name+' '+r.text).includes(normalize(w))).length}))
+-   .filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,Math.min(options.limit||24,24)).map(x=>x.r);
++   .filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,Math.min(options.limit||24,24)).map(x=>{const r=x.r;if(!r.blockId){const original=[...evidenceById.values()].find(p=>p.name===r.name&&p.sha256===r.sha256&&(!r.locator?.page||p.locator.page===r.locator.page));return original?{...r,blockId:original.blockId}:r;}return r;});
+   return {results};
+  }
+  const retrieval=createQuickRetrieval({app:scoped,knowledge:publicKnowledge,search,searchCases:async()=>({results:[]}),
+   originalDocuments:originals,resolveDocuments:async rows=>rows.map(r=>({available:allowed(r.name,r.sha256),url:allowed(r.name,r.sha256)?approved.get(r.name).url:null})),
+   filterEvidence:async rows=>rows.filter(r=>allowed(r.name,r.sha256))});
+- const sessions=new Map();let active=0;
++ const sessions=new Map();let active=0,nextReadHandle=1000000;
+  const safeReply=text=>catalog.transform(String(text||'')).replace(/\/(?:v2\/(?:offline|resources)|directory-catalog)[^\s）)<>]*/g,'[内部链接不可公开]');
+- function visible(output){return {status:output.status||'answer',reply:safeReply(output.reply),actualMode:output.actualMode||'quick',modelStatus:output.modelStatus||'not-used',model:output.model||'v2-public-quick',
++ function visible(output){return {status:output.status||'answer',reply:safeReply(output.reply),actualMode:output.actualMode||'quick',modelStatus:output.modelStatus||'not-used',model:output.model||'v2-public-quick',answerBasis:output.answerBasis||null,modelCallCount:output.modelCallCount||0,evidenceSummary:output.evidenceSummary||null,
+   results:(output.results||[]).filter(r=>approved.has(r.name)).map(r=>({name:r.name,text:r.text?safeReply(r.text):null,download:catalog.transform({name:r.name,url:'approved'}).url})),elapsedMs:output.elapsedMs};}
+  async function answer(input,{signal}={}){
+   if(!input||typeof input.message!=='string'||!input.message.trim()||input.message.length>8000||!['quick','expert'].includes(input.mode||'quick'))return {code:400,body:{error:'invalid-query',reply:'请输入8000字以内的问题，并选择快速或专家模式。'}};
+@@ -46,38 +49,49 @@
+   for(const [id,s]of sessions)if(Date.now()-s.updatedAt>1800000&&!s.busy)sessions.delete(id);
+   const known=typeof input.conversationId==='string'&&sessions.get(input.conversationId);
+   if(!known&&sessions.size>=200)return {code:429,body:{reply:'当前咨询较多，请稍后重试。'}};
+-  const state=known||{id:randomUUID(),messages:[],facts:{},retrievalHistory:[],updatedAt:Date.now()};
+-  if(state.busy)return {code:409,body:{reply:'上一条咨询仍在处理，请稍候。'}};
+-  sessions.set(state.id,state);state.busy=true;active++;const started=Date.now();
++  const stored=known||{id:randomUUID(),messages:[],facts:{},retrievalHistory:[],updatedAt:Date.now()};
++  if(stored.busy)return {code:409,body:{reply:'上一条咨询仍在处理，请稍候。'}};
++  const state=structuredClone(stored);
++  sessions.set(state.id,stored);stored.busy=true;active++;const started=Date.now();let requestOpen=true,committed=false;
+   try{
++   signal?.throwIfAborted();
+    let output;const mode=input.mode||'quick';
+    if(mode==='expert'){
+     if(!expert)return {code:503,body:{reply:'专家模型尚未连接，请先使用快速回答。',actualMode:'expert'}};
+     const route=require('../../domain/parser/chat-intent.cjs').expertIntent(input.message,lookup,state);
+     // Read handles are request-local, issued only by this public search. Never proxy an internal block ID.
+-    const readable=new Set();
++    const readable=new Map();
+     const execute=async(name,args)=>{
+      if(name==='read_document'){
+-      if(!readable.has(args.blockId))throw Error('expert-invalid-tool');
+-      const r=evidenceById.get(args.blockId);return {evidence:[{...r,readPerformed:true,readAvailable:false,verificationStatus:'public-original-hash-verified'}]};
++      const entry=readable.get(args.blockId),offset=args.offset||0;
++      if(!requestOpen||!entry||!Number.isInteger(offset)||!entry.offsets.has(offset))throw Error('expert-invalid-tool');
++      const r=entry.row,next=offset+5000<r.text.length?offset+5000:null;if(next!==null)entry.offsets.add(next);
++      return {evidence:[{...r,blockId:args.blockId,text:r.text.slice(offset,offset+5000),nextOffset:next,readPerformed:true,readAvailable:next!==null,verificationStatus:'public-original-hash-verified'}],notice:{nextOffset:next}};
+      }
+      if(name==='calculate_ordering')return {notice:{status:'unsupported',reason:'public-calculation-not-enabled'},evidence:[]};
+      if(name!=='search_evidence')throw Error('expert-invalid-tool');
+      const query=[...(Array.isArray(args.models)?args.models:[]),args.query||''].join(' '),data=await search(query,args.kind,{limit:6});
+-     const evidence=data.results.filter(r=>!args.documents||args.documents.includes(r.name)).map(r=>{if(r.blockId)readable.add(r.blockId);return {...r,readAvailable:!!r.blockId,readPerformed:!r.blockId,verificationStatus:'public-original-hash-verified'};});
++     if(!requestOpen)throw Error('expert-invalid-tool');
++     const evidence=data.results.filter(r=>!args.documents||args.documents.includes(r.name)).map(r=>{if(r.blockId){const handle=++nextReadHandle;readable.set(handle,{row:evidenceById.get(r.blockId),offsets:new Set([0])});return {...r,blockId:handle,readAvailable:true,readPerformed:false};}return r;});
+      return {evidence,notice:{scope:'explicit-public-allowlist-only',internalIndexAvailable:false,compatibilityConfirmed:false}};
+     };
+-    output=await expert.answer({message:input.message,sessionState:state,route,execute,signal});
++    let preparedEvidence;if(ragflow){try{preparedEvidence=(await ragflow.retrieve(input.message,{state,signal})).results;}catch{}}
++    output=await expert.answer({message:input.message,sessionState:state,route,execute,signal,preparedEvidence});
+    }else{
+-    output=await retrieval.answer(input.message,{state});
++    let ragAnswer=null;if(ragflow){try{ragAnswer=await ragflow.quick(input.message,{state,signal});}catch{}}
++    output=ragAnswer||await retrieval.answer(input.message,{state});
++    state.taskState=output.quickContext?.taskState||state.taskState||{lastQuickContext:output.quickContext||null};
+     state.retrievalHistory.push({quickContext:output.quickContext});state.retrievalHistory=state.retrievalHistory.slice(-12);
+     output.actualMode='quick';
+    }
++   signal?.throwIfAborted();
+    const body=visible({...output,elapsedMs:Date.now()-started});
++   if(['unavailable','busy'].includes(output.status))return {code:output.status==='busy'?429:503,body:{...body,conversationId:state.id}};
+    state.messages.push({role:'user',content:input.message},{role:'assistant',content:body.reply});state.messages=state.messages.slice(-20);
++   state.busy=false;sessions.set(state.id,state);committed=true;
+    return {code:output.status==='unavailable'?503:output.status==='busy'?429:200,body:{...body,conversationId:state.id}};
+-  }finally{state.busy=false;state.updatedAt=Date.now();active--;}
++  }finally{requestOpen=false;stored.busy=false;stored.updatedAt=Date.now();if(!committed&&!known)sessions.delete(state.id);active--;}
+  }
+- return {answer,capabilities:async()=>({modes:['quick','expert'],expert:expert?await expert.status():{available:false},publicEvidenceDocuments:originals.length}),evidenceCount:originals.length};
++ return {answer,capabilities:async()=>({modes:['quick','expert'],expert:expert?await expert.status():{available:false},retrievalMode:ragflow?'ragflow-hybrid':'local-index',publicEvidenceDocuments:originals.length}),evidenceCount:originals.length};
+ }
+ module.exports={createPublicChat};
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -24,7 +24,9 @@
+  return clean((drive?drive[1].toUpperCase()+'盘 / ':'')+folder);
+ }
+ const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
+-function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo}={}){
++function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo,ragflowConfigFile,driveInventoryFile}={}){
++ const driveCatalog=driveInventoryFile?require('../data/drive-catalog.cjs').createDriveCatalog(driveInventoryFile):null;
++ const ragflow=ragflowConfigFile?require('./ragflow-answer.cjs').createRagflowAnswers({source:require('./ragflow-source.cjs').createRagflowSource({configFile:ragflowConfigFile,authorize:()=>true}),knowledge,lookup:{...knowledge,softwareItems:t=>(app?.resourceMedia?.softwareItems(t)||[]),isSoftware:t=>!!app?.resourceMedia?.softwareItems(t)?.length},clean,catalog:driveCatalog}):null;
+  const sessions=createOfflineSessions(sessionDirectory);
+  const modelRequests=new Map(),inFlight=new Set();
+  const progress=require('./request-progress.cjs').createRequestProgress();
+@@ -298,6 +300,7 @@
+     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536)return send(413,{error:'body-too-large'});chunks.push(chunk);}
+     let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
+     const requestedMode=input.mode||req.headers['x-v2-mode']||'quick';if(!['quick','expert'].includes(requestedMode))return send(400,{error:'invalid-mode'});
++    const localRag=ragflow&&!req.v2Public&&['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket?.remoteAddress);
+     if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
+     if(inFlight.has(input.sessionId))return send(409,{status:'busy',error:'session-request-active',reply:'当前会话仍在处理，请等待完成。'});
+     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
+@@ -318,6 +321,7 @@
+        if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');
+        const parent=readableBlocks.get(args.blockId),raw=await request('/read?block='+args.blockId);for(const b of raw.blocks||[])readableBlocks.set(b.id,parent);return {evidence:(raw.blocks||[]).map(b=>({evidenceId:'block-'+b.id,blockId:b.id,name:parent.name,download:parent.download,readUrl:'/v2/offline/read?block='+b.id,text:clean(b.text),locator:location(b.locator)}))};
+       }
++      if(localRag&&name==='search_evidence'&&!['files','resources','firmware'].includes(args.kind)){try{const found=await ragflow.retrieve(args.query,{state,kind:args.kind,models:args.models?.length?args.models:route.models,documents:args.documents});if(found.results.length)return {evidence:found.results,notice:{scope:'local-operator-private-drive',completeWorkflow:false,compatibilityConfirmed:false}};}catch{}}
+       if(['cases','text','faq','firmware'].includes(args.kind))return expertEvidence.search(args);
+       if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases','products','resources'].includes(args.kind))throw Error('expert-invalid-tool');
+       let planned=answers.classify(args.query);
+@@ -342,13 +346,15 @@
+       return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
+      };
+     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
+-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
++    let preparedEvidence;if(localRag){try{preparedEvidence=(await ragflow.retrieve(input.message,{state,signal:controller.signal})).results;}catch{}}
++    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress,preparedEvidence});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+     progressCompleted=output.status!=='unavailable';onProgress(progressCompleted?'completed':'failed');
+     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
+     }
+     const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
+     const started=Date.now();
+-    const data=await quickRetrieval.answer(query,{state,facts:state.facts,currentFacts:input.facts||{},onProgress});
++    let ragAnswer=null;if(localRag){try{ragAnswer=await ragflow.quick(query,{state});}catch{}}
++    const data=ragAnswer||await quickRetrieval.answer(query,{state,facts:state.facts,currentFacts:input.facts||{},onProgress});
+     state=sessions.recordResult(state.id,{kind,query,intent:data.intent,quickContext:data.quickContext,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
+     const {routeLog,quickContext,queryPlan,retrievalTrace,candidateCount,retrievalPolicy,sourceFailures,...customerData}=data;
+     const customerResults=(customerData.results||[]).map(({rankingSignals,...evidence})=>evidence);
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -25,10 +25,11 @@
+  });
+ }
+ const numericFormat=text=>text.replace(/(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d.,])/g,n=>n.replace(/,/g,''));
+-function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require('./local-model-transport.cjs').localModelTransport,timeoutMs=0,onDiagnostic=()=>{}}={}){
++function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require('./local-model-transport.cjs').localModelTransport,timeoutMs=120000,maxModelCalls=6,maxToolCalls=4,answerTokens=2048,onDiagnostic=()=>{}}={}){
++ if(!Number.isInteger(maxModelCalls)||maxModelCalls<1||!Number.isInteger(maxToolCalls)||maxToolCalls<1||!Number.isInteger(answerTokens)||answerTokens<512)throw Error('Invalid expert budgets');
+  const base=new URL(baseUrl);if(base.protocol!=='http:'||!['127.0.0.1','localhost'].includes(base.hostname)||base.username||base.password||base.pathname!=='/'||base.search||base.hash)throw Error('Expert model requires local origin');let busy=false;
+  async function status(){try{const r=await transport(new URL('/v1/models',base),{signal:AbortSignal.timeout(2000),redirect:'error'}),j=await r.json(),model=j.data?.[0]?.id;return r.ok&&typeof model==='string'?{available:true,model,reason:null}:{available:false,model:null,reason:'model-identity-unavailable'};}catch{return {available:false,model:null,reason:'model-offline'};}}
+- async function answer({message,sessionState={},execute,route,signal,onProgress=()=>{}}){
++ async function answer({message,sessionState={},execute,route,signal,onProgress=()=>{},preparedEvidence} ){
+   if(busy)return {status:'busy',error:'expert-busy',actualMode:'expert',reply:'专家模式忙，请稍后重试。',results:[]};busy=true;
+   const context=require('./expert-context.cjs').createExpertContext({base,transport});
+   const started=Date.now(),evidence=new Map(),trace=[],usage=[],modelCalls=[];let identity;
+@@ -40,6 +41,13 @@
+    const messages=[{role:'system',content:social?socialInstructions:instructions+'\n已提供的配单工具协议：{"action":"calculate","userQuotes":["逐字引用本轮或历史客户已确认的工程条件"]}。该工具已加载官方静态模组、设备带载与接口数据，执行现有计算及几何校验；不需要先从全文拼出完整配单表才能调用。它返回ready、needs_input或unsupported；仅ready是已校验候选，其他状态追问或说明边界，不能补造条件。由你决定是否调用。'+'\n'+retrievalInstructions+'\n相似现象但型号或芯片不同的案例，可先read核对处理结果和适用边界，再明确比较差异；不能只凭候选摘录就反复改写同一搜索。generalAdvice仅为通用方向，禁止借此栏目写公司经验或未确认的具体调参阈值；公司经验必须放claims并引用已读证据。'},{role:'user',content:JSON.stringify(input)}];
+    delete input.retrievalDirections;delete input.retrievalPolicy;
+    const finalInstructions=messages[0].content;let phase=social?'answer':'decision',decisionRecovery=false;
++   if(!social&&Array.isArray(preparedEvidence)&&preparedEvidence.length){
++    const rows=structuredClone(preparedEvidence.slice(0,6));
++    if(rows.some(e=>!e.evidenceId||typeof e.text!=='string'||e.readPerformed!==true))throw Error('expert-invalid-prepared-evidence');
++    for(const e of rows)evidence.set(e.evidenceId,e);
++    input.preparedEvidence={evidence:rows,notice:'本轮知识服务已读原文。分块不代表完整案例或完整操作。先回答已支持的部分，引用真实evidenceIds；只在明确缺项时补查，不复述无关参数。'};
++    messages[1].content=JSON.stringify(input);phase='answer';
++   }
+    const cache=new Map(),seenEvidence=new Set(),repeatedCalls=new Map();let toolExecutions=0;
+    async function runTool(name,args,purpose){
+     signal?.throwIfAborted();let canonical;
+@@ -50,7 +58,7 @@
+     }else if(name==='calculate_ordering'&&Array.isArray(args.userQuotes))canonical=JSON.stringify([name,args.userQuotes]);else if(name==='read_document'&&Number.isInteger(args.blockId)&&args.blockId>0)canonical=JSON.stringify([name,args.blockId,args.offset||0]);else throw Error('expert-invalid-tool');
+     onProgress(name==='read_document'?'reading':'searching');
+     const at=Date.now(),cached=cache.has(canonical);
+-    if(cached){const repeats=(repeatedCalls.get(canonical)||0)+1;repeatedCalls.set(canonical,repeats);if(repeats>=2){trace.push({name,arguments:args,purpose,cached:true,error:'expert-repeated-tool',elapsedMs:Date.now()-at});throw Error('expert-repeated-tool');}}else toolExecutions++;
++    if(cached){const repeats=(repeatedCalls.get(canonical)||0)+1;repeatedCalls.set(canonical,repeats);if(repeats>=2){trace.push({name,arguments:args,purpose,cached:true,error:'expert-repeated-tool',elapsedMs:Date.now()-at});throw Error('expert-repeated-tool');}}else{if(toolExecutions>=maxToolCalls)throw Error('expert-tool-limit');toolExecutions++;}
+     let result;try{result=cached?structuredClone(cache.get(canonical)):await execute(name,args);}catch(error){trace.push({name,arguments:args,purpose,cached:false,error:error.message,elapsedMs:Date.now()-at});throw error;}
+     if(!cached)cache.set(canonical,structuredClone(result));
+     const items=(result.evidence||[]).slice(0,6).filter(e=>e.evidenceId&&typeof e.text==='string').map(e=>({...e,text:e.text.slice(0,e.readPerformed||e.sourceKind==='validated-ordering-calculation'?6000:1600)}));
+@@ -61,16 +69,19 @@
+     return {intent:result.intent,notice:result.notice,cached,noNewEvidence,authorizedReads:items.filter(e=>e.readAvailable).map(e=>({action:'read',blockId:e.blockId,name:e.name,offset:e.nextOffset||0})),evidence:items.map(e=>({...e,text:e.readPerformed||e.sourceKind==='validated-ordering-calculation'?e.text:e.text.slice(0,900),previewTruncated:!e.readPerformed&&e.sourceKind!=='validated-ordering-calculation'&&e.text.length>900,proximity:e.proximity?{...e.proximity,hits:e.proximity.hits?.slice(0,8),contextBlockIds:undefined}:undefined})),progress:noNewEvidence?'未获得新证据，请回答已确认部分或追问；如需补查须明确新的证据目标':'候选原文已定位；read可核对同条案例的处理结果和条件。补查须针对不同的缺失目标，不能用改写查询替代阅读。'};
+    }
+    const simpleProduct=route?.models?.length===1&&/^(?:请问|请查|查一下)?(?:HD[- ]?)?[a-z]{1,6}\d[a-z0-9+_-]*\s*(?:的)?(?:带载|控制范围|像素|分辨率|网口数量|接口)(?:多少|是多少|多大|有几个|参数)?[？?。\s]*$/i.test(message.trim());
+-   if(simpleProduct&&typeof execute==='function'){
++   if(!preparedEvidence?.length&&simpleProduct&&typeof execute==='function'){
+     input.preparedEvidence=await runTool('search_evidence',{action:'search',query:message,kind:'products'},'simple-product-candidate');const indexed=input.preparedEvidence.evidence.filter(e=>e.verificationStatus==='indexed-not-content-verified'&&e.modelIds?.includes(route.models[0]));if(indexed.length)input.preparedEvidence.evidence=indexed;input.answerScope='只回答客户所问的单项参数，优先转述准确型号索引；不要扩展未问的宽高、手册、故障建议或重复未知项。必要时只追问单网口还是整机。';phase='answer';
+    }
+-   if(route?.simpleResource&&typeof execute==='function'){
++   if(!preparedEvidence?.length&&route?.simpleResource&&typeof execute==='function'){
+     input.preparedEvidence=await runTool('search_evidence',{action:'search',query:route.query||message,kind:'resources'},'simple-resource-candidate');messages[1].content=JSON.stringify(input);phase='answer';
+    }
+    for(let i=0;;i++){
++    if(i>=maxModelCalls)throw Error('expert-tool-limit');
+     onProgress(phase==='answer'?'composing':'understanding');
+     signal?.throwIfAborted();const remaining=timeoutMs>0?timeoutMs-(Date.now()-started):null;if(remaining!==null&&remaining<=0)throw Error('expert-timeout');
+     const answerSchema=structuredClone(schema.oneOf[2]);if(simpleProduct){answerSchema.properties.claims.maxItems=1;answerSchema.properties.generalAdvice.maxItems=0;}
++    const factualPrepared=preparedEvidence?.length&&!['aftersales','ordering'].includes(route?.hintIntent||route?.intent);
++    if(factualPrepared)answerSchema.properties.generalAdvice.maxItems=0;
+     const citable=[...evidence.values()].filter(e=>(!e.readAvailable||e.readPerformed)&&(e.sourceKind!=='validated-ordering-calculation'||e.verificationStatus==='geometry-and-static-rule-checked')).map(e=>e.evidenceId);
+     if(citable.length)answerSchema.properties.claims.items.properties.evidenceIds.items={type:'string',enum:citable};else answerSchema.properties.claims.maxItems=0;
+     const searchSchema=structuredClone(schema.oneOf[0]);
+@@ -85,11 +96,11 @@
+      if(typeof execute==='function')choices.push(schema.oneOf[4]);
+     }
+     messages[0].content=phase==='decision'?decisionInstructions:finalInstructions;
+-    const thinkEnabled=false,budget=social?2048:phase==='answer'?8192:decisionRecovery?Math.max(2048,Buffer.byteLength(JSON.stringify(input),'utf8')+1024):512;
++    const thinkEnabled=false,budget=social?2048:phase==='answer'?answerTokens:decisionRecovery?2048:512;
+     // Strata treats json_object as object-only and ignores its nonstandard schema
+     // field. Use its supported schema envelope without changing the Bonsai path.
+-    const responseFormat=identity.model==='qwen3.8-flash-next-coder-iq1_m'?{type:'json_schema',json_schema:{name:'xiaohuiji_expert_action',strict:true,schema:{oneOf:choices}}}:{type:'json_object',schema:{oneOf:choices}};
+-    const contextUsage=await context.prepare(messages,input,!social?responseFormat:null,budget);
++    const responseFormat=/^qwen3[.]8-/.test(identity.model)?{type:'json_schema',json_schema:{name:'xiaohuiji_expert_action',strict:true,schema:{oneOf:choices}}}:{type:'json_object',schema:{oneOf:choices}};
++    const contextUsage=await context.prepare(messages,input,!social?responseFormat:null,budget,{deadline:timeoutMs>0?started+timeoutMs:undefined,signal});
+     const t=Date.now(),r=await transport(new URL('/v1/chat/completions',base),{method:'POST',redirect:'error',signal:remaining===null?signal:signal?AbortSignal.any([signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining),headers:{'Content-Type':'application/json'},body:JSON.stringify({model:identity.model,cache_prompt:false,temperature:0,max_tokens:budget,chat_template_kwargs:{enable_thinking:thinkEnabled,reasoning_effort:'low'},...(!social?{response_format:responseFormat}:{}),messages})});if(!r.ok){
+      let failure;try{failure=await r.json();}catch{}
+      const structured=failure?.error?.code==='structured_output_failed',truncated=structured&&/finish_reason=length/.test(failure.error.message||'');
+@@ -117,7 +128,7 @@
+      if(typeof output.question!=='string'||!output.question.trim()||output.question.length>400)throw Error('expert-invalid-output');
+      output={action:'answer',claims:[],generalAdvice:[],question:output.question};
+     }
+-    const advice=output.generalAdvice||[];
++    const advice=factualPrepared?[]:output.generalAdvice||[];
+     if(output.action!=='answer'||!Array.isArray(output.claims)||output.claims.length>8||typeof output.question!=='string'||!Array.isArray(advice)||advice.length>6||advice.some(t=>typeof t!=='string'||t.length>4000))throw Error('expert-invalid-output');
+     for(const c of output.claims){
+      if(typeof c.text!=='string'||!c.text.trim()||c.text.length>4000||!Array.isArray(c.evidenceIds)||!c.evidenceIds.length||c.evidenceIds.some(id=>!evidence.has(id)))throw Error('expert-invalid-citation');
+--- a/v2/model-adapter/expert-context.cjs
++++ b/v2/model-adapter/expert-context.cjs
+@@ -2,23 +2,44 @@
+ // Capacity belongs to the running server, not to the model's advertised training window.
+ function createExpertContext({base,transport}){
+  let capacity,source='unavailable';
+- async function count(text){
+-  try{const r=await transport(new URL('/tokenize',base),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:text}),signal:AbortSignal.timeout(5000)});const j=await r.json();if(r.ok&&Array.isArray(j.tokens))return {tokens:j.tokens.length,method:'server-tokenizer'};}catch{}
++ function checkBudget({signal,deadline}={}){
++  signal?.throwIfAborted();
++  if(Number.isFinite(deadline)&&Date.now()>=deadline)throw Error('expert-timeout');
++ }
++ async function requestJson(route,options,limits){
++  checkBudget(limits);
++  const remaining=Number.isFinite(limits.deadline)?Math.max(1,Math.ceil(limits.deadline-Date.now())):5000;
++  const timeout=AbortSignal.timeout(Math.min(5000,remaining));
++  const signal=limits.signal?AbortSignal.any([limits.signal,timeout]):timeout;
++  // Also stop awaiting a response body if an injected transport does not itself
++  // interrupt body decoding. The signal still cancels the actual HTTP request.
++  let aborted;
++  const cancellation=new Promise((_,reject)=>{aborted=()=>reject(signal.reason);signal.addEventListener('abort',aborted,{once:true});if(signal.aborted)aborted();});
++  try{
++   const pending=(async()=>{const r=await transport(new URL(route,base),{...options,signal});return {r,j:await r.json()};})();
++   const result=await Promise.race([pending,cancellation]);checkBudget(limits);return result;
++  }finally{signal.removeEventListener('abort',aborted);}
++ }
++ async function count(text,limits){
++  try{const {r,j}=await requestJson('/tokenize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:text})},limits);if(r.ok&&Array.isArray(j.tokens))return {tokens:j.tokens.length,method:'server-tokenizer'};}catch{checkBudget(limits);}
+   // A byte bound is deliberately conservative; it is not presented as actual token usage.
+   return {tokens:Buffer.byteLength(text,'utf8'),method:'utf8-byte-upper-bound'};
+  }
+- async function prepare(messages,input,format,outputBudget){
+-  if(!capacity){try{const r=await transport(new URL('/props',base),{signal:AbortSignal.timeout(5000)}),j=await r.json(),n=j.default_generation_settings?.n_ctx;if(r.ok&&Number.isInteger(n)&&n>0){capacity=n;source='server-props';}}catch{}}
++ async function prepare(messages,input,format,outputBudget,limits={}){
++  checkBudget(limits);
++  if(!capacity){try{const {r,j}=await requestJson('/props',{},limits),n=j.default_generation_settings?.n_ctx;if(r.ok&&Number.isInteger(n)&&n>0){capacity=n;source='server-props';}}catch{checkBudget(limits);}}
+   if(!capacity)throw Error('expert-context-unavailable');
+   const available=capacity,reserve=outputBudget+2048,originalHistory=input.history.length;let estimate;
+   for(;;){
++   checkBudget(limits);
+    messages[1].content=JSON.stringify(input);
+-   estimate=await count(JSON.stringify({messages,response_format:format}));
++   estimate=await count(JSON.stringify({messages,response_format:format}),limits);
+    if(estimate.tokens+reserve<=available)break;
+    if(!input.history.length)throw Error('expert-context-capacity');
+    // Only evict old complete exchanges at actual capacity pressure; current evidence is retained.
+    input.history.shift();while(input.history[0]?.role==='assistant')input.history.shift();
+   }
++  checkBudget(limits);
+   return {capacityTokens:available,capacitySource:source,inputTokens:estimate.tokens,countMethod:estimate.method,reservedOutputTokens:outputBudget,templateSafetyTokens:2048,historyMessages:input.history.length,droppedHistoryMessages:originalHistory-input.history.length,serializedCharacters:JSON.stringify(messages).length};
+  }
+  return {prepare};
+--- /dev/null
++++ b/v2/tests/ragflow-expert.test.cjs
+@@ -0,0 +1,14 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict');
++const {createEvidenceExpert}=require('../model-adapter/evidence-expert.cjs');
++test('Server-prepared evidence is answered directly once and factual tasks cannot smuggle product steps into uncited advice',async()=>{
++ let calls=0;const expert=createEvidenceExpert({transport:async(url,options)=>{
++  if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'qwen3.8-synthetic'}]})};
++  if(url.pathname==='/props')return {ok:true,json:async()=>({default_generation_settings:{n_ctx:131072}})};
++  if(url.pathname==='/tokenize')return {ok:false,json:async()=>({})};
++  calls++;const body=JSON.parse(options.body);assert.equal(body.response_format.type,'json_schema');assert.equal(body.max_tokens,2048);
++  return {ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({action:'answer',claims:[{text:'灰度等级256~65536级',evidenceIds:['prepared']}],generalAdvice:['点击未核对的菜单修改权限'],question:''})}}]})};
++ }});
++ const result=await expert.answer({message:'X1灰度等级',route:{intent:'technical',models:['HD-X1']},preparedEvidence:[{name:'X1规格书',evidenceId:'prepared',text:'灰度等级256~65536级',modelIds:['HD-X1'],readPerformed:true,readAvailable:false}],execute:async()=>{throw Error('Prepared answer must not search again');}});
++ assert.equal(result.status,'answer');assert.equal(calls,1);assert.doesNotMatch(result.reply,/未核对|修改权限/);assert.match(result.reply,/256~65536/);
++});
