@@ -19,6 +19,7 @@ function createRagflowSource({configFile,authorize=()=>false,transport=fetch,tim
   if(models.length)eligible=eligible.filter(d=>models.some(m=>(d.modelIds||[]).includes(m))||kind==='cases'&&d.category==='case'&&!d.modelIds?.length);
   const category=kind==='products'||kind==='parameters'?'spec':kind==='operation'?'manual':null;
   if(category&&eligible.some(d=>d.category===category))eligible=eligible.filter(d=>d.category===category);
+  eligible=require('./retrieval-document-version.cjs').selectRetrievalDocuments(eligible,query);
   if(!eligible.length)return {results:[],scope:'authorized-documents',absenceConfirmed:false};
   const ids=new Set(eligible.map(d=>d.documentId));
   const response=await transport(new URL('/api/v1/retrieval',base),{method:'POST',headers:{Authorization:'Bearer '+config.apiKey,'Content-Type':'application/json'},body:JSON.stringify({question:query,dataset_ids:[...new Set(eligible.map(d=>d.datasetId))],document_ids:[...ids],page_size:Math.min(12,limit),top_k:80,similarity_threshold:0.2,vector_similarity_weight:0.5}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]):AbortSignal.timeout(timeoutMs)});
