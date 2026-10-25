@@ -19,7 +19,7 @@
     {
       "path": "v2/model-adapter/evidence-expert.cjs",
       "baselineSHA256": "29210e4ad6c5283c09a7ecf5e0f08ad5f1b37341920a4d1c39563b9dac1590a8",
-      "candidateSHA256": "0a0e5be9541a59ba7f873282ad89eec61cc04bb6ae4284b8fdcd67c26022f28d"
+      "candidateSHA256": "e4f1ad4f65c25c53c121528237c2a4ba76b9cec256e413c62c4a5c52c773723f"
     },
     {
       "path": "v2/model-adapter/expert-context.cjs",
