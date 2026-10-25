@@ -247,7 +247,7 @@
      let result;try{result=cached?structuredClone(cache.get(canonical)):await execute(name,args);}catch(error){trace.push({name,arguments:args,purpose,cached:false,error:error.message,elapsedMs:Date.now()-at});throw error;}
      if(!cached)cache.set(canonical,structuredClone(result));
      const items=(result.evidence||[]).slice(0,6).filter(e=>e.evidenceId&&typeof e.text==='string').map(e=>({...e,text:e.text.slice(0,e.readPerformed||e.sourceKind==='validated-ordering-calculation'?6000:1600)}));
-@@ -60,36 +70,36 @@
+@@ -60,36 +70,40 @@
      const signature=JSON.stringify(items.map(e=>[e.evidenceId,e.text,e.readPerformed,e.nextOffset]).sort((a,b)=>a[0].localeCompare(b[0]))),noNewEvidence=seenEvidence.has(signature);seenEvidence.add(signature);
      return {intent:result.intent,notice:result.notice,cached,noNewEvidence,authorizedReads:items.filter(e=>e.readAvailable).map(e=>({action:'read',blockId:e.blockId,name:e.name,offset:e.nextOffset||0})),evidence:items.map(e=>({...e,text:e.readPerformed||e.sourceKind==='validated-ordering-calculation'?e.text:e.text.slice(0,900),previewTruncated:!e.readPerformed&&e.sourceKind!=='validated-ordering-calculation'&&e.text.length>900,proximity:e.proximity?{...e.proximity,hits:e.proximity.hits?.slice(0,8),contextBlockIds:undefined}:undefined})),progress:noNewEvidence?'未获得新证据，请回答已确认部分或追问；如需补查须明确新的证据目标':'候选原文已定位；read可核对同条案例的处理结果和条件。补查须针对不同的缺失目标，不能用改写查询替代阅读。'};
     }
@@ -270,11 +270,14 @@
      signal?.throwIfAborted();const remaining=timeoutMs>0?timeoutMs-(Date.now()-started):null;if(remaining!==null&&remaining<=0)throw Error('expert-timeout');
 -    const answerSchema=structuredClone(schema.oneOf[2]);if(simpleProduct){answerSchema.properties.claims.maxItems=1;answerSchema.properties.generalAdvice.maxItems=0;}
 +    const answerSchema=structuredClone(schema.oneOf[2]);if(simpleProduct||compactParameters){answerSchema.properties.claims.maxItems=1;answerSchema.properties.generalAdvice.maxItems=0;}
-+    if(compactParameters)answerSchema.properties.question={type:'string',const:''};
++    delete answerSchema.properties.question;
++    answerSchema.required=answerSchema.required.filter(k=>k!=='question');
 +    const factualPrepared=preparedEvidence?.length&&!['aftersales','ordering'].includes(route?.hintIntent||route?.intent);
 +    if(factualPrepared)answerSchema.properties.generalAdvice.maxItems=0;
++    if(answerSchema.properties.generalAdvice.maxItems===0){delete answerSchema.properties.generalAdvice;answerSchema.required=answerSchema.required.filter(k=>k!=='generalAdvice');}
++    const packet=require('./answer-packet.cjs').answerPacket(input,[...evidence.values()]);
      const citable=[...evidence.values()].filter(e=>(!e.readAvailable||e.readPerformed)&&(e.sourceKind!=='validated-ordering-calculation'||e.verificationStatus==='geometry-and-static-rule-checked')).map(e=>e.evidenceId);
-     if(citable.length)answerSchema.properties.claims.items.properties.evidenceIds.items={type:'string',enum:citable};else answerSchema.properties.claims.maxItems=0;
+-    if(citable.length)answerSchema.properties.claims.items.properties.evidenceIds.items={type:'string',enum:citable};else answerSchema.properties.claims.maxItems=0;
 -    const searchSchema=structuredClone(schema.oneOf[0]);
 -    const documentNames=[...new Set([...evidence.values()].map(e=>e.name).filter(n=>typeof n==='string'&&/\.(?:pdf|docx?|pptx?|xlsx?|txt|csv)$/i.test(n)))];if(documentNames.length)searchSchema.properties.documents={type:'array',minItems:1,maxItems:4,items:{type:'string',enum:documentNames}};
 -    const knownVersions=[...new Set((JSON.stringify(input)+' '+[...evidence.values()].map(e=>e.text).join(' ')).match(/(?<![\d.])[Vv]?\d+[.]\d+[.]\d+(?:[.]\d+)?(?![\d.])/g)||[])];
@@ -286,22 +289,25 @@
 -     if(blocks.length){const readSchema=structuredClone(schema.oneOf[1]);readSchema.properties.blockId.enum=blocks;choices.push(readSchema);}
 -     if(typeof execute==='function')choices.push(schema.oneOf[4]);
 -    }
+-    messages[0].content=phase==='decision'?decisionInstructions:finalInstructions;
+-    const thinkEnabled=false,budget=social?2048:phase==='answer'?8192:decisionRecovery?Math.max(2048,Buffer.byteLength(JSON.stringify(input),'utf8')+1024):512;
++    if(citable.length)answerSchema.properties.claims.items.properties.evidenceIds.items={type:'string',enum:citable.map(packet.encode)};else answerSchema.properties.claims.maxItems=0;
++    if(compactParameters)answerSchema.properties.claims.items.properties.evidenceIds.maxItems=1;
 +    // One customer message permits one generation request. Retrieval is server-prepared;
 +    // missing evidence must become clarification, never another model/tool round.
 +    const choices=[answerSchema,schema.oneOf[3]];
-     messages[0].content=phase==='decision'?decisionInstructions:finalInstructions;
--    const thinkEnabled=false,budget=social?2048:phase==='answer'?8192:decisionRecovery?Math.max(2048,Buffer.byteLength(JSON.stringify(input),'utf8')+1024):512;
++    messages[0].content=finalInstructions+'\n只回答客户所问，不复述问题，不写多个版本均有记载等验证说明，不重复列出文件名。来源由后台展示；引用只选支撑该结论所需的短编号。';
 +    const thinkEnabled=false,budget=social?2048:phase==='answer'?(compactParameters?Math.min(768,answerTokens):answerTokens):decisionRecovery?2048:512;
      // Strata treats json_object as object-only and ignores its nonstandard schema
      // field. Use its supported schema envelope without changing the Bonsai path.
 -    const responseFormat=identity.model==='qwen3.8-flash-next-coder-iq1_m'?{type:'json_schema',json_schema:{name:'xiaohuiji_expert_action',strict:true,schema:{oneOf:choices}}}:{type:'json_object',schema:{oneOf:choices}};
 -    const contextUsage=await context.prepare(messages,input,!social?responseFormat:null,budget);
 +    const responseFormat=/^qwen3[.]8-/.test(identity.model)?{type:'json_schema',json_schema:{name:'xiaohuiji_expert_action',strict:true,schema:{oneOf:choices}}}:{type:'json_object',schema:{oneOf:choices}};
-+    const contextUsage=await context.prepare(messages,input,!social?responseFormat:null,budget,{deadline:timeoutMs>0?started+timeoutMs:undefined,signal});
++    const contextUsage=await context.prepare(messages,packet.input,!social?responseFormat:null,budget,{deadline:timeoutMs>0?started+timeoutMs:undefined,signal});
      const t=Date.now(),r=await transport(new URL('/v1/chat/completions',base),{method:'POST',redirect:'error',signal:remaining===null?signal:signal?AbortSignal.any([signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining),headers:{'Content-Type':'application/json'},body:JSON.stringify({model:identity.model,cache_prompt:false,temperature:0,max_tokens:budget,chat_template_kwargs:{enable_thinking:thinkEnabled,reasoning_effort:'low'},...(!social?{response_format:responseFormat}:{}),messages})});if(!r.ok){
       let failure;try{failure=await r.json();}catch{}
       const structured=failure?.error?.code==='structured_output_failed',truncated=structured&&/finish_reason=length/.test(failure.error.message||'');
-@@ -108,16 +118,12 @@
+@@ -108,16 +122,13 @@
      let output;try{output=JSON.parse(text.replace(/^\s*```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/,'$1'));}catch{throw Error('expert-invalid-json');}
      if(modelCalls.length)modelCalls.at(-1).action=output;try{onDiagnostic({event:'model-action',round:i+1,action:output});}catch{}
      if(!output||typeof output!=='object'||Array.isArray(output))throw Error('expert-invalid-output');
@@ -311,6 +317,7 @@
 -    }
 -    if(output.action==='analyze'){phase='answer';continue;}
 +    if(!['answer','clarify'].includes(output.action))throw Error('expert-invalid-output');
++    output=packet.decode(output);
      if(output.action==='clarify'){
       if(typeof output.question!=='string'||!output.question.trim()||output.question.length>400)throw Error('expert-invalid-output');
       output={action:'answer',claims:[],generalAdvice:[],question:output.question};
@@ -320,6 +327,17 @@
      if(output.action!=='answer'||!Array.isArray(output.claims)||output.claims.length>8||typeof output.question!=='string'||!Array.isArray(advice)||advice.length>6||advice.some(t=>typeof t!=='string'||t.length>4000))throw Error('expert-invalid-output');
      for(const c of output.claims){
       if(typeof c.text!=='string'||!c.text.trim()||c.text.length>4000||!Array.isArray(c.evidenceIds)||!c.evidenceIds.length||c.evidenceIds.some(id=>!evidence.has(id)))throw Error('expert-invalid-citation');
+@@ -141,9 +152,8 @@
+     if(advice.some(t=>/(?:不低于|不高于|设为|设置为|调到|调为)\s*[Vv]?\d+(?:[.]\d+)*/.test(t)))throw Error('expert-ungrounded-setting');
+     if(!output.claims.length&&!advice.length&&!output.question.trim())throw Error('expert-empty-answer');
+     const used=[...new Set(output.claims.flatMap(c=>c.evidenceIds))],sources=used.map((id,i)=>{const e=evidence.get(id);return {...e,label:'来源'+(i+1),name:e.name||'原文资料',text:null};});
+-    const sourceLabel=e=>e.name+(e.locator?' · '+Object.entries(e.locator).filter(([key])=>['page','paragraph','slide','row','sheet','section','line','table'].includes(key)).map(([key,value])=>({page:'页',paragraph:'段',slide:'幻灯片',row:'行',sheet:'工作表',section:'章节'}[key]||key)+' '+value).join('、'):'');
+     const readable=t=>{for(const [id]of evidence){const name=sources.find(e=>e.evidenceId===id)?.name||'原文资料';t=t.split(id).join(name);const hash=/^(?:case|evidence|file|calculation)-([a-f0-9]{16,64})$/.exec(id)?.[1];if(hash)t=t.split(hash).join(name);}if(/(?:blk-[a-f0-9]{8}|\bblock-\d+|\bfile-[a-f0-9]{16}|\bcase-[a-f0-9]{8}|\bevidence-[a-f0-9]{8}|\bcalculation-[a-f0-9]{8})/.test(t))throw Error('expert-invalid-citation');return t;};
+-    const reply=[...output.claims.map(c=>readable(c.text)+'（'+[...new Set(c.evidenceIds.map(id=>sourceLabel(sources.find(e=>e.evidenceId===id))))].join('；')+'）'),advice.length?'通用排查建议（非公司已确认结论）：\n'+advice.map(t=>readable(t)).join('\n'):null,readable(output.question)].filter(Boolean).join('\n\n');
++    const reply=[...output.claims.map(c=>readable(c.text)),advice.length?'通用排查建议（非公司已确认结论）：\n'+advice.map(t=>readable(t)).join('\n'):null,readable(output.question)].filter(Boolean).join('\n\n');
+     return {status:output.claims.length||advice.length?'answer':'clarify',actualMode:'expert',intent:route?.intent,model:identity.model,modelStatus:'available',reply,claims:output.claims,question:output.question,results:[...new Map(sources.map(e=>[JSON.stringify([e.name,e.download,e.locator]),e])).values()],evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,usage,modelCalls,elapsedMs:Date.now()-started,grounding:'citation-identity-checked; general-advice-separated; semantic-support-not-independently-verified'};
+    }throw Error('expert-tool-limit');
+   }catch(e){const error=/abort/i.test(e.name+' '+e.message)&&signal?.aborted?'expert-cancelled':/timeout/i.test(e.name+' '+e.message)?'expert-timeout':/^expert-/.test(e.message)?e.message:'expert-tool-failed';const reason={'expert-context-unavailable':'未能核实本地模型实际上下文容量','expert-context-capacity':'当前问题与已读证据超过模型实际可用上下文','expert-repeated-tool':'相同工具请求多次重复且未推进，已停止循环','expert-model-offline':'本地 Bonsai 模型未连接','expert-output-truncated':'模型回复达到长度上限，未得到完整结果','expert-reasoning-exhausted':'模型本次思考耗尽预算，未生成正文','expert-invalid-json':'模型返回格式不符合资料协议','expert-schema-validation':'模型返回未通过业务结构校验','expert-invalid-tool':'模型请求的工具参数或原文位置无效','expert-unsupported-number':'模型回复含无来源的数值，未通过事实校验','expert-invalid-output':'模型回复不符合资料协议','expert-invalid-citation':'模型引用未通过来源校验','expert-model-scope-unverified':'资料未确认适用于当前型号，不能据此给出该型号参数','expert-unread-evidence':'引用的公司资料尚未完成原文阅读','expert-uncited-company-claim':'公司经验被放入无引用建议，未通过来源校验','expert-ungrounded-setting':'建议含未确认的具体调参阈值，未通过事实校验','expert-timeout':'模型本次响应超时','expert-cancelled':'本次生成已取消'}[error]||'模型或资料工具本次未完成';return {status:'unavailable',actualMode:'expert',intent:route?.intent,model:identity?.model,modelStatus:'failed',error,reply:reason+'。本次未生成可确认回答，请重试或手动切换快速模式。',results:[],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,usage,modelCalls,elapsedMs:Date.now()-started};}
 --- a/v2/model-adapter/expert-context.cjs
 +++ b/v2/model-adapter/expert-context.cjs
 @@ -2,23 +2,44 @@
@@ -383,7 +401,7 @@
 +  if(url.pathname==='/v1/models')return {ok:true,json:async()=>({data:[{id:'qwen3.8-synthetic'}]})};
 +  if(url.pathname==='/props')return {ok:true,json:async()=>({default_generation_settings:{n_ctx:131072}})};
 +  if(url.pathname==='/tokenize')return {ok:false,json:async()=>({})};
-+  calls++;const body=JSON.parse(options.body);assert.equal(body.response_format.type,'json_schema');assert.equal(body.max_tokens,768);assert.ok(body.messages[0].content.length<500);assert.equal(body.response_format.json_schema.schema.oneOf[0].properties.question.const,'');
++  calls++;const body=JSON.parse(options.body);assert.equal(body.response_format.type,'json_schema');assert.equal(body.max_tokens,768);assert.ok(body.messages[0].content.length<500);assert.equal(body.response_format.json_schema.schema.oneOf[0].properties.question,undefined);assert.equal(body.response_format.json_schema.schema.oneOf[0].properties.generalAdvice,undefined);assert.deepEqual(body.response_format.json_schema.schema.oneOf[0].properties.claims.items.properties.evidenceIds.items.enum,['s1']);
 +  return {ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({action:'answer',claims:[{text:'灰度等级256~65536级',evidenceIds:['prepared']}],generalAdvice:['点击未核对的菜单修改权限'],question:''})}}]})};
 + }});
 + const result=await expert.answer({message:'X1灰度等级',route:{intent:'technical',hintIntent:'parameters',models:['HD-X1']},preparedEvidence:[{name:'X1规格书',evidenceId:'prepared',text:'灰度等级256~65536级',modelIds:['HD-X1'],readPerformed:true,readAvailable:false}],execute:async()=>{throw Error('Prepared answer must not search again');}});

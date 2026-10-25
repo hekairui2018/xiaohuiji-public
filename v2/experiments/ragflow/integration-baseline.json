@@ -19,7 +19,7 @@
     {
       "path": "v2/model-adapter/evidence-expert.cjs",
       "baselineSHA256": "29210e4ad6c5283c09a7ecf5e0f08ad5f1b37341920a4d1c39563b9dac1590a8",
-      "candidateSHA256": "e4f1ad4f65c25c53c121528237c2a4ba76b9cec256e413c62c4a5c52c773723f"
+      "candidateSHA256": "38c6d758e79316e6176e5b37abd51155d713564880d7a343a8809838308574a7"
     },
     {
       "path": "v2/model-adapter/expert-context.cjs",
@@ -29,7 +29,7 @@
     {
       "path": "v2/tests/ragflow-expert.test.cjs",
       "baselineSHA256": null,
-      "candidateSHA256": "4ad97fb2bdbfc4d4ab33d88384c7347a3d7c7cd0bc801639a0177cb541e39107"
+      "candidateSHA256": "bbe597c87469d6eeeb57148c3d5b5a4eb400baa56e87cbc90279f06ce0fa4e70"
     }
   ]
 }
