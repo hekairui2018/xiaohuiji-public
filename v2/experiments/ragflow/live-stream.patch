@@ -1,0 +1,201 @@
+--- a/v2/model-adapter/local-model-transport.cjs
++++ b/v2/model-adapter/local-model-transport.cjs
+@@ -1,13 +1,14 @@
+ 'use strict';
+ const http=require('node:http');
++const {StringDecoder}=require('node:string_decoder');
+ // Local development inference can exceed fetch/undici's default header deadline.
+ // Cancellation remains active throughout headers and body; there is no implicit timer.
+ function localModelTransport(url,options={}){
+  return new Promise((resolve,reject)=>{
+   const req=http.request(url,{method:options.method||'GET',headers:options.headers,signal:options.signal},res=>{
+-   const chunks=[];let bytes=0;
+-   res.on('data',chunk=>{bytes+=chunk.length;if(bytes>16*1024*1024){req.destroy(Error('expert-model-response-too-large'));return;}chunks.push(chunk);});
+-   res.on('error',reject);res.on('end',()=>{const raw=Buffer.concat(chunks).toString('utf8');resolve({ok:res.statusCode>=200&&res.statusCode<300,status:res.statusCode,json:async()=>JSON.parse(raw)});});
++   const chunks=[],decoder=new StringDecoder('utf8'),stream=/text\/event-stream/.test(res.headers['content-type']||'')?require('./model-stream.cjs').modelStream(options.onContentDelta):null;let bytes=0;
++   res.on('data',chunk=>{bytes+=chunk.length;if(bytes>16*1024*1024){req.destroy(Error('expert-model-response-too-large'));return;}try{if(stream)stream.push(decoder.write(chunk));else chunks.push(chunk);}catch(error){req.destroy(error);reject(error);}});
++   res.on('error',reject);res.on('end',()=>{try{if(stream)stream.push(decoder.end());const body=stream?stream.finish():JSON.parse(Buffer.concat(chunks).toString('utf8'));resolve({ok:res.statusCode>=200&&res.statusCode<300,status:res.statusCode,json:async()=>body});}catch(error){reject(error);}});
+   });
+   req.on('error',reject);if(options.body!==undefined)req.write(options.body);req.end();
+  });
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -30,7 +30,7 @@
+  if(!Number.isInteger(maxModelCalls)||maxModelCalls<1||!Number.isInteger(maxToolCalls)||maxToolCalls<1||!Number.isInteger(answerTokens)||answerTokens<512)throw Error('Invalid expert budgets');
+  const base=new URL(baseUrl);if(base.protocol!=='http:'||!['127.0.0.1','localhost'].includes(base.hostname)||base.username||base.password||base.pathname!=='/'||base.search||base.hash)throw Error('Expert model requires local origin');let busy=false;
+  async function status(){try{const r=await transport(new URL('/v1/models',base),{signal:AbortSignal.timeout(2000),redirect:'error'}),j=await r.json(),model=j.data?.[0]?.id;return r.ok&&typeof model==='string'?{available:true,model,reason:null}:{available:false,model:null,reason:'model-identity-unavailable'};}catch{return {available:false,model:null,reason:'model-offline'};}}
+- async function answer({message,sessionState={},execute,route,signal,onProgress=()=>{},preparedEvidence} ){
++ async function answer({message,sessionState={},execute,route,signal,onProgress=()=>{},preparedEvidence,onAnswerDelta} ){
+   if(busy)return {status:'busy',error:'expert-busy',actualMode:'expert',reply:'专家模式忙，请稍后重试。',results:[]};busy=true;
+   const context=require('./expert-context.cjs').createExpertContext({base,transport});
+   const started=Date.now(),evidence=new Map(),trace=[],usage=[],modelCalls=[];let identity;
+@@ -103,8 +103,10 @@
+     // Strata treats json_object as object-only and ignores its nonstandard schema
+     // field. Use its supported schema envelope without changing the Bonsai path.
+     const responseFormat=/^qwen3[.]8-/.test(identity.model)?{type:'json_schema',json_schema:{name:'xiaohuiji_expert_action',strict:true,schema:{oneOf:choices}}}:{type:'json_object',schema:{oneOf:choices}};
+-    const contextUsage=await context.prepare(messages,packet.input,!social?responseFormat:null,budget,{deadline:timeoutMs>0?started+timeoutMs:undefined,signal});
+-    const t=Date.now(),r=await transport(new URL('/v1/chat/completions',base),{method:'POST',redirect:'error',signal:remaining===null?signal:signal?AbortSignal.any([signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining),headers:{'Content-Type':'application/json'},body:JSON.stringify({model:identity.model,cache_prompt:false,temperature:0,max_tokens:budget,chat_template_kwargs:{enable_thinking:thinkEnabled,reasoning_effort:'low'},...(!social?{response_format:responseFormat}:{}),messages})});if(!r.ok){
++    const streaming=typeof onAnswerDelta==='function';let visible='';
++    if(streaming&&!social)messages[0].content+='\n只输出JSON：{"action":"answer","claims":[{"text":"答案正文","evidenceIds":["短编号"]}]}。无证据则输出{"action":"clarify","question":"缺口或问题"}。引用编号只能取preparedEvidence中的evidenceId。';
++    const contextUsage=await context.prepare(messages,packet.input,!social&&!streaming?responseFormat:null,budget,{deadline:timeoutMs>0?started+timeoutMs:undefined,signal});
++    const t=Date.now(),r=await transport(new URL('/v1/chat/completions',base),{method:'POST',redirect:'error',signal:remaining===null?signal:signal?AbortSignal.any([signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining),headers:{'Content-Type':'application/json'},...(streaming?{onContentDelta:content=>{const text=social?content:require('./model-stream.cjs').answerText(content);if(text&&text!==visible){visible=text;onAnswerDelta(text);}}}:{}),body:JSON.stringify({model:identity.model,cache_prompt:false,temperature:0,max_tokens:budget,chat_template_kwargs:{enable_thinking:thinkEnabled,reasoning_effort:'low'},...(streaming?{stream:true,stream_options:{include_usage:true}}:!social?{response_format:responseFormat}:{}),messages})});if(!r.ok){
+      let failure;try{failure=await r.json();}catch{}
+      const structured=failure?.error?.code==='structured_output_failed',truncated=structured&&/finish_reason=length/.test(failure.error.message||'');
+      diagnostic({round:i+1,purpose:phase==='decision'?'retrieval-decision':'final-answer',model:identity.model,httpStatus:r.status,elapsedMs:Date.now()-t,finishReason:truncated?'length':null,thinkingEnabled:thinkEnabled,thinkingEffort:thinkEnabled?'low':'off',outputBudget:budget,contextUsage,reasoningTokens:null,reasoningLength:null,contentLength:null,usage:null,upstreamError:structured?'structured_output_failed':'model-http-error'});
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -18,13 +18,14 @@
+  const docKey=(cat,history,offset,limit,view,listOnly)=>JSON.stringify([cat,history,offset,limit,view,listOnly]);
+  const server=http.createServer(async(req,res)=>{
+   if(accessGuard&&!accessGuard(req,res))return;
+-  const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
++  const send=(code,body)=>{const value=req.v2Public?publicCatalog.transform(body):body;if(req.v2ChatStream?.finish(code,value))return;res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(value));};
+   const route=req.url.split('?')[0];
+   // Defense in depth: a guard may mark public traffic, but cannot authorize
+   // internal dialogue, evidence, index or model routes by accident.
+   if(req.v2Public&&!(req.method==='POST'&&(route==='/api/huidu/log'||require('./public-routes.cjs').publicPostRoutes.has(route)))&&
+    !(req.method==='GET'&&require('./public-routes.cjs').publicGetRoutes.has(route))){send(403,{error:'public-route-not-enabled'});return;}
+ 
++  if(route==='/api/ai/chat')req.v2ChatStream=require('./chat-stream.cjs').chatStream(req,res);
+   if(!req.v2Public&&developmentMonitor?.handle(req,res))return;
+   if(req.v2Public&&route==='/api/huidu/log'&&req.method==='POST'){if(offlineKnowledge&&await offlineKnowledge.handle(req,res))return;res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'log-store-not-configured'}));return;}
+   if(req.v2Public&&!publicCatalog){res.writeHead(503);res.end('Public resources are not configured');return;}
+@@ -35,8 +36,8 @@
+    try{
+     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536){send(413,{reply:'问题内容过长。'});return;}chunks.push(chunk);}
+     let input;try{input=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{send(400,{reply:'请求格式不正确。'});return;}
+-    const result=await publicChat.answer(input,{signal:controller.signal});if(!res.destroyed)send(result.code,result.body);
+-   }catch{if(!res.headersSent&&!res.destroyed)send(503,{reply:'公网客服本次未完成，请稍后重试。'});}
++    const result=await publicChat.answer(input,{signal:controller.signal,...(req.v2ChatStream?{onAnswerDelta:req.v2ChatStream.text}:{})});if(!res.destroyed)send(result.code,result.body);
++   }catch{if(!res.destroyed)send(503,{reply:'公网客服本次未完成，请稍后重试。'});}
+    return;
+   }
+   if(route==='/'){res.writeHead(302,{Location:'/wiki'});res.end();return;}
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -221,7 +221,7 @@
+   const original=req.method==='GET'&&p.startsWith('/v2/resources/original/')&&originals.has(p.split('/').pop());
+   const image=p==='/api/ocr',logRoute=p==='/api/huidu/log';
+   if(!p.startsWith('/v2/offline/')&&!chat&&!legacy&&!original&&!image&&!logRoute)return false;
+-  const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value,(_k,v)=>typeof v==='string'?clean(v):v));return true;};
++  const send=(code,value)=>{const text=JSON.stringify(value,(_k,v)=>typeof v==='string'?clean(v):v);if(req.v2ChatStream?.finish(code,JSON.parse(text)))return true;res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(text);return true;};
+   const host=req.headers.host;if(req.headers.origin&&req.headers.origin!=='http://'+host)return send(403,{error:'origin-not-allowed'});
+   try{
+    if(logRoute&&req.method==='POST'){if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});}
+@@ -347,7 +347,7 @@
+      };
+     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
+     let preparedEvidence;if(localRag){try{const prepared=await ragflow.retrieve(input.message,{state,signal:controller.signal});preparedEvidence=prepared.results.slice(0,prepared.q.models.length>1?6:3);if(!route.models?.length&&prepared.q.models.length)route.models=[...prepared.q.models];route.hintIntent=prepared.q.intent;}catch{}}
+-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress,preparedEvidence});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
++    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+     output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:route.models||[]});
+     progressCompleted=output.status!=='unavailable';onProgress(progressCompleted?'completed':'failed');
+     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
+--- a/v2/adapters/http/public-chat.cjs
++++ b/v2/adapters/http/public-chat.cjs
+@@ -43,7 +43,7 @@
+  const safeReply=text=>catalog.transform(String(text||'')).replace(/\/(?:v2\/(?:offline|resources)|directory-catalog)[^\s）)<>]*/g,'[内部链接不可公开]');
+  function visible(output){return {status:output.status||'answer',reply:safeReply(output.reply),actualMode:output.actualMode||'quick',modelStatus:output.modelStatus||'not-used',model:output.model||'v2-public-quick',answerBasis:output.answerBasis||null,modelCallCount:output.modelCallCount||0,evidenceSummary:output.evidenceSummary||null,processingSummary:output.processingSummary||null,
+   results:(output.results||[]).filter(r=>approved.has(r.name)).map(r=>({name:r.name,text:r.text?safeReply(r.text):null,download:catalog.transform({name:r.name,url:'approved'}).url})),elapsedMs:output.elapsedMs};}
+- async function answer(input,{signal}={}){
++ async function answer(input,{signal,onAnswerDelta}={}){
+   if(!input||typeof input.message!=='string'||!input.message.trim()||input.message.length>8000||!['quick','expert'].includes(input.mode||'quick'))return {code:400,body:{error:'invalid-query',reply:'请输入8000字以内的问题，并选择快速或专家模式。'}};
+   if(active>=4)return {code:429,body:{reply:'当前咨询较多，请稍后重试。'}};
+   for(const [id,s]of sessions)if(Date.now()-s.updatedAt>1800000&&!s.busy)sessions.delete(id);
+@@ -76,7 +76,7 @@
+      return {evidence,notice:{scope:'explicit-public-allowlist-only',internalIndexAvailable:false,compatibilityConfirmed:false}};
+     };
+     let preparedEvidence;if(ragflow){try{const prepared=await ragflow.retrieve(input.message,{state,signal});preparedEvidence=prepared.results.slice(0,prepared.q.models.length>1?6:3);if(!route.models?.length&&prepared.q.models.length)route.models=[...prepared.q.models];route.hintIntent=prepared.q.intent;}catch{}}
+-    output=await expert.answer({message:input.message,sessionState:state,route,execute,signal,preparedEvidence});
++    output=await expert.answer({message:input.message,sessionState:state,route,execute,signal,preparedEvidence,onAnswerDelta});
+     output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:route.models||[],results:(output.results||[]).filter(r=>allowed(r.name,r.sha256))});
+    }else{
+     let ragAnswer=null;if(ragflow){try{ragAnswer=await ragflow.quick(input.message,{state,signal});}catch{}}
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -1,10 +1,15 @@
+ 'use strict';
+ // The only text/OCR send lifecycle. Channels supply request data and presentation, never replace browser functions.
+-window.ChatController = Object.freeze({create(ui, channel = {}) {
++window.ChatController = Object.freeze({async readResponse(response,onText){
++ if(!(response.headers?.get('content-type')||'').includes('application/x-ndjson'))return response.json();
++ const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',final;
++ const line=value=>{if(!value.trim())return;const event=JSON.parse(value);if(event.type==='text'&&typeof event.text==='string')onText?.(event.text);if(event.type==='final')final=event.data;};
++ try{for(;;){const part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});if(buffer.length>1024*1024)throw Error('回复数据过长');let at;while((at=buffer.indexOf('\n'))>=0){line(buffer.slice(0,at));buffer=buffer.slice(at+1);}}buffer+=decoder.decode();if(buffer.trim())line(buffer);if(!final)throw Error('回复中断，请重试');return final;}finally{reader.releaseLock();}
++},create(ui, channel = {}) {
+  const legacy = channel.legacy !== false;
+  const request = channel.request || (async body => {
+   const response = await fetch('/api/ai/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+-  return response.json();
++  return window.ChatController.readResponse(response,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})));
+  });
+  let sending = false;
+  let composing = false;
+@@ -53,6 +58,12 @@
+   const row=document.createElement('li');row.dataset.label=label;row.textContent=label+' · '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';list.append(row);
+  }
+  window.addEventListener('v2-answer-progress',event=>{if(event.detail?.sessionId===clockSession)recordProgress(event.detail.label);});
++ window.addEventListener('v2-answer-text',event=>{
++  if(!sending||event.detail?.sessionId!==clockSession||ui.getSessionId()!==clockSession)return;
++  const loading=document.getElementById('aiLoading'),bubble=loading?.querySelector('.ai-msg-bubble');if(!bubble||typeof event.detail.text!=='string')return;
++  loading.dataset.streaming='true';bubble.textContent=event.detail.text;bubble.style.whiteSpace='pre-wrap';
++  recordProgress('正在生成回答');ui.scrollChatToBottom?.();
++ });
+  function startClock(){clearInterval(clock);clockStarted=performance.now();clockSession=ui.getSessionId();const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';};update();recordProgress('请求已发送');clock=setInterval(update,100);}
+  async function send(value, display) {
+   let text = typeof value==='string'?value:ui.input.value;
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -4,7 +4,7 @@
+  const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
+  const fetchOriginal=window.fetch.bind(window);
+  const {state,getSessionId:getSid,clearImage:clearOcrImage}=ui;
+- async function json(url,init){const response=await fetchOriginal(url,init);let data;try{data=await response.json();}catch{throw Error('服务返回格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
++ async function json(url,init,onText){const response=await fetchOriginal(url,init);let data;try{data=await window.ChatController.readResponse(response,onText);}catch{throw Error('服务回复中断或格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
+ 
+  const place=l=>typeof l==='string'?l:Object.entries(l||{}).map(([k,v])=>({page:'页',paragraph:'段',row:'行',sheet:'工作表',slide:'幻灯片',table:'表',section:'章节',part:'位置',line:'行'}[k]||k)+'：'+v).join(' · ');
+  const labels={chips:'芯片',pitches:'点间距',scans:'扫描方式',softwareVersions:'软件版本',firmwareVersions:'固件版本',hardwareVersions:'硬件版本',additionalConditions:'其他条件'};
+@@ -102,10 +102,10 @@
+   const stages={understanding:'正在理解问题',searching:'正在检索资料',reading:'正在阅读原文','evidence-found':'已找到相关依据',composing:'正在整理回答',completed:'回答已完成',failed:'本次处理未完成'};
+   const poll=async()=>{if(done||getSid()!==sessionId)return;pollController=new AbortController();try{
+    const response=await fetchOriginal('/v2/offline/progress?session='+encodeURIComponent(sessionId)+'&request='+encodeURIComponent(requestId),{signal:pollController.signal});
+-   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');window.dispatchEvent(new CustomEvent('v2-answer-progress',{detail:{sessionId,label:stages[event.stage]}}));}}}
++   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'&&target.parentElement.dataset.streaming!=='true'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');window.dispatchEvent(new CustomEvent('v2-answer-progress',{detail:{sessionId,label:stages[event.stage]}}));}}}
+   }catch{}finally{if(!done)timer=setTimeout(poll,300);}};
+   if(!ordering)poll();
+-  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});}
++  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value,'Accept':'application/x-ndjson'}:{})},body:JSON.stringify(body)},text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId,text}})));}
+   finally{done=true;clearTimeout(timer);pollController?.abort();}
+  }
+  function render(data){
+--- a/v2/frontend/public-client.js
++++ b/v2/frontend/public-client.js
+@@ -10,7 +10,7 @@
+  document.getElementById('aiImgBtn').hidden=true;ui.input.disabled=false;ui.sendButton.disabled=false;ui.input.placeholder='请输入产品型号或问题…';
+  fetch('/api/ai/capabilities').then(r=>r.json()).then(c=>{status.textContent=c.expert?.available?' 专家模型已连接':' 专家模型未连接；快速回答可用';}).catch(()=>{status.textContent=' 模型状态暂不可用';});
+  return {legacy:false,allowImages:()=>false,
+-  async request(body){const r=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:body.message,mode:select.value,conversationId})});const data=await r.json();if(data.conversationId)conversationId=data.conversationId;return data;},
++  async request(body){const r=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/x-ndjson'},body:JSON.stringify({message:body.message,mode:select.value,conversationId})});const data=await window.ChatController.readResponse(r,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})));if(data.conversationId)conversationId=data.conversationId;return data;},
+   render(data){const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';const text=make('div',data.reply||'本次未获得回答，请重试。');text.style.whiteSpace='pre-wrap';bubble.append(text);
+    for(const r of data.results||[]){if(typeof r.download!=='string'||!r.download.startsWith('https://'))continue;const line=make('p'),a=make('a',r.name||'来源资料');a.href=r.download;a.target='_blank';a.rel='noopener noreferrer';line.append(a);bubble.append(line);}row.append(bubble);ui.messages.append(row);ui.scrollChatToBottom?.();return true;},
+   reset(){conversationId=null;},setBusy(busy){select.disabled=busy;}
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -88,14 +88,14 @@
+   <script src="product-resources.js?v=20261021-video-nature"></script>
+   <script src="product-card.js?v=20261020-video-scope-review"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261026-process-clock"></script>
+-  <script src="offline-client.js?v=20261026-process-clock"></script>
++  <script src="chat-controller.js?v=20261026-live-stream"></script>
++  <script src="offline-client.js?v=20261026-live-stream"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+   <script src="source-directory-browser.js?v=20261022-lazy-final"></script>
+   <script src="app.js?v=20261022-public-chat"></script>
+-  <script src="public-client.js?v=20261022-public-chat"></script>
++  <script src="public-client.js?v=20261026-live-stream"></script>
+   <script src="site-compat.js?v=20261022-public-chat"></script>
+ </body>
+ </html>

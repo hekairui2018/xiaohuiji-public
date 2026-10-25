@@ -1,0 +1,50 @@
+{
+  "warning": "Review-only delta against recorded accepted local runtime after concise-answer integration. Review together with prior integration patches; do not overwrite newer public runtime implementations. New tests require the runtime integration.",
+  "files": [
+    {
+      "path": "v2/model-adapter/local-model-transport.cjs",
+      "baselineSHA256": "30b4d069937b7bb594ff9d613b57749c1aa90f1a4b166199a14faf45c62a7755",
+      "candidateSHA256": "53e20eabed80de677b13ce206db1219c179485bbd45372093df4141eb77d704b"
+    },
+    {
+      "path": "v2/model-adapter/evidence-expert.cjs",
+      "baselineSHA256": "38c6d758e79316e6176e5b37abd51155d713564880d7a343a8809838308574a7",
+      "candidateSHA256": "cb256210fde7ab1da285b4aca612f7a154dc490f5060b557bb3a13c121a07ff9"
+    },
+    {
+      "path": "v2/adapters/http/server.cjs",
+      "baselineSHA256": "e8d6873cbd48541843a1abf24942e2da31c2fe5909f52868a0c5d96fbbfb3305",
+      "candidateSHA256": "2d15263b1281ffba16ee947dbe2d5500f07144b22a0b0f5a7f81b2fc7853d3dd"
+    },
+    {
+      "path": "v2/adapters/http/offline-knowledge.cjs",
+      "baselineSHA256": "caa45baa5c2a56a107dab11f1e99c02503f43d8cffb881d9c649e7bf2f74cc51",
+      "candidateSHA256": "4683ce4f23e56b6929de262d598bfc05b40d64e9286d42ffb11e76247fceffee"
+    },
+    {
+      "path": "v2/adapters/http/public-chat.cjs",
+      "baselineSHA256": "0b1724ce0e0571f76223c9f080a12626b199a2bf365354f42190dd1ae36192d5",
+      "candidateSHA256": "e3ea50a5ec00785052cf51e13f00e4ec183c68f3bf5f750ca5309bc71c3f1643"
+    },
+    {
+      "path": "v2/frontend/chat-controller.js",
+      "baselineSHA256": "37ac4237705c7d3e8654745685f37a3880010c18e080372b792b13d5c8005880",
+      "candidateSHA256": "03c1f89fb1deb3a5676cf683798999d7edb04b784b6f8ee285c8000bb2ef485c"
+    },
+    {
+      "path": "v2/frontend/offline-client.js",
+      "baselineSHA256": "3b51f685aa2ccd6f6f3632c3151bbbf056561cfa00075c768f87ba1638d8e09f",
+      "candidateSHA256": "97968e026cf85fef03a43b9ab10dcecef2fe0ef85764ea15f7c17863b73011ce"
+    },
+    {
+      "path": "v2/frontend/public-client.js",
+      "baselineSHA256": "ddf39fcda3e7b4935afa31330ad2ffd645426eef6347e52e967ee6e9969f2bae",
+      "candidateSHA256": "d66295dcd6c285a7b847c4a8abe686dac64893056358de6e5848ae8e23f88eec"
+    },
+    {
+      "path": "v2/frontend/index.html",
+      "baselineSHA256": "967b32b6927828013a27f939499589ec6774750857efd37953ba51836dabd4d7",
+      "candidateSHA256": "4d2476c86f8cec5e931398ea081efc84ff84f0ea43c99d2c5116c4ce4818a8fb"
+    }
+  ]
+}
