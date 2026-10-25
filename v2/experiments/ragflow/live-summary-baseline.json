@@ -1,0 +1,65 @@
+{
+  "warning": "Review-only delta after the accepted live-stream runtime. Two directly synchronized modules are excluded from this patch. New integration tests require prior runtime integration patches; do not overwrite newer public runtime implementations.",
+  "files": [
+    {
+      "path": "v2/adapters/http/answer-process.cjs",
+      "delivery": "direct-module",
+      "baselineSHA256": "b77b9e0b5f43969f0f015c089d21b650d9d13ad5d649808e0000f6c4d32138e8",
+      "candidateSHA256": "f77bdf600313fe87fc33ccab3af9f2acf150cf9c3b92506fa3d5f90a7963d3ac"
+    },
+    {
+      "path": "v2/adapters/http/chat-stream.cjs",
+      "delivery": "direct-module",
+      "baselineSHA256": "6c2405b86b599da192a4bf80b49e2fab0e0627f41556b90865bbee5fb674e3b8",
+      "candidateSHA256": "f5820dbdf3a6c8fa2d79a42cf763aae36108b420b5aae60fafe4984cf4274e56"
+    },
+    {
+      "path": "v2/adapters/http/server.cjs",
+      "delivery": "review-patch",
+      "baselineSHA256": "2d15263b1281ffba16ee947dbe2d5500f07144b22a0b0f5a7f81b2fc7853d3dd",
+      "candidateSHA256": "d7bae9ff275cc26c4fb32a3579d6a36aef9115386a99c9768362eb8f3c3d2e14"
+    },
+    {
+      "path": "v2/adapters/http/offline-knowledge.cjs",
+      "delivery": "review-patch",
+      "baselineSHA256": "4683ce4f23e56b6929de262d598bfc05b40d64e9286d42ffb11e76247fceffee",
+      "candidateSHA256": "56a09e54718eedb31b3fab02bcc5772b2b5932a309b8fe847738e6f1089438b7"
+    },
+    {
+      "path": "v2/adapters/http/public-chat.cjs",
+      "delivery": "review-patch",
+      "baselineSHA256": "e3ea50a5ec00785052cf51e13f00e4ec183c68f3bf5f750ca5309bc71c3f1643",
+      "candidateSHA256": "66c3601d753147e0c7138cba9813d08ff9e194477630491158b4952c01ee4eae"
+    },
+    {
+      "path": "v2/model-adapter/evidence-expert.cjs",
+      "delivery": "review-patch",
+      "baselineSHA256": "cb256210fde7ab1da285b4aca612f7a154dc490f5060b557bb3a13c121a07ff9",
+      "candidateSHA256": "6434fff81718069079edc39fe9212316e0753724009687167b65ea453ae10f23"
+    },
+    {
+      "path": "v2/frontend/chat-controller.js",
+      "delivery": "review-patch",
+      "baselineSHA256": "03c1f89fb1deb3a5676cf683798999d7edb04b784b6f8ee285c8000bb2ef485c",
+      "candidateSHA256": "dbabc3dd244e19bddd6f2dd295a745fd30cb9334cc650b9911564558bc1c22b7"
+    },
+    {
+      "path": "v2/frontend/offline-client.js",
+      "delivery": "review-patch",
+      "baselineSHA256": "97968e026cf85fef03a43b9ab10dcecef2fe0ef85764ea15f7c17863b73011ce",
+      "candidateSHA256": "7281e6e63310e77db7358af126ecf36f9745369788e6cc857bffe170664d6ec7"
+    },
+    {
+      "path": "v2/frontend/public-client.js",
+      "delivery": "review-patch",
+      "baselineSHA256": "d66295dcd6c285a7b847c4a8abe686dac64893056358de6e5848ae8e23f88eec",
+      "candidateSHA256": "e421194e2c2405824fe0fe11b2950c627f001a19bd818510a409b293c2a08e4f"
+    },
+    {
+      "path": "v2/frontend/index.html",
+      "delivery": "review-patch",
+      "baselineSHA256": "4d2476c86f8cec5e931398ea081efc84ff84f0ea43c99d2c5116c4ce4818a8fb",
+      "candidateSHA256": "355f4d6143bb137eb7ca7aa24707d359e6c236483e12534b8efe5e7a61bd05d4"
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -36,7 +36,7 @@
+    try{
+     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536){send(413,{reply:'问题内容过长。'});return;}chunks.push(chunk);}
+     let input;try{input=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{send(400,{reply:'请求格式不正确。'});return;}
+-    const result=await publicChat.answer(input,{signal:controller.signal,...(req.v2ChatStream?{onAnswerDelta:req.v2ChatStream.text}:{})});if(!res.destroyed)send(result.code,result.body);
++    const result=await publicChat.answer(input,{signal:controller.signal,...(req.v2ChatStream?{onAnswerDelta:req.v2ChatStream.text,onAnswerProgress:req.v2ChatStream.progress}:{})});if(!res.destroyed)send(result.code,result.body);
+    }catch{if(!res.destroyed)send(503,{reply:'公网客服本次未完成，请稍后重试。'});}
+    return;
+   }
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -346,8 +346,12 @@
+       return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
+      };
+     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
++    const progressFacts={models:route.models||[],results:[],modelCallCount:0};
++    const expertProgress=(stage,detail={})=>{onProgress(stage);Object.assign(progressFacts,detail);req.v2ChatStream?.progress(require('./answer-process.cjs').answerProcess({...progressFacts,status:progressFacts.generating?'generating':'running'}));};
++    expertProgress('searching');
+     let preparedEvidence;if(localRag){try{const prepared=await ragflow.retrieve(input.message,{state,signal:controller.signal});preparedEvidence=prepared.results.slice(0,prepared.q.models.length>1?6:3);if(!route.models?.length&&prepared.q.models.length)route.models=[...prepared.q.models];route.hintIntent=prepared.q.intent;}catch{}}
+-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
++    expertProgress('evidence-found',{models:route.models||[],results:preparedEvidence||[]});
++    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+     output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:route.models||[]});
+     progressCompleted=output.status!=='unavailable';onProgress(progressCompleted?'completed':'failed');
+     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
+--- a/v2/adapters/http/public-chat.cjs
++++ b/v2/adapters/http/public-chat.cjs
+@@ -43,7 +43,7 @@
+  const safeReply=text=>catalog.transform(String(text||'')).replace(/\/(?:v2\/(?:offline|resources)|directory-catalog)[^\s）)<>]*/g,'[内部链接不可公开]');
+  function visible(output){return {status:output.status||'answer',reply:safeReply(output.reply),actualMode:output.actualMode||'quick',modelStatus:output.modelStatus||'not-used',model:output.model||'v2-public-quick',answerBasis:output.answerBasis||null,modelCallCount:output.modelCallCount||0,evidenceSummary:output.evidenceSummary||null,processingSummary:output.processingSummary||null,
+   results:(output.results||[]).filter(r=>approved.has(r.name)).map(r=>({name:r.name,text:r.text?safeReply(r.text):null,download:catalog.transform({name:r.name,url:'approved'}).url})),elapsedMs:output.elapsedMs};}
+- async function answer(input,{signal,onAnswerDelta}={}){
++ async function answer(input,{signal,onAnswerDelta,onAnswerProgress}={}){
+   if(!input||typeof input.message!=='string'||!input.message.trim()||input.message.length>8000||!['quick','expert'].includes(input.mode||'quick'))return {code:400,body:{error:'invalid-query',reply:'请输入8000字以内的问题，并选择快速或专家模式。'}};
+   if(active>=4)return {code:429,body:{reply:'当前咨询较多，请稍后重试。'}};
+   for(const [id,s]of sessions)if(Date.now()-s.updatedAt>1800000&&!s.busy)sessions.delete(id);
+@@ -75,8 +75,12 @@
+      const evidence=data.results.filter(r=>!args.documents||args.documents.includes(r.name)).map(r=>{if(r.blockId){const handle=++nextReadHandle;readable.set(handle,{row:evidenceById.get(r.blockId),offsets:new Set([0])});return {...r,blockId:handle,readAvailable:true,readPerformed:false};}return r;});
+      return {evidence,notice:{scope:'explicit-public-allowlist-only',internalIndexAvailable:false,compatibilityConfirmed:false}};
+     };
++    const progressFacts={models:route.models||[],results:[],modelCallCount:0};
++    const onProgress=(_stage,detail={})=>{Object.assign(progressFacts,detail);onAnswerProgress?.(require('./answer-process.cjs').answerProcess({...progressFacts,results:progressFacts.results.filter(r=>allowed(r.name,r.sha256)),status:progressFacts.generating?'generating':'running'}));};
++    onProgress('searching');
+     let preparedEvidence;if(ragflow){try{const prepared=await ragflow.retrieve(input.message,{state,signal});preparedEvidence=prepared.results.slice(0,prepared.q.models.length>1?6:3);if(!route.models?.length&&prepared.q.models.length)route.models=[...prepared.q.models];route.hintIntent=prepared.q.intent;}catch{}}
+-    output=await expert.answer({message:input.message,sessionState:state,route,execute,signal,preparedEvidence,onAnswerDelta});
++    onProgress('evidence-found',{models:route.models||[],results:preparedEvidence||[]});
++    output=await expert.answer({message:input.message,sessionState:state,route,execute,signal,preparedEvidence,onAnswerDelta,onProgress});
+     output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:route.models||[],results:(output.results||[]).filter(r=>allowed(r.name,r.sha256))});
+    }else{
+     let ragAnswer=null;if(ragflow){try{ragAnswer=await ragflow.quick(input.message,{state,signal});}catch{}}
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -83,7 +83,7 @@
+    }
+    for(let i=0;;i++){
+     if(i>=Math.min(1,maxModelCalls))throw Error('expert-tool-limit');
+-    onProgress(phase==='answer'?'composing':'understanding');
++    onProgress('composing',{models:route?.models||[],results:[...evidence.values()],modelCallCount:0});
+     signal?.throwIfAborted();const remaining=timeoutMs>0?timeoutMs-(Date.now()-started):null;if(remaining!==null&&remaining<=0)throw Error('expert-timeout');
+     const answerSchema=structuredClone(schema.oneOf[2]);if(simpleProduct||compactParameters){answerSchema.properties.claims.maxItems=1;answerSchema.properties.generalAdvice.maxItems=0;}
+     delete answerSchema.properties.question;
+@@ -106,7 +106,8 @@
+     const streaming=typeof onAnswerDelta==='function';let visible='';
+     if(streaming&&!social)messages[0].content+='\n只输出JSON：{"action":"answer","claims":[{"text":"答案正文","evidenceIds":["短编号"]}]}。无证据则输出{"action":"clarify","question":"缺口或问题"}。引用编号只能取preparedEvidence中的evidenceId。';
+     const contextUsage=await context.prepare(messages,packet.input,!social&&!streaming?responseFormat:null,budget,{deadline:timeoutMs>0?started+timeoutMs:undefined,signal});
+-    const t=Date.now(),r=await transport(new URL('/v1/chat/completions',base),{method:'POST',redirect:'error',signal:remaining===null?signal:signal?AbortSignal.any([signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining),headers:{'Content-Type':'application/json'},...(streaming?{onContentDelta:content=>{const text=social?content:require('./model-stream.cjs').answerText(content);if(text&&text!==visible){visible=text;onAnswerDelta(text);}}}:{}),body:JSON.stringify({model:identity.model,cache_prompt:false,temperature:0,max_tokens:budget,chat_template_kwargs:{enable_thinking:thinkEnabled,reasoning_effort:'low'},...(streaming?{stream:true,stream_options:{include_usage:true}}:!social?{response_format:responseFormat}:{}),messages})});if(!r.ok){
++    onProgress('composing',{modelCallCount:1});
++    const t=Date.now(),r=await transport(new URL('/v1/chat/completions',base),{method:'POST',redirect:'error',signal:remaining===null?signal:signal?AbortSignal.any([signal,AbortSignal.timeout(remaining)]):AbortSignal.timeout(remaining),headers:{'Content-Type':'application/json'},...(streaming?{onContentDelta:content=>{const text=social?content:require('./model-stream.cjs').answerText(content);if(text&&text!==visible){if(!visible)onProgress('composing',{generating:true});visible=text;onAnswerDelta(text);}}}:{}),body:JSON.stringify({model:identity.model,cache_prompt:false,temperature:0,max_tokens:budget,chat_template_kwargs:{enable_thinking:thinkEnabled,reasoning_effort:'low'},...(streaming?{stream:true,stream_options:{include_usage:true}}:!social?{response_format:responseFormat}:{}),messages})});if(!r.ok){
+      let failure;try{failure=await r.json();}catch{}
+      const structured=failure?.error?.code==='structured_output_failed',truncated=structured&&/finish_reason=length/.test(failure.error.message||'');
+      diagnostic({round:i+1,purpose:phase==='decision'?'retrieval-decision':'final-answer',model:identity.model,httpStatus:r.status,elapsedMs:Date.now()-t,finishReason:truncated?'length':null,thinkingEnabled:thinkEnabled,thinkingEffort:thinkEnabled?'low':'off',outputBudget:budget,contextUsage,reasoningTokens:null,reasoningLength:null,contentLength:null,usage:null,upstreamError:structured?'structured_output_failed':'model-http-error'});
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -1,15 +1,15 @@
+ 'use strict';
+ // The only text/OCR send lifecycle. Channels supply request data and presentation, never replace browser functions.
+-window.ChatController = Object.freeze({async readResponse(response,onText){
++window.ChatController = Object.freeze({async readResponse(response,onText,onSummary){
+  if(!(response.headers?.get('content-type')||'').includes('application/x-ndjson'))return response.json();
+  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',final;
+- const line=value=>{if(!value.trim())return;const event=JSON.parse(value);if(event.type==='text'&&typeof event.text==='string')onText?.(event.text);if(event.type==='final')final=event.data;};
++ const line=value=>{if(!value.trim())return;const event=JSON.parse(value);if(event.type==='text'&&typeof event.text==='string')onText?.(event.text);if(event.type==='progress')onSummary?.(event.summary);if(event.type==='final')final=event.data;};
+  try{for(;;){const part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});if(buffer.length>1024*1024)throw Error('回复数据过长');let at;while((at=buffer.indexOf('\n'))>=0){line(buffer.slice(0,at));buffer=buffer.slice(at+1);}}buffer+=decoder.decode();if(buffer.trim())line(buffer);if(!final)throw Error('回复中断，请重试');return final;}finally{reader.releaseLock();}
+ },create(ui, channel = {}) {
+  const legacy = channel.legacy !== false;
+  const request = channel.request || (async body => {
+   const response = await fetch('/api/ai/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+-  return window.ChatController.readResponse(response,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})));
++  return window.ChatController.readResponse(response,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})),summary=>window.dispatchEvent(new CustomEvent('v2-answer-summary',{detail:{sessionId:body.sessionId,summary}})));
+  });
+  let sending = false;
+  let composing = false;
+@@ -58,6 +58,13 @@
+   const row=document.createElement('li');row.dataset.label=label;row.textContent=label+' · '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';list.append(row);
+  }
+  window.addEventListener('v2-answer-progress',event=>{if(event.detail?.sessionId===clockSession)recordProgress(event.detail.label);});
++ window.addEventListener('v2-answer-summary',event=>{
++  if(!sending||event.detail?.sessionId!==clockSession||ui.getSessionId()!==clockSession)return;
++  const summary=event.detail.summary,loading=document.getElementById('aiLoading');if(!loading||summary?.version!==1||!Array.isArray(summary.steps))return;
++  let details=loading.querySelector('.v2-live-summary');if(!details){details=document.createElement('details');details.className='v2-answer-process v2-live-summary';details.open=true;const title=document.createElement('summary');title.textContent='查看处理过程';details.append(title,document.createElement('ol'));loading.append(details);}
++  const list=details.querySelector('ol');list.replaceChildren();for(const step of summary.steps.slice(0,8)){if(typeof step.label!=='string'||typeof step.detail!=='string')continue;const row=document.createElement('li'),label=document.createElement('strong');label.textContent=step.label+'：';row.append(label,document.createTextNode(step.detail));list.append(row);}
++  const stages=loading.querySelector('.v2-loading-process');if(stages)stages.hidden=true;
++ });
+  window.addEventListener('v2-answer-text',event=>{
+   if(!sending||event.detail?.sessionId!==clockSession||ui.getSessionId()!==clockSession)return;
+   const loading=document.getElementById('aiLoading'),bubble=loading?.querySelector('.ai-msg-bubble');if(!bubble||typeof event.detail.text!=='string')return;
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -4,7 +4,7 @@
+  const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
+  const fetchOriginal=window.fetch.bind(window);
+  const {state,getSessionId:getSid,clearImage:clearOcrImage}=ui;
+- async function json(url,init,onText){const response=await fetchOriginal(url,init);let data;try{data=await window.ChatController.readResponse(response,onText);}catch{throw Error('服务回复中断或格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
++ async function json(url,init,onText,onSummary){const response=await fetchOriginal(url,init);let data;try{data=await window.ChatController.readResponse(response,onText,onSummary);}catch{throw Error('服务回复中断或格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
+ 
+  const place=l=>typeof l==='string'?l:Object.entries(l||{}).map(([k,v])=>({page:'页',paragraph:'段',row:'行',sheet:'工作表',slide:'幻灯片',table:'表',section:'章节',part:'位置',line:'行'}[k]||k)+'：'+v).join(' · ');
+  const labels={chips:'芯片',pitches:'点间距',scans:'扫描方式',softwareVersions:'软件版本',firmwareVersions:'固件版本',hardwareVersions:'硬件版本',additionalConditions:'其他条件'};
+@@ -105,7 +105,7 @@
+    if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'&&target.parentElement.dataset.streaming!=='true'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');window.dispatchEvent(new CustomEvent('v2-answer-progress',{detail:{sessionId,label:stages[event.stage]}}));}}}
+   }catch{}finally{if(!done)timer=setTimeout(poll,300);}};
+   if(!ordering)poll();
+-  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value,'Accept':'application/x-ndjson'}:{})},body:JSON.stringify(body)},text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId,text}})));}
++  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value,'Accept':'application/x-ndjson'}:{})},body:JSON.stringify(body)},text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId,text}})),summary=>window.dispatchEvent(new CustomEvent('v2-answer-summary',{detail:{sessionId,summary}})));}
+   finally{done=true;clearTimeout(timer);pollController?.abort();}
+  }
+  function render(data){
+--- a/v2/frontend/public-client.js
++++ b/v2/frontend/public-client.js
+@@ -10,7 +10,7 @@
+  document.getElementById('aiImgBtn').hidden=true;ui.input.disabled=false;ui.sendButton.disabled=false;ui.input.placeholder='请输入产品型号或问题…';
+  fetch('/api/ai/capabilities').then(r=>r.json()).then(c=>{status.textContent=c.expert?.available?' 专家模型已连接':' 专家模型未连接；快速回答可用';}).catch(()=>{status.textContent=' 模型状态暂不可用';});
+  return {legacy:false,allowImages:()=>false,
+-  async request(body){const r=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/x-ndjson'},body:JSON.stringify({message:body.message,mode:select.value,conversationId})});const data=await window.ChatController.readResponse(r,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})));if(data.conversationId)conversationId=data.conversationId;return data;},
++  async request(body){const r=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/x-ndjson'},body:JSON.stringify({message:body.message,mode:select.value,conversationId})});const data=await window.ChatController.readResponse(r,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})),summary=>window.dispatchEvent(new CustomEvent('v2-answer-summary',{detail:{sessionId:body.sessionId,summary}})));if(data.conversationId)conversationId=data.conversationId;return data;},
+   render(data){const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';const text=make('div',data.reply||'本次未获得回答，请重试。');text.style.whiteSpace='pre-wrap';bubble.append(text);
+    for(const r of data.results||[]){if(typeof r.download!=='string'||!r.download.startsWith('https://'))continue;const line=make('p'),a=make('a',r.name||'来源资料');a.href=r.download;a.target='_blank';a.rel='noopener noreferrer';line.append(a);bubble.append(line);}row.append(bubble);ui.messages.append(row);ui.scrollChatToBottom?.();return true;},
+   reset(){conversationId=null;},setBusy(busy){select.disabled=busy;}
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -88,14 +88,14 @@
+   <script src="product-resources.js?v=20261021-video-nature"></script>
+   <script src="product-card.js?v=20261020-video-scope-review"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261026-live-stream"></script>
+-  <script src="offline-client.js?v=20261026-live-stream"></script>
++  <script src="chat-controller.js?v=20261026-live-process"></script>
++  <script src="offline-client.js?v=20261026-live-process"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+   <script src="source-directory-browser.js?v=20261022-lazy-final"></script>
+   <script src="app.js?v=20261022-public-chat"></script>
+-  <script src="public-client.js?v=20261026-live-stream"></script>
++  <script src="public-client.js?v=20261026-live-process"></script>
+   <script src="site-compat.js?v=20261022-public-chat"></script>
+ </body>
+ </html>
