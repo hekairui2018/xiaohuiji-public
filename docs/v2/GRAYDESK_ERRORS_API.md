@@ -4,19 +4,19 @@
 
 ## 当前交付状态
 
-开发接收端已部署8520/8521；真实飞书写入、重复回传及隐私回读通过。专用表名为“灰desk异常日志”。**公网HTTPS尚未配置成功，不能将当前HTTP地址当作正式接口交付。** HTTP公网请求返回426，不能携带凭证试用。配置有可信证书的HTTPS反向代理后，正式路径为 `POST https://<已配置并验收的域名>/api/graydesk/errors`；必须再做该HTTPS入口的真实鉴权、写入、重复及内部接口隔离验收。
+2026-10-28用户明确要求HTTP，并在风险确认中单独同意上报凭证及脱敏日志经过公网明文传输。正式接收地址：`POST http://43nudj314064.vicp.fun/api/graydesk/errors`。保持独立Bearer鉴权、敏感字段拒收、脱敏、去重和飞书确认后才成功。客户端专用配置的endpoint已填入实际地址，不包含飞书密钥。
 
 ## 鉴权与配置
 
 请求头 `Authorization: Bearer <GRAYDESK_ERROR_UPLOAD_TOKEN>`，以及 `Content-Type: application/json; charset=utf-8`。上报凭证为独立随机256位密钥，与升级助手凭证不同。客户端只接收上报凭证，不接收任何飞书app_secret或tenant_access_token；不能把上报凭证写入日志、URL、公开仓库或网页脚本。原生客户端内的共享上报密钥不具有硬件保密能力，泄露后须在接收端轮换并更新客户端。
 
-接收端配置位于运行目录的 `graydesk.private.json`（不入Git），含 `uploadKey, appId, appSecret, appToken, tableId`。只给客户端的配置应只有 `endpoint, auth_header, auth_scheme, upload_token`。正式endpoint在HTTPS验收前保持未配置，不自动降级HTTP。
+接收端配置位于运行目录的 `graydesk.private.json`（不入Git），含 `uploadKey, appId, appSecret, appToken, tableId`。只给客户端的配置应只有 `endpoint, auth_header, auth_scheme, upload_token`。endpoint使用用户指定HTTP地址；不公开上报凭证。
 
 ## 请求示例
 
 ```http
 POST /api/graydesk/errors HTTP/1.1
-Host: <已验收的HTTPS域名>
+Host: 43nudj314064.vicp.fun
 Authorization: Bearer <GRAYDESK_ERROR_UPLOAD_TOKEN>
 Content-Type: application/json; charset=utf-8
 ```

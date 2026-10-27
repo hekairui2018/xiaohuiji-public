@@ -6,8 +6,8 @@
 
 - 已加载开发服务8520/8521。清单路径 `GET /api/graydesk/updates/standard/win-x64`；HEAD同样支持。无发布包返回404，不返回空200或虚假版本。
 - `.20261027.23`完整离线安装包已经自行计算大小及SHA256并登记为候选，**未上架**。大小96,578,982字节，SHA256 `0a02601c12c3d4794a34e6d386a1311f119f4ba3e702784d2d72d00a137d6ae5`。
-- 现有域名HTTPS仍返回对端关闭连接，**没有可交付的真实HTTPS URL**。公网HTTP灰Desk更新入口拒绝为426；管理入口公网403。不能把HTTP写进灰Desk配置，也未以助手的另一种签名协议替换灰Desk协议。
-- 客户端最终配置为 `{"ManifestUrl":"https://<已验收域名>/api/graydesk/updates/standard/win-x64"}`。当前尚不能填入实际域名，需要HTTPS接通、用户明确发布候选并完成真实客户端联调后使用。
+- 2026-10-28用户明确要求使用HTTP，更新接口已允许现有HTTP公网地址；管理入口仍限本机鉴权。清单地址：http://43nudj314064.vicp.fun/api/graydesk/updates/standard/win-x64。
+- 客户端目标配置为 `{"ManifestUrl":"http://43nudj314064.vicp.fun/api/graydesk/updates/standard/win-x64"}`。现有灰Desk客户端仍硬性拒绝HTTP，须由灰Desk项目将检查源及下载源的校验改为允许这个指定HTTP主机；保留普通版/同域/大小/哈希校验。仅改配置文件不足以生效，本聊天未修改客户端或发布新包。候选仍未上架，当前清单404。
 
 ## 清单合同
 
@@ -20,7 +20,7 @@
   "arch": "win-x64",
   "version": "2.2.0-test.20261027.23",
   "fileName": "灰Desk-2.2.0-test.20261027.23-安装包.exe",
-  "downloadUrl": "https://<已验收域名>/api/graydesk/updates/standard/win-x64/files/0a02601c12c3d4794a34e6d386a1311f119f4ba3e702784d2d72d00a137d6ae5.exe",
+  "downloadUrl": "http://43nudj314064.vicp.fun/api/graydesk/updates/standard/win-x64/files/0a02601c12c3d4794a34e6d386a1311f119f4ba3e702784d2d72d00a137d6ae5.exe",
   "size": 96578982,
   "sha256": "0a02601c12c3d4794a34e6d386a1311f119f4ba3e702784d2d72d00a137d6ae5",
   "releaseNotes": "由发布者填写实际更新说明",
@@ -32,13 +32,13 @@ UTF-8 JSON；清单ETag为内容哈希，支持If-None-Match返回304，缓存30
 
 ## 管理与登记
 
-配置：`.private/graydesk-updates/config.json`。字段为`directory`、`sourceRoot`、`publicOrigin`（未接HTTPS时null）及独立`adminToken`。运行包与历史为`var/graydesk-updates/`；两目录已Git忽略，不公开管理员密钥或原安装包。配置文件需由部署Windows账号保护读取权限。
+配置：`.private/graydesk-updates/config.json`。字段为`directory`、`sourceRoot`、`publicOrigin`（未配置时null）及独立`adminToken`。运行包与历史为`var/graydesk-updates/`；两目录已Git忽略，不公开管理员密钥或原安装包。配置文件需由部署Windows账号保护读取权限。
 
 管理API限回环地址、localhost/127.0.0.1 Host、无浏览器Origin，必须携带`Authorization: Bearer <adminToken>`；公网/LAN均不开放。没有网页管理页，提供管理API及本机CLI。
 
 - `GET /api/graydesk/updates/admin`：读取候选、当前发布和审计历史。
 - `POST .../admin/stage`：登记已落盘完整安装包，不接收网络大文件上传。JSON示例字段为`file, version, edition:"standard", arch:"win-x64", releaseNotes, expectedSHA256`。file只能在配置sourceRoot下，basename严格匹配普通版命名；管理JSON最大16 KiB。可选expectedSHA256只作核对，服务端仍重新计算实际摘要及大小。
-- `POST .../admin/publish`：`{"version":"2.2.0-test.20261027.23","confirmVersion":"2.2.0-test.20261027.23"}`。必须先配置真实HTTPS origin，并已获得具体发布授权；本次没有执行。
+- `POST .../admin/publish`：`{"version":"2.2.0-test.20261027.23","confirmVersion":"2.2.0-test.20261027.23"}`。必须先配置已核验的HTTP/HTTPS origin，并已获得具体发布授权；本次没有执行。
 - `POST .../admin/withdraw`：清空当前发布，保留历史和包；已缓存清单可能再保留30秒，不承诺即时撤回。
 
 CLI（路径占位符须换为本机实际值）：
@@ -46,7 +46,7 @@ CLI（路径占位符须换为本机实际值）：
 ```powershell
 node v2/tools/graydesk-update.cjs --action status --config <私有配置文件>
 node v2/tools/graydesk-update.cjs --action stage --config <私有配置文件> --file <完整安装包路径> --version 2.2.0-test.20261027.23 --notes <真实更新说明> --expected-sha256 <预期哈希>
-# 仅在HTTPS已验收并明确获准发布后执行：
+# 仅在入口已验收并明确获准发布后执行：
 node v2/tools/graydesk-update.cjs --action publish --config <私有配置文件> --version 2.2.0-test.20261027.23 --confirm-version 2.2.0-test.20261027.23
 ```
 
@@ -56,4 +56,4 @@ node v2/tools/graydesk-update.cjs --action publish --config <私有配置文件>
 
 ## 验证范围
 
-20项定向回归通过（更新7项，加既有异常接收、LAN和公网13项）。隔离环境实际96,578,982字节下载及SHA256一致，HEAD/Range/ETag、鉴权、404/503、复制中断、并发原子性和渠道隔离通过。生产清单保持无发布；未运行安装器、未修改灰Desk源码、未替换已安装版、未发布客服机或GitHub安装包。真实公网HTTPS和灰Desk客户端端到端尚未完成。
+20项定向回归通过（更新7项，加既有异常接收、LAN和公网13项）。隔离环境实际96,578,982字节下载及SHA256一致，HEAD/Range/ETag、鉴权、404/503、复制中断、并发原子性和渠道隔离通过。生产清单保持无发布；未运行安装器、未修改灰Desk源码、未替换已安装版、未发布客服机或GitHub安装包。公网HTTP已接通；因候选未上架及客户端仍拒HTTP，未宣称真实灰Desk更新端到端完成。

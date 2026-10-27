@@ -41,9 +41,9 @@ test('write failure never acknowledges success; auth/JSON/type/size checks leave
  assert.equal((await f.post('x'.repeat(MAX_BYTES+1))).status,413);assert.equal((await f.post({...sample(),account:'forbidden'})).status,422);
 });
 test('per-installation limit returns retry guidance',async t=>{const f=await fixture(t),e=sample();for(let i=0;i<10;i++)assert.equal((await f.post(e)).status,200);const r=await f.post(e);assert.equal(r.status,429);assert.equal(r.body.retryable,true);assert.equal(r.retry,'60');});
-test('public HTTP refuses GrayDesk credentials; HTTPS guard permits only the scoped POST',()=>{
+test('public HTTP and HTTPS permit the scoped authenticated POST',()=>{
  const {createLanGuard}=require('../adapters/http/lan-access.cjs');
  const run=origin=>{const headers={};let status;const res={writeHead:n=>{status=n;},end:()=>{},setHeader:(k,v)=>headers[k]=v};const req={url:'/api/graydesk/errors',method:'POST',headers:{host:'errors.example.test'},socket:{remoteAddress:'127.0.0.1'}};const allowed=createLanGuard({address:'192.168.1.2',cidr:'192.168.1.0/24',port:8520,publicOrigin:origin})(req,res);return {allowed,status};};
- assert.equal(run('http://errors.example.test').status,426);assert.equal(run('https://errors.example.test').allowed,true);
+ assert.equal(run('http://errors.example.test').allowed,true);assert.equal(run('https://errors.example.test').allowed,true);
 });
 module.exports={sample};
