@@ -55,3 +55,6 @@ data/huidulogs/
 # Online update runtime and private signing credentials
 var/assistant-updates/
 .private/assistant-updates/
+
+var/graydesk-updates/
+.private/graydesk-updates/

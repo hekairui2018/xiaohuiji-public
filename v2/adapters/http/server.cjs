@@ -5,7 +5,7 @@ const {createQuickService}=require('./quick-service.cjs');
 const {createDialogueService}=require('./dialogue-service.cjs');
 const {serveStatic}=require('./static-service.cjs');
 const {createOriginalResource}=require('./original-resource.cjs');
-function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,graydeskReceiver=null,assistantUpdates=null,publicOnly=false,publicSearch=null}={}){
+function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,graydeskReceiver=null,assistantUpdates=null,graydeskUpdates=null,publicOnly=false,publicSearch=null}={}){
  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
  app={...app,dialogue:app.customerDialogue||app.dialogue};
  const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app,publicCatalog?.localRelease?{
@@ -36,6 +36,10 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   try{
   const send=(code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(req.v2Public?publicCatalog.transform(body):body));};
   const route=req.url.split('?')[0];
+  if(route.startsWith('/api/graydesk/updates/')){
+   if(graydeskUpdates&&await graydeskUpdates.handle(req,res))return;
+   res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'graydesk-updates-not-configured'}));return;
+  }
   if(route==='/api/graydesk/errors'){
    if(graydeskReceiver){await graydeskReceiver.handle(req,res);return;}
    res.writeHead(503,{'Content-Type':'application/json','Retry-After':'60'});res.end(JSON.stringify({ok:false,error:'receiver-not-configured',retryable:true}));return;
