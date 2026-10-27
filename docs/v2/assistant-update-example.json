@@ -1,0 +1,36 @@
+{
+  "notice": "SIGNED TEST EXAMPLE ONLY; test channel now disabled. Never accept this as stable.",
+  "queryResponse": {
+    "algorithm": "RSA-PSS-SHA256",
+    "keyId": "1f8e1eeb503f1fe046050894f3060bbe85b9276ec3eb1966b081267fdb4aba49",
+    "payload": "eyJzY2hlbWFWZXJzaW9uIjoxLCJwcm9kdWN0SWQiOiJ4aWFvaHVpamlhbmctZmlybXdhcmUtYXNzaXN0YW50IiwiY2hhbm5lbCI6InRlc3QiLCJzZXF1ZW5jZSI6IjIiLCJpc3N1ZWRBdCI6IjIwMjYtMTAtMjdUMTM6MDk6MTYuMjQwWiIsImV4cGlyZXNBdCI6IjIwMjYtMTEtMDNUMTM6MDk6MTYuMjQwWiIsImhpZ2hlc3RCdWlsZCI6IjIwMjYxMDI3MDAwMSIsImxhdGVzdCI6eyJwcm9kdWN0SWQiOiJ4aWFvaHVpamlhbmctZmlybXdhcmUtYXNzaXN0YW50IiwiYnVpbGQiOiIyMDI2MTAyNzAwMDEiLCJkaXNwbGF5VmVyc2lvbiI6IlRSQU5TUE9SVCBURVNUIE9OTFkgQSIsInB1Ymxpc2hlZEF0IjoiMjAyNi0xMC0yN1QxMzowOToxNi4yNDBaIiwibm90ZXMiOiJEaWFnbm9zdGljIEVYRSwgbm90IGEgZmlybXdhcmUgYXNzaXN0YW50IHJlbGVhc2UuIE5ldmVyIGluc3RhbGwgdGhyb3VnaCBzdGFibGUuIiwiZmlsZU5hbWUiOiIyMDI2MTAyNzAwMDEtYzZjMWY5ZjRmZGE1NGU1MjJlMmRjZjUyNjQ2ZTYxNGMwYjIyZTAwNDk2MmQ1ZjYyYjY0NTQxYThmZTViMDhjYy5leGUiLCJzaXplIjozMDcyLCJzaGEyNTYiOiJjNmMxZjlmNGZkYTU0ZTUyMmUyZGNmNTI2NDZlNjE0YzBiMjJlMDA0OTYyZDVmNjJiNjQ1NDFhOGZlNWIwOGNjIiwiZG93bmxvYWRVcmwiOiJodHRwOi8vNDNudWRqMzE0MDY0LnZpY3AuZnVuL2FwaS9hc3Npc3RhbnQtdXBkYXRlcy92MS90ZXN0L2ZpbGVzLzIwMjYxMDI3MDAwMS1jNmMxZjlmNGZkYTU0ZTUyMmUyZGNmNTI2NDZlNjE0YzBiMjJlMDA0OTYyZDVmNjJiNjQ1NDFhOGZlNWIwOGNjLmV4ZSIsInRlc3RPbmx5Ijp0cnVlLCJwbGF0Zm9ybSI6IndpbmRvd3MteDY0IiwiZm9ybWF0Ijoic2luZ2xlLWV4ZSJ9LCJwcmV2aW91cyI6bnVsbCwicmV2b2tlZEJ1aWxkcyI6W119",
+    "signature": "mee9x+DgMDIHxBXPhHLYffeQ9WPuqKA5v8Fjz/DQWKe7OTvQEDzU5oQYPAS1/uhuOQl4RG7RWXGw17sjBDoKGUKPyXlJ1hkazSgq+4QuVlJ9x4056nnpktt1LpuClTTLCFH0CHdITDU2wEtAXAfVX+s9V1xw8UvFH7+PlI0I/f6odZBTPql8BkTqSEy/daaI64EWWwUrTAyCG1ZpX6RK/Ljuzg5NzL6MN/IdOPxGrZ8lti49tespoMaOOJJz1B5Y97MoaHXGe1OiysaRmmu0pKh/MPix7HdMr1JCkZ2yWN2gcgY0+K6aMbbL5LUzfRNRAWM/6GN+k7VeANI9hYdF1dJqsaGKR1QpQh+r8WU/QL/iboTYhv8k1Rn+44isAnHJEbcEgdWAGtevOaRjCThwhdD87667yG54t4Pv0mdRMkMm16H54IR6K/UtINhheJUVcHibdV7L+wBa+j7/wBYjQpedcvW0+b9iXOdyttGWJFQv7xvrvOOC25eaVXzQrZaH",
+    "status": "published",
+    "hasUpdate": true
+  },
+  "decodedSignedPayload": {
+    "schemaVersion": 1,
+    "productId": "xiaohuijiang-firmware-assistant",
+    "channel": "test",
+    "sequence": "2",
+    "issuedAt": "2026-10-27T13:09:16.240Z",
+    "expiresAt": "2026-11-03T13:09:16.240Z",
+    "highestBuild": "202610270001",
+    "latest": {
+      "productId": "xiaohuijiang-firmware-assistant",
+      "build": "202610270001",
+      "displayVersion": "TRANSPORT TEST ONLY A",
+      "publishedAt": "2026-10-27T13:09:16.240Z",
+      "notes": "Diagnostic EXE, not a firmware assistant release. Never install through stable.",
+      "fileName": "202610270001-c6c1f9f4fda54e522e2dcf52646e614c0b22e004962d5f62b64541a8fe5b08cc.exe",
+      "size": 3072,
+      "sha256": "c6c1f9f4fda54e522e2dcf52646e614c0b22e004962d5f62b64541a8fe5b08cc",
+      "downloadUrl": "http://43nudj314064.vicp.fun/api/assistant-updates/v1/test/files/202610270001-c6c1f9f4fda54e522e2dcf52646e614c0b22e004962d5f62b64541a8fe5b08cc.exe",
+      "testOnly": true,
+      "platform": "windows-x64",
+      "format": "single-exe"
+    },
+    "previous": null,
+    "revokedBuilds": []
+  }
+}

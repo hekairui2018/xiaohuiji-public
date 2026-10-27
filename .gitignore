@@ -51,3 +51,7 @@ wecom-bridge/data/records.jsonl
 
 # HD固件升级助手运行日志公网回传落盘（运营数据，随本机累积，不入库）
 data/huidulogs/
+
+# Online update runtime and private signing credentials
+var/assistant-updates/
+.private/assistant-updates/
