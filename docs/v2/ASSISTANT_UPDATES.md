@@ -2,6 +2,8 @@
 
 交付日期：2026-10-27。仅小灰机服务端；助手端的检查、验签、下载、替换、重启由助手项目实现。本次没有发布任何助手正式EXE。
 
+> 2026-10-28修正：现有助手保持x86。发布器已支持x86/x64并从实际PE头生成签名platform；助手无需改成x64。此前签名示例是x64诊断包，保留其原签名事实，不代表助手架构。
+
 ## 已上线的入口
 
 - 产品标识固定为 `xiaohuijiang-firmware-assistant`。
@@ -54,7 +56,7 @@ payload解码后的完整结构示意：
     "sha256": "<64位小写SHA256>",
     "downloadUrl": "http://43nudj314064.vicp.fun/api/assistant-updates/v1/stable/files/202610270001-<64位小写SHA256>.exe",
     "testOnly": false,
-    "platform": "windows-x64",
+    "platform": "windows-x86",
     "format": "single-exe"
   },
   "previous": null,
@@ -98,7 +100,7 @@ payload解码后的完整结构示意：
 
 1. 限制响应/下载大小及超时；查询失败时保持现有助手可用，不替换EXE。
 2. 只接受算法 `RSA-PSS-SHA256`、上述keyId和内置公钥。签名验证对象是Base64解码payload的**原始字节**，不是重序列化JSON。RSA 3072位、SHA256、MGF1-SHA256、PSS盐长32字节（.NET的SHA256/Pss对应此设置）。
-3. 验签通过后解析JSON，校验schemaVersion、产品、stable、testOnly=false、Windows x64、single-exe、字段类型、URL主机/协议白名单及文件大小上限。禁止跨产品、跨通道复用。
+3. 验签通过后解析JSON，校验schemaVersion、产品、stable、testOnly=false、Windows架构与当前助手相符（现有助手应为windows-x86，可在32/64位Windows运行）、single-exe、字段类型、URL主机/协议白名单及文件大小上限。禁止跨产品、跨通道复用。
 4. 校验issuedAt/expiresAt及本机可信时钟；当前清单有效期7天。按产品+通道持久保存已接受的最大sequence，拒绝更低sequence，避免见过新版后被重放旧清单。同sequence内容变化亦拒绝。首次接入仍有有效期内重放窗口；需要更强即时撤回能力时应迁移到经验证的HTTPS。
 5. 下载到临时文件，完整核对验签payload中的size、SHA256。仅在这两项及签名全部通过后交给助手端替换逻辑。独立RSA签名绑定EXE哈希；本次未生成Windows Authenticode证书，不将此签名冒充Windows已签名软件。
 6. 换公钥只能通过已信任的助手发布或独立可信渠道批准；签名私钥绝不能交给客户端。
@@ -143,7 +145,7 @@ node v2/tools/assistant-release.cjs --config .private/assistant-updates/config.j
 node v2/tools/assistant-release.cjs --config .private/assistant-updates/config.json --key .private/assistant-updates/signing-private.pem --channel stable --action renew --approve-stable
 ```
 
-发布按源EXE预期大小/哈希及x64 PE头校验，复制到同卷partial并fsync，再复核，重命名为不可变构建包，最后原子替换签名current.json。版本信息和EXE不会分别指向不同提交。发布目录保留包、history清单和release-audit.jsonl；上一版不被覆盖。重复完全相同发布幂等返回原清单；同构建号改内容拒绝。切换前中断不会让孤立包被HTTP下载，同包重试可复用已验证孤立包。损坏的孤立包拒绝。
+发布按源EXE预期大小/哈希及x86 PE32/x64 PE32+头校验（platform从EXE实测，不能由发布参数伪填），复制到同卷partial并fsync，再复核，重命名为不可变构建包，最后原子替换签名current.json。版本信息和EXE不会分别指向不同提交。发布目录保留包、history清单和release-audit.jsonl；上一版不被覆盖。重复完全相同发布幂等返回原清单；同构建号改内容拒绝。切换前中断不会让孤立包被HTTP下载，同包重试可复用已验证孤立包。损坏的孤立包拒绝。
 
 全局.publish.lock阻止并行发布；异常断电可能留下锁，先确认没有发布进程，再人工移除锁后重试。不要直接编辑签名JSON或手工改current。发布与回退不需要重启8520。
 

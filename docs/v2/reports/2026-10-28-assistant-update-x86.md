@@ -1,0 +1,7 @@
+# Update publication: x86 correction
+
+The previous publisher incorrectly required AMD64/PE32+ and hardcoded windows-x64 in signed metadata. It now recognizes I386/PE32 as windows-x86 and AMD64/PE32+ as windows-x64. Inconsistent or unsupported PE headers are rejected. The signed platform is derived from the actual source EXE rather than operator-supplied platform text. The existing assistant can remain x86 on 32-bit or 64-bit Windows.
+
+All seven update-service tests passed, including an x86 signed publication/download/hash case, architecture-spoof rejection and retained x64 compatibility. Public acceptance used a newly compiled x86 diagnostic EXE: 3584 bytes, SHA256 c724e97edcf0c74065a96e89d4c7f81f0732b0426d842aa8db73bfc64a4407d7. Signed test queries reported windows-x86; actual repeated download and SHA256 checks passed. Rollback/withdrawal checks passed. Stable remained byte-identical and without a release; test was disabled afterwards.
+
+The change takes effect in each invocation of the existing local release command. The HTTP service already transmits signed architecture metadata and verified bytes without imposing an x64 restriction, so no service restart was required. No real assistant EXE was published, replaced or executed. The existing signature trust root and upload/Feishu/resource business rules were not changed. The earlier signed x64 diagnostic example remains historically accurate; integration instructions now explicitly identify the real assistant as x86.
