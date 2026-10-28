@@ -1,0 +1,100 @@
+--- a/v2/contracts/demand.schema.json
++++ b/v2/contracts/demand.schema.json
+@@ -23,6 +23,7 @@
+       "pixelWidth": {"type": "integer", "minimum": 1}, "pixelHeight": {"type": "integer", "minimum": 1},
+       "physicalWidthMm": {"type": "number", "exclusiveMinimum": 0}, "physicalHeightMm": {"type": "number", "exclusiveMinimum": 0},
+       "interface": {"type": "string"},
++      "inputCount": {"enum": [1, 2]},
+       "driverFamily": {"enum": ["conventional", "pwm", null]},
+       "scan": {"type": "object", "required": ["numerator", "denominator"], "additionalProperties": false, "properties": {
+         "numerator": {"type": "integer", "minimum": 1}, "denominator": {"type": "integer", "minimum": 1}
+--- a/v2/domain/parser/ordering-fields.cjs
++++ b/v2/domain/parser/ordering-fields.cjs
+@@ -17,6 +17,8 @@
+  if(m){set(module,'pixelWidth',Number(m[1]),m,'/module');set(module,'pixelHeight',Number(m[2]),m,'/module');}
+  m=text.match(/(?:^|[^A-Z0-9_-])(?:(\d+)\s*\/\s*)?(\d+)\s*(?:扫|S\b)/i);if(m)set(module,'scan',{numerator:m[1]?Number(m[1]):1,denominator:Number(m[2])},m,'/module');
+  m=text.match(/\bHUB(?:75E?|12|08|320|50)\b/i);if(m)set(module,'interface',m[0].toUpperCase(),m,'/module');
++ const inputAssertions=[...text.matchAll(/(?:模组[^，,。；;\n]{0,24}|(?:^|[，,；;])\s*(?:改成|改为|调整为|采用|不是|不要|是|用)?\s*)(单|双)(?:排线)?输入/g)];
++ m=inputAssertions.filter(a=>!/不是|不要/.test(a[0])).at(-1)||inputAssertions.at(-1);if(m){set(module,'inputCount',m[1]==='单'?1:2,m,'/module');if(/不是|不要/.test(m[0]))provenance['/module/inputCount'].kind='user-negated';}
+  m=text.match(/(\d+)R\s*(\d+)G\s*(\d+)B/i);if(m)set(module,'color',{r:Number(m[1]),g:Number(m[2]),b:Number(m[3])},m,'/module');
+  else if(/全彩/.test(text)&&!/(?:不是|非|不要|不使用)\s*全彩/.test(text))set(module,'color',{r:1,g:1,b:1},['全彩'],'/module');
+  if(/PWM/i.test(text)&&!/常规芯片/.test(text)&&!/(?:不是|非|不要|不使用)\s*PWM/i.test(text))set(module,'driverFamily','pwm',['PWM'],'/module');else if(/常规芯片/.test(text)&&!/PWM/i.test(text))set(module,'driverFamily','conventional',['常规芯片'],'/module');
+--- a/v2/domain/ordering/module-selector.cjs
++++ b/v2/domain/ordering/module-selector.cjs
+@@ -1,5 +1,6 @@
+ 'use strict';
+-const fieldMap={pitchMm:m=>m.dotPitch.spacing,pixelWidth:m=>m.resolution[0],pixelHeight:m=>m.resolution[1],physicalWidthMm:m=>m.size[0],physicalHeightMm:m=>m.size[1],interface:m=>m.interface};
++const {moduleInputCount}=require('./module-input.cjs');
++const fieldMap={pitchMm:m=>m.dotPitch.spacing,pixelWidth:m=>m.resolution[0],pixelHeight:m=>m.resolution[1],physicalWidthMm:m=>m.size[0],physicalHeightMm:m=>m.size[1],interface:m=>m.interface,inputCount:moduleInputCount};
+ function moduleCandidates(demand,dataset){
+  const input=demand.module||{};
+  let rows=dataset.modules().filter(m=>Object.entries(fieldMap).every(([key,get])=>input[key]===undefined||get(m)===input[key]));
+@@ -11,7 +12,7 @@
+ function selectModule(demand,dataset){
+  const input=demand.module||{},rows=moduleCandidates(demand,dataset);
+  if(!rows.length)return {status:'conflict',reason:'no-module-satisfies-explicit-conditions'};
+- if(rows.length!==1)return {status:'needs_input',candidates:rows.map(m=>({moduleId:m.id,pitchMm:m.dotPitch.spacing,pixels:m.resolution,scan:m.scanningMethod,interface:m.interface,color:m.color})),missing_parameters:[{path:'/module',reason:'请补充模组像素、扫描方式、接口或颜色，以区分候选'}]};
++ if(rows.length!==1){const variants=new Set(rows.map(moduleInputCount)),inputVariant=variants.size>1&&![...variants].includes(undefined);return {status:'needs_input',candidates:rows.map(m=>({moduleId:m.id,pitchMm:m.dotPitch.spacing,pixels:m.resolution,scan:m.scanningMethod,interface:m.interface,color:m.color,inputCount:moduleInputCount(m)})),missing_parameters:[inputVariant?{path:'/module/inputCount',reason:'同规格模组有单输入和双输入两种，接收卡可带数量不同，请确认模组输入类型'}:{path:'/module',reason:'请补充模组像素、扫描方式、接口或颜色，以区分候选'}]};}
+  const missing=['pitchMm','pixelWidth','pixelHeight','scan','interface','color'].filter(k=>input[k]===undefined);
+  if(!demand.environment)return {status:'needs_input',missing_parameters:[{path:'/environment',reason:'请明确室内或户外，不以候选库记录代替现场条件'}]};
+  if(missing.length)return {status:'needs_input',missing_parameters:missing.map(k=>({path:'/module/'+k,reason:'唯一库记录不能替代客户确认的适用条件'}))};
+--- a/v2/adapters/http/ordering-session.cjs
++++ b/v2/adapters/http/ordering-session.cjs
+@@ -47,6 +47,7 @@
+  const modules=(refs?.modules||[]).filter(row=>demand.provenance?.['/module/color']?.kind!=='user-negated'||!(row.color.R&&row.color.G&&row.color.B));
+  const known=[],s=demand.screen||{},m=demand.module||{};
+  if(m.pitchMm)known.push('P'+m.pitchMm);
++ if(m.inputCount)known.push('模组'+(m.inputCount===1?'单':'双')+'输入');
+  if(s.physicalWidthMm&&s.physicalHeightMm)known.push('宽'+s.physicalWidthMm/1000+'米、高'+s.physicalHeightMm/1000+'米');
+  if(s.pixelWidth&&s.pixelHeight)known.push('整屏'+s.pixelWidth+'×'+s.pixelHeight+'像素');
+  if(s.moduleColumns&&s.moduleRows)known.push('模组横'+s.moduleColumns+'张、竖'+s.moduleRows+'张，共'+s.moduleColumns*s.moduleRows+'张');
+@@ -95,7 +96,10 @@
+  let stage=strict.status==='ready'&&strict.exportAllowed!==false?'formal':strict.status==='conflict'?'conflict':'needs-input';
+  const simulations=[];
+  const simulationFailures=[];
+- const evidence=modules.slice(0,3).map(row=>({moduleId:row.id,pitchMm:row.dotPitch.spacing,pixels:row.resolution,scan:row.scanningMethod,interface:row.interface,source:row.source}));
++ const inputCount=require('../../domain/ordering/module-input.cjs').moduleInputCount;
++ const inputVariants=new Set(modules.map(inputCount));
++ if(m.inputCount===undefined&&inputVariants.size>1&&![...inputVariants].includes(undefined))pending.push({path:'/module/inputCount',question:'模组是单输入还是双输入？两种模组的接收卡可带数量不同。'});
++ const evidence=modules.slice(0,3).map(row=>({moduleId:row.id,pitchMm:row.dotPitch.spacing,pixels:row.resolution,scan:row.scanningMethod,interface:row.interface,inputCount:inputCount(row),source:row.source}));
+  // A requested product is a constraint, not proof that it can drive this screen.
+  const id=require('../../domain/identity/model-id.cjs').modelId;
+  const missingDevice=(demand.providedDevices||[]).some(d=>![...refs?.devices||[],...refs?.receivers||[]].some(r=>id(r.model)===d.modelId));
+@@ -105,6 +109,7 @@
+    for(const mode of demand.controlMode?[demand.controlMode]:['sync','async']){
+    const hypothesis=structuredClone(demand),assumptions=[];
+    const sourceModule={pitchMm:row.dotPitch.spacing,pixelWidth:row.resolution[0],pixelHeight:row.resolution[1],physicalWidthMm:row.size[0],physicalHeightMm:row.size[1],scan:{numerator:1,denominator:Number(row.scanningMethod.replace(/S$/,''))},interface:row.interface,color:{r:row.color.R,g:row.color.G,b:row.color.B}};
++   if(inputCount(row)!==undefined)sourceModule.inputCount=inputCount(row);
+    for(const [key,value]of Object.entries(sourceModule))if(hypothesis.module[key]===undefined){hypothesis.module[key]=value;assumptions.push('/module/'+key);}
+    if(!hypothesis.environment){hypothesis.environment=row.indoor?'indoor':'outdoor';assumptions.push('/environment');}
+    if(!hypothesis.controlMode){hypothesis.controlMode=mode;assumptions.push('/controlMode');}
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -373,7 +373,7 @@
+     const progressFacts={models:route.models||[],results:[],modelCallCount:0};
+     const expertProgress=(stage,detail={})=>{onProgress(stage);Object.assign(progressFacts,detail);req.v2ChatStream?.progress(require('./answer-process.cjs').answerProcess({...progressFacts,status:progressFacts.generating?'generating':'running'}));};
+     expertProgress('searching');
+-    let preparedEvidence=[];
++    let preparedEvidence=[],preparedOperation=null;
+     if(resourceAnswer&&localRag&&input.message.length<=240){try{
+      const shared=route.hintIntent==='operation'&&resourceSearch?await resourceSearch(input.message,{request:req,signal:controller.signal}):await resourceAnswer(input.message,{request:req,signal:controller.signal});
+      if(route.hintIntent==='operation')shared.results=require('./expert-operation-evidence.cjs').selectOperationEvidence(shared.results,shared.plan||shared.retrievalPlan);
+@@ -388,10 +388,17 @@
+     }catch{}}
+     if(expertMaterials){const added=expertMaterials.evidence(input.message,{models:route.models||[],targetedOnly:true});preparedEvidence=[...added,...preparedEvidence].slice(0,6);}
+     if(expertMaterialRag&&/控标|投标|招标|竞品|友商|对比|比较/.test(input.message)&&!preparedEvidence.some(e=>/^structured-(?:comparison|tender)-original$/.test(e.sourceKind))){try{const added=await expertMaterialRag.search(input.message,{models:route.models||[],signal:controller.signal});preparedEvidence=[...added,...preparedEvidence].slice(0,6);}catch{}}
++    if(route.hintIntent==='operation'){
++     const plan=require('../../domain/knowledge/resource-query.cjs').planResourceQuery(input.message),software=(plan.software||[]).map(s=>s.toLowerCase());
++     const documentKey=s=>String(s).normalize('NFKC').replace(/\s/g,'').toLowerCase(),preferred=new Set(preparedEvidence.map(e=>documentKey(e.name)));
++     const documents=[...new Set((await localCatalog()).filter(r=>/\.(pdf|docx?)$/i.test(r.name)&&software.some(s=>r.name.toLowerCase().includes(s))).sort((a,b)=>Number(preferred.has(documentKey(b.name)))-Number(preferred.has(documentKey(a.name)))).map(r=>r.name))].slice(0,40);
++     preparedOperation=await require('./prepare-operation-evidence.cjs').prepareOperationEvidence({rows:preparedEvidence,plan,search:args=>expertEvidence.search(args),read:args=>expertEvidence.read(args),documents});
++     preparedEvidence=preparedOperation.rows;
++    }
+     const scopedSources=require('../../domain/knowledge/expert-source-contract.cjs').prepareExpertSources(input.message,route,preparedEvidence);
+     preparedEvidence=scopedSources.evidence;route.sourceContract=scopedSources.contract;
+     expertProgress('evidence-found',{models:route.models||[],results:preparedEvidence||[]});
+-    let output;try{output=require('../../domain/knowledge/comparison-answer.cjs').comparisonAnswer(route,preparedEvidence)||await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
++    let output;try{output=(preparedOperation&&require('./prepare-operation-evidence.cjs').incompleteOperationAnswer(preparedOperation))||require('../../domain/knowledge/comparison-answer.cjs').comparisonAnswer(route,preparedEvidence)||await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+     const compared=(preparedEvidence||[]).find(e=>e.sourceKind==='structured-comparison-original');
+     if(compared&&output.status==='answer'){const table=JSON.parse(compared.text);if(table.models?.length>1)output.parameterComparison=table;}
+     output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:route.models||[]});
