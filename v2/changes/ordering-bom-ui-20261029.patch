@@ -1,0 +1,180 @@
+--- a/v2/frontend/v2-components.js
++++ b/v2/frontend/v2-components.js
+@@ -10,9 +10,9 @@
+ }
+ // Presentation only: all choices and quantities come from the validated domain result.
+ function renderV2Ordering(result){
+- const root=document.createElement('div');
++ const root=document.createElement('div');root.className='v2-ordering-result';
+  const direct=result.plan?.architecture==='direct';
+- if(result.options?.length>1){const choices=document.createElement('div');for(const option of result.options){const b=document.createElement('button');b.type='button';b.textContent='方案'+option.id+' '+option.controller+' '+(option.controlMode==='async'?'异步':'同步')+' / 模组'+option.moduleId;b.onclick=()=>{const input=document.querySelector('#aiInput'),send=document.querySelector('#aiSendBtn');if(!input||!send||send.disabled)return;input.value='配单方案：'+option.id;input.dispatchEvent(new Event('input',{bubbles:true}));send.click();};choices.appendChild(b);}root.appendChild(choices);}
++ if(result.options?.length>1){const choices=document.createElement('div');choices.className='v2-ordering-choices';choices.setAttribute('role','group');choices.setAttribute('aria-label','切换配单方案');for(const [index,option]of result.options.entries()){const b=document.createElement('button');b.type='button';b.className='ord-choice';b.setAttribute('aria-pressed',String(index===0));const label=document.createElement('strong');label.textContent=option.controller;const mode=document.createElement('span');mode.textContent=(option.controlMode==='async'?'异步播放':'同步显示')+' · 方案'+option.id;const detail=document.createElement('small');detail.textContent='模组候选 '+option.moduleId;b.append(label,mode,detail);b.onclick=()=>root.dispatchEvent(new CustomEvent('v2-ordering-select',{bubbles:true,detail:{optionId:option.id}}));choices.appendChild(b);}root.appendChild(choices);}
+  if(result.nativeOrdering){const native=result.nativeOrdering;
+   const heading=document.createElement('p');heading.textContent='官网原算法 · '+(native.controller?.model||'选型结果');root.appendChild(heading);
+    const list=document.createElement('ul');for(const item of native.matchingResult||[]){if(item.value===undefined||item.value===null||native.scene?.T16&&item.key==='T902')continue;const row=document.createElement('li');row.textContent=item.key+'：'+item.value;list.appendChild(row);}root.appendChild(list);
+@@ -27,10 +27,20 @@
+   const note=document.createElement('p');note.textContent=result.configurationBlockReason||'官网选型和原生图已生成；此分支的标准SSM坐标映射尚未核验。';root.appendChild(note);
+   const button=document.createElement('button');button.type='button';button.textContent='下载官网计算结果包（非SSM）';button.onclick=()=>{const blob=new Blob([JSON.stringify({format:'xiaohuiji-official-result-1',hardwareConfiguration:false,demand:result.nativeDemand,calculation:native},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='xiaohuiji-official-result.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};root.appendChild(button);return root;
+  }
+- const heading=document.createElement('p');heading.textContent=`整屏 ${result.plan.screen.pixelWidth}×${result.plan.screen.pixelHeight} 像素，`+(direct?`${result.plan.directOutputs.length} 个逻辑HUB接口区域`:`${result.plan.ports.length} 个网口`);root.appendChild(heading);
++ const heading=document.createElement('p');heading.className='ord-key-summary';heading.textContent=`整屏 ${result.plan.screen.pixelWidth}×${result.plan.screen.pixelHeight} 像素，`+(direct?`${result.plan.directOutputs.length} 个逻辑HUB接口区域`:`${result.plan.ports.length} 个网口`);root.appendChild(heading);
+  const list=document.createElement('ul');
+- for(const item of result.bom||result.previewBom||[]){const li=document.createElement('li');const name=item.kind==='module'?`P${result.plan.module.dotPitch.spacing} 模组 ${result.plan.module.resolution.join('×')}`:item.kind==='receiver'?`接收卡 ${item.modelId}`:`主控 ${item.modelId}`;li.textContent=`${name}：${item.quantity}${item.kind==='module'?'块':item.kind==='receiver'?'张':'台'}`;list.appendChild(li);}root.appendChild(list);
+- if(result.hdsetSvg||result.topologySvg){const img=document.createElement('img');img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(result.hdsetSvg||result.topologySvg);img.alt='网口与接收卡区域规划';img.style.width='100%';img.style.maxHeight='440px';root.appendChild(img);}
++ for(const item of result.bom||result.previewBom||[]){const li=document.createElement('li');li.className='ord-key-material';const name=item.kind==='module'?`P${result.plan.module.dotPitch.spacing} 模组 ${result.plan.module.resolution.join('×')}`:item.kind==='receiver'?`接收卡 ${item.modelId}`:`主控 ${item.modelId}`;li.textContent=`${name}：${item.quantity}${item.kind==='module'?'块':item.kind==='receiver'?'张':'台'}`;list.appendChild(li);}root.appendChild(list);
++ const bomButton=document.createElement('button');bomButton.type='button';bomButton.className='ord-bom-download';bomButton.textContent='下载BOM表';
++ bomButton.onclick=async()=>{bomButton.disabled=true;try{await window.OrderingWorkbook.download(result);}catch(error){bomButton.textContent='导出失败，点击重试';bomButton.title=error.message;}finally{bomButton.disabled=false;}};root.append(bomButton);
++ if(result.hdsetSvg||result.topologySvg){
++  const svg=result.hdsetSvg||result.topologySvg,img=document.createElement('img');img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);img.alt='网口与接收卡区域规划，点击放大';img.style.cssText='width:100%;max-height:440px;object-fit:contain;cursor:zoom-in';
++  const open=()=>{const dialog=document.createElement('dialog');dialog.className='ord-image-dialog';dialog.style.cssText='width:94vw;max-width:94vw;height:90vh;padding:16px;border:1px solid #ccd8e2;border-radius:12px';const close=document.createElement('button');close.type='button';close.textContent='关闭';const viewport=document.createElement('div');viewport.style.cssText='overflow:auto;height:calc(100% - 45px);margin-top:10px';const full=document.createElement('img');full.src=img.src;full.alt='放大的配单连接图';full.style.cssText='width:1600px;max-width:none;height:auto';viewport.append(full);close.onclick=()=>dialog.close();dialog.addEventListener('close',()=>dialog.remove());dialog.append(close,viewport);document.body.append(dialog);dialog.showModal();};
++  img.onclick=open;img.tabIndex=0;img.setAttribute('role','button');img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};
++  const frame=document.createElement('div');frame.style.cssText='position:relative;border:1px solid #dce5ec;border-radius:8px;overflow:hidden';
++  const tools=document.createElement('div');tools.style.cssText='position:absolute;right:8px;top:8px;display:flex;gap:8px;background:white;padding:5px;border-radius:6px;box-shadow:0 1px 5px #0002';
++  const zoom=document.createElement('button');zoom.type='button';zoom.className='ord-image-zoom';zoom.textContent='👁';zoom.title='放大查看连接图';zoom.setAttribute('aria-label',zoom.title);zoom.onclick=open;
++  const download=document.createElement('a');download.className='ord-image-download';download.href=img.src;download.download='xiaohuiji-connection.svg';download.textContent='↓';download.title='下载连接图';download.setAttribute('aria-label',download.title);download.style.cssText='padding:3px 8px;font-size:20px';tools.append(zoom,download);frame.append(img,tools);root.append(frame);
++ }
+  if(direct||result.plan.builtInRegions?.length){const note=document.createElement('p');note.textContent=direct?'直控方案不生成接收卡连屏文件；逻辑接口区域需按对应设备资料核对实际排线。':'末端箱体由控制卡内置接口接管；当前没有混合配置格式依据，暂不导出SSM。';root.appendChild(note);return root;}
+  const draft=!!result.provisionalExportDemand;
+  if(result.exportAllowed===false&&!draft){const note=document.createElement('p');note.textContent=result.plan.specialCanvas?'该折叠方案的逻辑配置映射尚未验证，暂不生成标准SSM。':'暂定方案预览：当前条件尚未通过配置导出校验。';root.appendChild(note);return root;}
+@@ -41,5 +51,5 @@
+   if(!response.ok){const error=await response.json();throw Error(error.reason||error.message||(typeof error.error==='string'?error.error:'当前方案不能导出（'+response.status+'）'));}
+   const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=draft?'xiaohuiji-v2-draft.ssm':'xiaohuiji-v2.ssm';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message.textContent=(draft?'暂定方案SSM':'SSM')+'已下载；这仅表示文件生成，尚未验证本次HDSet导入及现场映射。'+(result.plan.ports.length>16?' 超过16口，仍需对应口数设备验证。':'');
+  }catch(error){message.textContent='下载失败：'+error.message;}finally{button.disabled=false;}};
+- root.append(button,message);return root;
++ root.append(button,bomButton,message);return root;
+ }
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -13,6 +13,24 @@
+  });
+  let sending = false;
+  let composing = false;
++ ui.messages.addEventListener('v2-ordering-select',async event=>{
++  const root=event.target,optionId=event.detail?.optionId;
++  if(!Number.isSafeInteger(optionId)||optionId<1||sending||!root.matches?.('.v2-ordering-result'))return;
++  const panels=ui.messages.querySelectorAll('.v2-ordering-result');
++  if(panels[panels.length-1]!==root)return;
++  const sessionId=ui.getSessionId();busy(true);
++  const buttons=root.querySelectorAll('.v2-ordering-choices button');buttons.forEach(b=>b.disabled=true);
++  const status=document.createElement('p');status.setAttribute('role','status');status.textContent='正在切换方案…';root.append(status);
++  try{
++   const response=await request(payload('配单方案：'+optionId,sessionId));
++   if(ui.getSessionId()!==sessionId||!root.isConnected)return;
++   if(!response.result?.plan&&!response.result?.nativeOrdering)throw Error(response.reply||'方案未能切换');
++   const bubble=root.closest('.ai-msg-bubble'),description=bubble?.firstElementChild;
++   if(description&&description!==root&&['DIV','P'].includes(description.tagName)&&typeof response.reply==='string')description.textContent=response.reply;
++   root.replaceWith(renderV2Ordering(response.result));
++  }catch(error){if(ui.getSessionId()===sessionId&&root.isConnected)status.textContent='切换失败：'+error.message;}
++  finally{busy(false);buttons.forEach(b=>b.disabled=false);}
++ });
+  ui.input.addEventListener('compositionstart',()=>{composing=true;});
+  ui.input.addEventListener('compositionend',()=>{composing=false;});
+  ui.input.addEventListener('keydown',event=>{
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -12,7 +12,7 @@
+   <meta property="og:title" content="小灰机 · 灰度LED显示屏智能客服与选型助手">
+   <meta property="og:description" content="速查LED显示屏控制设备的参数规格书、固件与软件，附操作视频、故障排查案例，支持按屏体尺寸智能配单选型。">
+   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23174f9e'/><path d='M37 6L17 36H29L25 58L47 26H34Z' fill='%23ffffff'/></svg>">
+-  <link rel="stylesheet" href="styles.css?v=20261028-chip-browser">
++  <link rel="stylesheet" href="styles.css?v=20261029-ordering-cards">
+ </head>
+ <body data-client="rules" data-view="quick">
+   <header class="site-header">
+@@ -85,11 +85,12 @@
+     </section>
+   </main>
+ 
+-  <script src="v2-components.js?v=20261029-inline-zoom-bom"></script>
++  <script src="ordering-workbook.js?v=20261029-xlsx-v2"></script>
++  <script src="v2-components.js?v=20261029-cards-xlsx"></script>
+   <script src="product-resources.js?v=20261027-curated-word-preview"></script>
+   <script src="product-card.js?v=20261027-source-label"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261029-inline-choice"></script>
++  <script src="chat-controller.js?v=20261029-inline-choice-v2"></script>
+   <script src="offline-client.js?v=20261028-curated-search"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
+--- a/v2/adapters/http/ordering-session.cjs
++++ b/v2/adapters/http/ordering-session.cjs
+@@ -38,11 +38,12 @@
+   for(const k of Object.keys(delta.screen))delta.provenance['/screen/'+k]={kind:'user-approved-proposal',text,source:p.source};
+   acceptedProposal={...p,originalTarget:previous.confirmed.screen,userQuote:text};
+  }
+- const demand=update?.restore?structuredClone(update.restore):mergeOrderingDemand(previous?.confirmed,delta);
++ const confirmedDemand=update?.restore?structuredClone(update.restore):mergeOrderingDemand(previous?.confirmed,delta);
+  for(const operation of update?.operations||[])if(operation.op==='clear'){
+-  const parts=operation.path.split('/').filter(Boolean),last=parts.pop();let parent=demand;for(const part of parts)parent=parent?.[part];if(parent)delete parent[last];
+-  demand.provenance??={};demand.provenance[operation.path]=operation.source;
++  const parts=operation.path.split('/').filter(Boolean),last=parts.pop();let parent=confirmedDemand;for(const part of parts)parent=parent?.[part];if(parent)delete parent[last];
++  confirmedDemand.provenance??={};confirmedDemand.provenance[operation.path]=operation.source;
+  }
++ const {demand,defaults}=require('../../domain/ordering/conversation-defaults.cjs').conversationDefaults(confirmedDemand);
+  const refs=app.orderingReferences?.(demand),negated=Object.values(demand.provenance||{}).some(p=>p.kind==='user-negated');
+  const modules=(refs?.modules||[]).filter(row=>demand.provenance?.['/module/color']?.kind!=='user-negated'||!(row.color.R&&row.color.G&&row.color.B));
+  const known=[],s=demand.screen||{},m=demand.module||{};
+@@ -147,7 +148,7 @@
+   else{const first=strict.missing_parameters?.[0];pending.push({path:first?.path||'/module',question:first?.reason||'请提供模组完整规格，核对当前条件与选型库不一致的地方。'});}
+  }
+  if(chosen){const index=simulations.findIndex(s=>s.moduleId===chosen.moduleId&&s.inputs.controlMode===chosen.inputs.controlMode&&s.controller===chosen.controller);if(index>=0)simulations.unshift(...simulations.splice(index,1));}
+- const orderingState={confirmed:demand,derived,pending,candidates:evidence,simulations,simulationFailures,gridProposal,acceptedProposal,stage,scope:multi?'multiple-or-irregular':'single-screen',datasetVersion:refs?.datasetVersion||strict.datasetVersion};
++ const orderingState={confirmed:confirmedDemand,defaults,derived,pending,candidates:evidence,simulations,simulationFailures,gridProposal,acceptedProposal,stage,scope:multi?'multiple-or-irregular':'single-screen',datasetVersion:refs?.datasetVersion||strict.datasetVersion};
+  const header=known.length?'已记下：'+known.join('；')+'。':'可以，我先帮你确定配单方向。';
+  let reply;
+  if(multi){stage='needs-input';orderingState.stage=stage;orderingState.candidates=[];orderingState.simulations=[];pending.splice(0,pending.length,{path:'/screen',question:'这是多屏或异形工程；请用“另一块屏”开始，说明其中一块独立矩形屏的宽高，可以吗？'});reply=header+'\n多屏不能合并成单屏配单。\n'+pending[0].question;}
+@@ -187,6 +188,9 @@
+   if(simulations[0].validation?.passed&&preview.plan&&!preview.plan.specialCanvas&&!preview.plan.builtInRegions?.length&&preview.plan.architecture!=='direct')preview.provisionalExportDemand=structuredClone(simulations[0].inputs);
+  }
+  if(preview?.plan)reply+='\n暂定预览：'+preview.plan.module.size.join('×')+'mm、'+preview.plan.module.interface+'；未确认条件只用于预览，现场规格不同须重算。';
++ if(defaults.length)reply='本次未说明的条件按默认：'+defaults.map(d=>d.label).join('、')+'。\n'+reply;
++ if(stage==='formal')strict.defaults=defaults;
++ if(preview)preview.defaults=defaults;
+  return {reply,status:stage==='formal'?'answer':'clarify',result:stage==='formal'?strict:stage==='native-preview'?{...strict,nativeDemand:strict.normalizedDemand}:{...(preview||{}),exportAllowed:false,status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
+ }
+ module.exports={createOrderingSessions,mergeOrderingDemand,progressiveOrdering};
+--- a/v2/domain/ordering/output/hdset-preview.cjs
++++ b/v2/domain/ordering/output/hdset-preview.cjs
+@@ -12,7 +12,7 @@
+  }
+  const topology={schema:'xhj-topo/1',screen:{w:plan.screen.pixelWidth,h:plan.screen.pixelHeight},grid:{cols:new Set(plan.cells.map(c=>c.col)).size,rows:new Set(plan.cells.map(c=>c.row)).size,cardCount:cards.length},route:{id:'h-TL',major:'h',corner:'TL'},portCapacity:655360,cards,ports,wires};
+  const label=String(plan.controller.model).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+- const svg=render(topology,{proc:plan.controller.model}).replace(/(<svg\b[^>]*>)/,'$1<title>'+label+' · '+plan.screen.pixelWidth+'×'+plan.screen.pixelHeight+'</title>');
++ const svg=render(topology,{proc:plan.controller.model,labelEveryPort:true}).replace(/(<svg\b[^>]*>)/,'$1<title>'+label+' · '+plan.screen.pixelWidth+'×'+plan.screen.pixelHeight+'</title>');
+  return {topology,svg};
+ }
+ module.exports={hdsetPreview};
+--- a/backend/ordering/render-hdset.cjs
++++ b/backend/ordering/render-hdset.cjs
+@@ -182,11 +182,11 @@
+   ports.forEach(p=>{
+     [[p.sCard,SGREEN,"S","首"],[p.eCard,EPINK,"E","尾"]].forEach(([ci,col,ch2,han])=>{
+       const cd=cards[ci], r=rectOf(cd);
+-      const isGlobal=(ch2==="S"&&ci===gStart)||(ch2==="E"&&ci===gEnd);
++      const isGlobal=meta?.labelEveryPort===true||(ch2==="S"&&ci===gStart)||(ch2==="E"&&ci===gEnd);
+       const cx=r.x+cw*(ch2==="S"?0.16:0.84), cy=ly+cd.row*ch+ch*RY.wire;
+       const rad=isGlobal?Math.max(6,Math.min(cw,ch)*0.18):Math.max(3.5,Math.min(cw,ch)*0.105);
+       P.push(`<circle cx="${nd(cx)}" cy="${nd(cy)}" r="${nd(rad)}" fill="${col}" fill-opacity="0.16" stroke="${col}" stroke-width="${isGlobal?2.3:1.6}"/>`);
+-      if(isGlobal&&rad>=8.5)
++      if(isGlobal&&(rad>=8.5||meta?.labelEveryPort===true))
+         P.push(`<text x="${nd(cx)}" y="${nd(cy)}" font-size="${nd(rad*1.34)}" text-anchor="middle" dominant-baseline="central" fill="${col}" font-weight="800">${han}</text>`);
+     });
+   });
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -1589,3 +1589,15 @@
+ .chip-series-select{display:none;width:100%;margin-bottom:10px}
+ @media(max-width:640px){.chip-browser-layout{grid-template-columns:minmax(0,1fr)}.chip-series{display:none}.chip-series-select{display:block}.chip-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}}
+ .v2-source-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.v2-source-title>strong{min-width:0;overflow-wrap:anywhere}.v2-source-title>.pr-actions{flex-shrink:0;display:flex;gap:8px}.v2-source-title>.pr-actions svg{width:18px;height:18px}
++
++/* Ordering choices update the same result panel. */
++.v2-ordering-choices{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
++.v2-ordering-result .ord-choice{display:flex;flex:1 1 140px;max-width:220px;min-width:130px;flex-direction:column;align-items:flex-start;gap:5px;padding:12px 15px;border:1px solid #d5e2ec;border-radius:12px;background:#fff;color:#475569;cursor:pointer;transition:background .15s,border-color .15s;line-height:1.4;text-align:left}
++.v2-ordering-result .ord-choice strong{font-size:16px;color:#176bb0}
++.v2-ordering-result .ord-choice span{font-size:12px}.v2-ordering-result .ord-choice small{font-size:11px;color:#7a8795}
++.v2-ordering-result .ord-choice[aria-pressed=true]{border:2px solid #1685cc;padding:11px 14px;background:#eef8ff;box-shadow:0 2px 8px #1685cc15}
++.v2-ordering-result .ord-choice:hover{background:#f0f8fe;border-color:#1685cc}.v2-ordering-result button:disabled{opacity:.55;cursor:wait}
++.v2-ordering-result .ord-key-summary{color:#1276bd;font-weight:700;font-size:15px;margin:14px 0 8px}
++.v2-ordering-result .ord-key-material{color:#176bb0;font-weight:600;margin:6px 0}
++.v2-ordering-result .ord-bom-download,.v2-ordering-result .ord-topo-btn{border:1px solid #1685cc;border-radius:8px;background:#eff8ff;color:#176bb0;padding:9px 14px;margin:10px 8px 8px 0;cursor:pointer}
++.v2-ordering-result .ord-image-zoom{border:0;background:white;color:#1677c8;cursor:pointer;font-size:18px;padding:3px 7px}
