@@ -1,0 +1,322 @@
+--- a/v2/domain/ordering/controller-selector.cjs
++++ b/v2/domain/ordering/controller-selector.cjs
+@@ -6,14 +6,18 @@
+ function controllerCandidates(demand,screen,dataset,selectedModule){
+  const missing=['controlMode','architecture'].filter(k=>!demand[k]);if(missing.length)return {status:'needs_input',missing_parameters:missing.map(k=>({path:'/'+k,reason:k==='controlMode'?'请明确同步或异步':'请明确接收卡架构或直控'}))};
+  const requirements=demand.requirements||{},invalid=validateRequirements(requirements);if(invalid)return invalid;
+- const family=requirements.controllerFamily||'processor';
+- if((demand.architecture!=='receiver'&&family!=='asyncCard')||(family==='processor'&&demand.controlMode!=='sync')||(family==='asyncCard'&&demand.controlMode!=='async'))return {status:'unsupported',reason:'requested-control-mode-or-architecture-not-implemented-for-family'};
+  const receiverIds=new Set(dataset.receivers().map(r=>modelId(r.model)));
+  const unknown=(demand.providedDevices||[]).filter(d=>!receiverIds.has(modelId(d.modelId))&&!dataset.findProducts(d.modelId).length);
+  if(unknown.length)return {status:'needs_input',reason:'provided-device-not-established-in-source',devices:unknown};
+  if((demand.providedDevices||[]).some(d=>d.revisionId))return {status:'needs_input',reason:'hardware-revision-not-established-in-selection-source'};
+  const specified=(demand.providedDevices||[]).filter(d=>dataset.findProducts(d.modelId).length);
+  if(specified.length>1)return {status:'conflict',reason:'multiple-controller-models-specified'};
++ const categoryFamilies={'异步控制卡':'asyncCard','同步异步播放盒':'playBox','二合一视频处理器':'processor'};
++ const specifiedDevice=specified.length?dataset.findProducts(specified[0].modelId)[0]:null,specifiedFamily=categoryFamilies[specifiedDevice?.category];
++ if(requirements.controllerFamily&&specifiedFamily&&requirements.controllerFamily!==specifiedFamily)return {status:'conflict',reason:'specified-controller-conflicts-with-requested-family'};
++ const family=requirements.controllerFamily||specifiedFamily||(demand.controlMode==='async'?(demand.architecture==='receiver'?'playBox':'asyncCard'):'processor');
++ const familySource={kind:requirements.controllerFamily?'user-stated':specifiedFamily?'specified-device-source':'selection-policy',family,rule:requirements.controllerFamily?'explicit-controller-family':specifiedFamily?'registered-controller-category':demand.controlMode==='async'?'async-architecture-family':'sync-receiver-processor',...(specifiedDevice?{source:specifiedDevice.source}:{})};
++ if((demand.architecture!=='receiver'&&family!=='asyncCard')||(family==='processor'&&demand.controlMode!=='sync')||(family==='asyncCard'&&demand.controlMode!=='async'))return {status:'unsupported',reason:'requested-control-mode-or-architecture-not-implemented-for-family'};
+  const category=family==='asyncCard'?'异步控制卡':family==='playBox'?'同步异步播放盒':'二合一视频处理器';
+  const module=family==='asyncCard'?(selectedModule||selectModule(demand,dataset).module):null;
+  if(family==='asyncCard'&&!module)return {status:'needs_input',missing_parameters:[{path:'/module',reason:'异步卡规则需要已明确的完整模组条件'}]};
+@@ -21,6 +25,6 @@
+    (!specified.length||modelId(d.model)===modelId(specified[0].modelId))&&d.totalPoints>=screen.points*(requirements.cascadeSplicing?.count||1)&&d.maxWidth>=screen.pixelWidth&&d.maxHeight>=screen.pixelHeight&&satisfiesFeatures(d,requirements,family)&&
+    (family!=='asyncCard'||(demand.architecture==='direct'?d.singleCardMode===true:d.singleCardMode===false||requirements.c16Sharing&&['C16L','C16H'].includes(d.model))&&asyncCardFits(d,module,screen,(demand.providedDevices||[]).find(d=>receiverIds.has(modelId(d.modelId)))?.modelId?.replace(/^HD-/i,''))));
+  const candidates=[...new Map(require('./official-runtime.cjs').publicFilter(rows,screen,family==='processor'?4:family==='playBox'?3:2).map(d=>[d.model,d])).values()];
+- return candidates.length?{status:'selected',controllers:candidates,family}:{status:'no_feasible_plan',reason:'no-source-supported-controller-candidate'};
++ return candidates.length?{status:'selected',controllers:candidates,family,familySource}:{status:'no_feasible_plan',reason:'no-source-supported-controller-candidate',family,familySource};
+ }
+ module.exports={controllerCandidates};
+--- a/v2/domain/ordering/service.cjs
++++ b/v2/domain/ordering/service.cjs
+@@ -64,9 +64,16 @@
+ function createOrderingService(dataset,knowledge){
+  const local=createLocalOrderingService(dataset,knowledge);
+  return async demand=>{
+-  const req=demand.requirements||{},nativeFields=['nativeScene','T16','H4K','sourceResolution','outInput','wayOfCommunication','grayScale','builtIn2Open','multiOpenDrawing','LS99XX','singleScreen','conventionalChip'];
++  const conflict=require('./scene-contract.cjs').sceneConflict(demand);if(conflict)return conflict;
++  const missing=require('./scene-contract.cjs').sceneMissing(demand);
++  if(missing.length)return {status:'needs_input',reason:'scene-conditions-required',missing_parameters:missing};
++  const req=demand.requirements||{},nativeFields=['nativeScene','T16','H4K','sourceResolution','outInput','wayOfCommunication','grayScale','builtIn2Open','multiOpenDrawing','LS99XX','singleScreen','conventionalChip','applicationScenarios'];
+   const nativeOnly=['auto','singleDualColor','splicer'].includes(req.controllerFamily)||nativeFields.some(k=>req[k]!==undefined);
+   const previous=nativeOnly?null:local(demand);
++  // A validated physical fold preview remains useful even though its logical
++  // SSM map is withheld. The native fallback cannot upgrade that missing map
++  // and must not replace the already checked geometry with a plan-less result.
++  if(previous?.plan?.specialCanvas&&previous.validation?.passed&&previous.exportAllowed===false)return previous;
+   if(previous&&(!['unsupported','no_feasible_plan'].includes(previous.status)&&!previous.plan?.specialCanvas))return previous;
+   try{const result=await require('../../adapters/official/ordering-service.cjs').nativeOrdering(demand,dataset);
+    if(result.nativeOrdering?.success)return result;
+--- a/v2/adapters/official/ordering-service.cjs
++++ b/v2/adapters/official/ordering-service.cjs
+@@ -1,6 +1,17 @@
+ 'use strict';
+ const {selectModule}=require('../../domain/ordering/module-selector.cjs');
+ const {calculate}=require('./website-worker.cjs');
++const {modelId}=require('../../domain/identity/model-id.cjs');
++function nativeSelectionConflicts(state,demand,dataset){
++ const issues=[],controller=state.productCard?.model,receiver=state.receivingCard?.model,receiverIds=new Set(dataset.receivers().map(r=>modelId(r.model)));
++ for(const requested of demand.providedDevices||[]){const expected=modelId(requested.modelId),actual=modelId(receiverIds.has(expected)?receiver:controller);if(expected!==actual)issues.push({kind:'specified-device-replaced',requested:expected,actual});}
++ const source=dataset.findProducts(controller)[0],family=demand.requirements?.controllerFamily,categories={processor:'二合一视频处理器',playBox:'同步异步播放盒',asyncCard:'异步控制卡'};
++ if(categories[family]&&source?.category!==categories[family])issues.push({kind:'requested-family-not-met',requested:family,actual:source?.category});
++ const actualFamily=Object.keys(categories).find(key=>categories[key]===source?.category);
++ if(actualFamily&&!require('../../domain/ordering/controller-requirements.cjs').satisfiesFeatures(source,demand.requirements||{},actualFamily))issues.push({kind:'requested-features-not-met'});
++ if(demand.controlMode==='async'&&source?.category==='二合一视频处理器')issues.push({kind:'async-request-returned-sync-processor'});
++ return issues;
++}
+ function sceneOptions(requirements){
+  const opts=structuredClone(requirements.nativeScene||{});
+  const allowed=new Set(['wayOfCommunication','grayScale','sound','peripherals','numberOfScreens','inputSource','hdmiOut','posterScreen','meetingScreen','basemapSubtitles','peerToPeer','sourceResolution','cascadeSplicing','outInput','dockingCentralControl','singleScreen','LS99XX','builtIn2Open','multimediaServer','T16','applicationScenarios','ktvRecommended','H4K','multiOpenDrawing','conventionalChip']);
+@@ -11,9 +22,22 @@
+  for(const key of ['sourceResolution','outInput','wayOfCommunication'])if(requirements[key])opts[key]=requirements[key].map(value=>typeof value==='object'?value:{id:value});
+  if(requirements.grayScale!==undefined)opts.grayScale=typeof requirements.grayScale==='object'?requirements.grayScale:{id:requirements.grayScale};
+  if(requirements.cascadeSplicing)opts.cascadeSplicing=requirements.cascadeSplicing;
++ if(requirements.applicationScenarios)opts.applicationScenarios=requirements.applicationScenarios;
++ if(opts.T16===true)opts.peerToPeer=true;
+  return opts;
+ }
+ async function nativeOrdering(demand,dataset){
++ const conflict=require('../../domain/ordering/scene-contract.cjs').sceneConflict(demand);if(conflict)return {...conflict,exportAllowed:false};
++ const missing=require('../../domain/ordering/scene-contract.cjs').sceneMissing(demand);
++ if(missing.length)return {status:'needs_input',reason:'scene-conditions-required',missing_parameters:missing,exportAllowed:false};
++ const mappedRequirements=new Set(['controllerFamily','nativeScene','hdmiOut','posterScreen','meetingScreen','dockingCentralControl','ktvRecommended','peripherals','inputSource','sourceResolution','outInput','wayOfCommunication','grayScale','cascadeSplicing','T16','H4K','builtIn2Open','multiOpenDrawing','LS99XX','singleScreen','conventionalChip','applicationScenarios']);
++ const unmapped=Object.keys(demand.requirements||{}).filter(k=>!mappedRequirements.has(k));
++ if(unmapped.length)return {status:'unsupported',reason:'native-requirements-not-mapped',requirements:unmapped,exportAllowed:false};
++ const commonKeys=new Set(['cascadeSplicing','hdmiOut','posterScreen','meetingScreen','dockingCentralControl','ktvRecommended','peripherals','inputSource']);
++ const invalid=require('../../domain/ordering/controller-requirements.cjs').validateRequirements(Object.fromEntries(Object.entries(demand.requirements||{}).filter(([k])=>commonKeys.has(k))));
++ if(invalid)return {...invalid,exportAllowed:false};
++ if(demand.controlMode==='async'&&['processor','splicer'].includes(demand.requirements?.controllerFamily))return {status:'conflict',reason:'controller-family-conflicts-with-playback-mode',exportAllowed:false};
++ if(demand.architecture==='direct'&&['processor','playBox','splicer'].includes(demand.requirements?.controllerFamily))return {status:'conflict',reason:'controller-family-conflicts-with-direct-architecture',exportAllowed:false};
+  const selected=selectModule(demand,dataset);if(selected.status!=='selected')return selected;
+  const module=selected.module,grid=demand.screen||{},cabinet=demand.cabinet;
+  const columns=cabinet?cabinet.moduleColumns*cabinet.columns:grid.moduleColumns||grid.pixelWidth/module.resolution[0]||grid.physicalWidthMm/module.size[0];
+@@ -26,14 +50,28 @@
+  const receiverIds=new Set(dataset.receivers().map(r=>'HD-'+r.model));
+  const specified=ids.filter(d=>!receiverIds.has(d.modelId));if(specified.length>1)return {status:'conflict',reason:'multiple-controller-models-specified'};
+  let controller;if(specified.length){controller=dataset.findProducts(specified[0].modelId)[0];if(!controller)return {status:'needs_input',missing_parameters:[{path:'/providedDevices',reason:'指定型号不在官网设备表，不能用相近型号代替'}]};}
++ // The native site's category fallback can choose a playback box without the
++ // requested cascade capability. Pin its selection to the source-backed filter
++ // already used by the local solver; retain the native drawing calculation.
++ if(!controller&&req.cascadeSplicing){
++  const screen={pixelWidth:columns*module.resolution[0],pixelHeight:rows*module.resolution[1]};screen.points=screen.pixelWidth*screen.pixelHeight;
++  const eligible=require('../../domain/ordering/controller-selector.cjs').controllerCandidates(demand,screen,dataset,module);
++  if(eligible.status!=='selected')return eligible;
++  controller=eligible.controllers[0];
++ }
+  const receiverIdsRequested=ids.filter(d=>receiverIds.has(d.modelId));if(receiverIdsRequested.length>1)return {status:'conflict',reason:'multiple-receivers-specified'};
+  const sceneId=controller?{singleDualColor:1,sync:2,playBox:3,processor:4,splicer:5}[controller.type]:{singleDualColor:1,asyncCard:2,playBox:3,processor:4,splicer:5,auto:module.lampBeadsType===3?(demand.controlMode==='sync'?4:2):1}[family];
+  if(!sceneId)return {status:'unsupported',reason:'unknown-official-scene'};
+  const scene=sceneOptions(req);if(module.lampBeadsType===3&&demand.module?.driverFamily==='conventional')scene.conventionalChip=true;
+  const native=await calculate({moduleId:module.id,columns,rows,cabinet,sceneId,scene,controllerModel:controller?.model,controllerType:controller?.type,receiverModel:receiverIdsRequested[0]?.modelId.replace(/^HD-/,'')});
+  const state=native.state,diagrams=Object.values(native.diagrams||{}).filter(d=>/^data:image\/(?:jpeg|png);base64,/.test(d.url||''));
+- const success=!!state.productCard?.model&&!state.loading&&(!!diagrams.length||!state.drawType&&state.matchingResult?.length>0);
++ const t16=state.scene?.T16===true;
++ const incomplete=t16&&(!Number.isSafeInteger(state.T16Number)||state.T16Number<1||!state.matchingResult?.some(row=>row.key==='型号'&&row.value));
++ const success=!incomplete&&!!state.productCard?.model&&!state.loading&&(!!diagrams.length||!state.drawType&&state.matchingResult?.length>0);
++ const conflicts=success?nativeSelectionConflicts(state,demand,dataset):[];
++ if(conflicts.length)return {status:'conflict',reason:'native-result-violates-request',conflicts,exportAllowed:false};
+  const summary={engine:'official-website-native',sourceSHA256:native.sourceSHA256,module:state.moduleProducts,screen:state.screenInformation,cabinet:state.twoTabActive===1?state.cabinetModule:null,scene:state.scene,controller:state.productCard,receiver:state.receivingCard,matchingResult:state.matchingResult,drawType:state.drawType,excludedModels:state.drawFail,outputGroups:state.VP8000Output};
+- return {status:success?'needs_input':'unsupported',reason:success?'native-plan-awaiting-standard-configuration-map':'official-scene-found-no-plan',exportAllowed:false,nativeOrdering:{...summary,success,diagrams},method:'complete-original-website-application; no-v1-calculator',configurationBlockReason:success?'官网已生成选型与原生连接图；该分支尚无经过核验的标准SSM映射，不生成伪配置。':null};
++ const direct=module.lampBeadsType!==3;
++ return {status:success?'needs_input':'unsupported',reason:incomplete?'official-t16-result-incomplete':success?'native-plan-awaiting-standard-configuration-map':'official-scene-found-no-plan',exportAllowed:false,nativeOrdering:{...summary,T16Number:state.T16Number,success,diagrams:success?diagrams:[]},method:'complete-original-website-application; no-v1-calculator',configurationBlockReason:incomplete?'官网返回的T16数量或型号不完整，不能作为可交付配单。':success?direct?'单双色直控选型不使用接收卡SSM；需按所选设备的控制软件核对屏参和实际排线。':'官网已生成选型与原生连接图；该分支尚无经过核验的标准SSM映射，不生成伪配置。':null};
+ }
+-module.exports={nativeOrdering};
++module.exports={nativeOrdering,nativeSelectionConflicts};
+--- a/v2/acceptance/ordering.cjs
++++ b/v2/acceptance/ordering.cjs
+@@ -12,7 +12,7 @@
+    r.check('direct-family-and-interface',controller.category==='异步控制卡'&&['D16','C08L','C16L','C16H'].includes(controller.model)&&module.interface==='HUB75'&&hub?.count>0);
+    if(['C16L','C16H'].includes(controller.model))r.check('c16-direct-scope',result.normalizedDemand?.requirements?.c16Sharing===true&&c16CanDrive(controller,module,screen.columns,screen.rows));
+    r.check('positive-integral-direct-grid',integer(screen.columns)&&screen.columns>0&&integer(screen.rows)&&screen.rows>0);
+-   const input=result.normalizedDemand;if(input){r.check('requested-direct-mode',input.architecture==='direct'&&input.controlMode==='async'&&input.requirements?.controllerFamily==='asyncCard');r.check('direct-requested-peripherals',(input.requirements?.peripherals||[]).every(p=>controller.peripherals?.includes(p)));}
++   const input=result.normalizedDemand;if(input){r.check('requested-direct-mode',input.architecture==='direct'&&input.controlMode==='async'&&(!input.requirements?.controllerFamily||input.requirements.controllerFamily==='asyncCard'));r.check('direct-requested-peripherals',(input.requirements?.peripherals||[]).every(p=>controller.peripherals?.includes(p)));r.check('direct-requested-hardware',(input.providedDevices||[]).every(d=>!d.revisionId&&modelId(d.modelId)===modelId(controller.model)));}
+    r.check('direct-screen-capacity',screen.pixelWidth===screen.columns*module.resolution[0]&&screen.pixelHeight===screen.rows*module.resolution[1]&&screen.points===screen.pixelWidth*screen.pixelHeight&&screen.points<=controller.totalPoints&&screen.pixelWidth<=controller.maxWidth&&screen.pixelHeight<=controller.maxHeight);
+    const count=screen.columns*screen.rows,positions=new Set(),ids=new Set();let valid=directOutputs.length===count&&count<=hub.count;
+    for(const o of directOutputs){const key=o.col+':'+o.row;if(!integer(o.col)||!integer(o.row)||o.col>=screen.columns||o.row>=screen.rows||positions.has(key)||!integer(o.hubId)||o.hubId<1||o.hubId>hub.count||ids.has(o.hubId)||o.pixelWidth!==module.resolution[0]||o.pixelHeight!==module.resolution[1])valid=false;positions.add(key);ids.add(o.hubId);}
+@@ -62,8 +62,14 @@
+   const expectedConnections=ports.flatMap(port=>port.cells.map((cell,index)=>({portId:port.id,from:index?{kind:'receiver',id:port.cells[index-1].id}:{kind:'controller',modelId:'HD-'+controller.model,portId:port.id},to:{kind:'receiver',id:cell.id}})));
+   r.check('receiver-chain-order',JSON.stringify(topology?.connections)===JSON.stringify(expectedConnections));
+   const demand=result.normalizedDemand;if(demand?.screen)r.check('explicit-demand-preserved',['pixelWidth','pixelHeight'].every(k=>demand.screen[k]===undefined||demand.screen[k]===screen[k]));
+-  if(demand){const requested=demand.requirements||{},playbox=requested.controllerFamily==='playBox';
+-   r.check('requested-controller-family',controller.category===(requested.controllerFamily==='asyncCard'?'异步控制卡':playbox?'同步异步播放盒':'二合一视频处理器'));
++  if(demand){const requested=demand.requirements||{},categories={asyncCard:'异步控制卡',playBox:'同步异步播放盒',processor:'二合一视频处理器'};
++   r.check('requested-controller-family',!requested.controllerFamily||controller.category===categories[requested.controllerFamily]);
++   r.check('requested-control-mode',demand.controlMode==='async'?['异步控制卡','同步异步播放盒'].includes(controller.category):['二合一视频处理器','同步异步播放盒'].includes(controller.category));
++   const supplied=(demand.providedDevices||[]).filter(d=>devices.some(p=>modelId(p.model)===modelId(d.modelId)));
++   r.check('requested-controller-preserved',supplied.every(d=>modelId(d.modelId)===modelId(controller.model)));
++   r.check('requested-devices-verified',(demand.providedDevices||[]).every(d=>!d.revisionId&&[...devices,...receivers].some(p=>modelId(p.model)===modelId(d.modelId))));
++   const suppliedReceivers=(demand.providedDevices||[]).filter(d=>receivers.some(p=>modelId(p.model)===modelId(d.modelId)));
++   r.check('requested-receiver-preserved',suppliedReceivers.every(d=>modelId(d.modelId)===modelId(receiver.model)));
+    r.check('requested-peripherals',(requested.peripherals||[]).every(p=>controller.peripherals?.includes(p)));
+    r.check('requested-input-sources',(requested.inputSource||[]).every(type=>controller.inputSource?.some(s=>s.type===type&&s.supportive===true)));
+    for(const key of ['hdmiOut','dockingCentralControl','ktvRecommended'])if(requested[key])r.check('requested-'+key,controller[key]===true);
+--- a/v2/domain/parser/ordering-fields.cjs
++++ b/v2/domain/parser/ordering-fields.cjs
+@@ -66,7 +66,10 @@
+  if(Object.keys(requirements).length)fields.requirements=requirements;
+  for(const k of ['environment','controlMode','architecture'])if(fields[k])provenance['/'+k]={kind:'user-stated',text};
+  if(Object.keys(module).length)fields.module=module;if(Object.keys(screen).length)fields.screen=screen;
+- if(Object.keys(provenance).length)fields.provenance=provenance;return fields;
++ const scenes=require('./ordering-scenes.cjs').parseOrderingScenes(text);
++ if(scenes.cabinet)fields.cabinet={...fields.cabinet,...scenes.cabinet};
++ if(scenes.requirements)fields.requirements={...fields.requirements,...scenes.requirements};
++ if(Object.keys(provenance).length||Object.keys(scenes.provenance).length)fields.provenance={...provenance,...scenes.provenance};return fields;
+ }
+ // Shared lexical observation: values, entity and units stay independent until
+ // the dialogue owner resolves them. This never selects equipment or rounds grids.
+--- a/v2/domain/parser/deterministic-parser.cjs
++++ b/v2/domain/parser/deterministic-parser.cjs
+@@ -10,7 +10,10 @@
+  const orderFields=parseOrderingFields(text);
+  const operation=decision.intent==='aftersales'?'aftersales':forcedOperation||(decision.intent==='ordering'?'ordering':'consultation');
+  const demand={schemaVersion:'2.0',operation,topic:text,provenance:{}};
+- const models=extractKnownModels(text,dataset);
++ // A component/feature label is not a second main controller. Keep the raw
++ // customer topic and scene assertion, mask only those typed feature spans.
++ const deviceText=operation==='ordering'?require('./ordering-scenes.cjs').orderingDeviceText(text,orderFields):text;
++ const models=extractKnownModels(deviceText,dataset);
+  if(models.length){demand.providedDevices=models.map(modelId=>({modelId,revisionId:null}));demand.provenance['/providedDevices']={kind:'user-stated',text};}
+  if(operation==='aftersales')demand.symptoms=[text];
+  if(operation==='ordering'){
+--- a/v2/domain/parser/task-context.cjs
++++ b/v2/domain/parser/task-context.cjs
+@@ -44,12 +44,13 @@
+  const input=replacement?replacement[1]:text;
+  if(replacement)Object.assign(update,messageUpdate(input,active,{correction:true}));
+  const delta=update.delta;
++ const constraintModels=require('../identity/extract-models.cjs').extractKnownModels(require('./ordering-scenes.cjs').orderingDeviceText(text,delta),lookup);
+  if(active?.type==='ordering'&&update.commands.negate&&raw.models.length&&active.ordering?.confirmed.providedDevices?.some(d=>raw.models.includes(d.modelId))){
+   delta.providedDevices=active.ordering.confirmed.providedDevices.filter(d=>!raw.models.includes(d.modelId));delta.provenance??={};delta.provenance['/providedDevices']={kind:'user-negated',text};update.commands.correct=true;update.clarification=null;update.pending=null;
+  }
+  // Registry-backed identity is a typed business constraint only in an explicit
+  // engineering request/correction, never in an independent parameter query.
+- if(raw.models.length&&!update.commands.negate&&(raw.intent==='ordering'||active?.type==='ordering'&&update.commands.correct&&!/[?？]|多少|怎么|规格书|固件|灰阶/.test(text))){delta.providedDevices=raw.models.map(modelId=>({modelId,revisionId:null}));delta.provenance??={};delta.provenance['/providedDevices']={kind:'user-stated',text};update.clarification=null;update.pending=null;update.operations.push({op:'set',path:'/providedDevices',value:delta.providedDevices,source:delta.provenance['/providedDevices']});}
++ if(constraintModels.length&&!update.commands.negate&&(raw.intent==='ordering'||active?.type==='ordering'&&update.commands.correct&&!/[?？]|多少|怎么|规格书|固件|灰阶/.test(text))){delta.providedDevices=constraintModels.map(modelId=>({modelId,revisionId:null}));delta.provenance??={};delta.provenance['/providedDevices']={kind:'user-stated',text};update.clarification=null;update.pending=null;update.operations.push({op:'set',path:'/providedDevices',value:delta.providedDevices,source:delta.provenance['/providedDevices']});}
+  const fields=leaves(delta);
+  const hasSlots=fields.length>0||update.operations.some(o=>['clear','exclude'].includes(o.op))||Object.values(delta.provenance||{}).some(p=>p.kind==='user-negated');
+  const independent=['resources','parameters','operation','compatibility','aftersales','software-function','service','chip','product','technical'].includes(raw.intent);
+--- a/v2/adapters/http/ordering-session.cjs
++++ b/v2/adapters/http/ordering-session.cjs
+@@ -54,11 +54,19 @@
+  if(demand.controlMode)known.push(demand.controlMode==='sync'?'同步':'异步');
+  if(demand.providedDevices?.length)known.push('指定'+demand.providedDevices.map(d=>d.modelId).join('、'));
+  const pending=[];
+- if(![[s.physicalWidthMm,s.physicalHeightMm],[s.pixelWidth,s.pixelHeight],[s.moduleColumns,s.moduleRows]].some(pair=>pair.every(Boolean)))pending.push({path:'/screen',question:Object.keys(s).length?'已给的尺寸记下了，另一边的尺寸或张数是多少？':'屏幕宽、高各多少米？知道整屏分辨率或模组横竖张数也可以。'});
++ const cabinetComplete=demand.cabinet&&['moduleColumns','moduleRows','columns','rows'].every(k=>Number.isSafeInteger(demand.cabinet[k])&&demand.cabinet[k]>0);
++ if(!cabinetComplete&&![[s.physicalWidthMm,s.physicalHeightMm],[s.pixelWidth,s.pixelHeight],[s.moduleColumns,s.moduleRows]].some(pair=>pair.every(Boolean)))pending.push({path:'/screen',question:Object.keys(s).length?'已给的尺寸记下了，另一边的尺寸或张数是多少？':'屏幕宽、高各多少米？知道整屏分辨率或模组横竖张数也可以。'});
+  if(!m.pitchMm)pending.push({path:'/module/pitchMm',question:'这块屏是 P 几？'});
+  if(!demand.controlMode)pending.push({path:'/controlMode',question:'要实时显示电脑画面（同步），还是发送节目后脱机播放（异步）？'});
+  if(!demand.environment)pending.push({path:'/environment',question:'这块屏用于室内还是户外？'});
+  const derivedDemand=structuredClone(demand),derived=[];
++ if(cabinetComplete){
++  derivedDemand.screen={...derivedDemand.screen};
++  for(const [key,axis]of [['moduleColumns','columns'],['moduleRows','rows']])if(derivedDemand.screen[key]===undefined){
++   derivedDemand.screen[key]=demand.cabinet[key]*demand.cabinet[axis];
++   derived.push({field:'/screen/'+key,value:derivedDemand.screen[key],basis:'explicit-cabinet-array-times-modules-per-cabinet'});
++  }
++ }
+  // Record reversible arithmetic separately from customer-confirmed fields.
+  // Nominal pitch is used only when every remaining source candidate agrees.
+  if(m.pitchMm&&modules.length)for(const [pixel,physical,axis] of [['pixelWidth','physicalWidthMm',0],['pixelHeight','physicalHeightMm',1]]){
+@@ -80,7 +88,7 @@
+   return {screen:out,basis};
+  }
+  if(m.pixelWidth&&m.pixelHeight){
+-  const grid=deriveGrid(demand,{resolution:[m.pixelWidth,m.pixelHeight],size:[derivedDemand.module.physicalWidthMm,derivedDemand.module.physicalHeightMm]});
++  const grid=deriveGrid(derivedDemand,{resolution:[m.pixelWidth,m.pixelHeight],size:[derivedDemand.module.physicalWidthMm,derivedDemand.module.physicalHeightMm]});
+   if(grid.basis.length){derivedDemand.screen=grid.screen;derived.push(...grid.basis);}
+  }
+  const strict=await app.dialogue(derivedDemand);
+@@ -92,7 +100,7 @@
+  const id=require('../../domain/identity/model-id.cjs').modelId;
+  const missingDevice=(demand.providedDevices||[]).some(d=>![...refs?.devices||[],...refs?.receivers||[]].some(r=>id(r.model)===d.modelId));
+  const multi=/主屏.*副屏|副屏.*主屏|[两二三四五六七八九十2-9]\s*(?:块|面)(?:独立)?屏|多块屏|异形屏/.test(text)||previous?.scope==='multiple-or-irregular';
+- if(stage!=='formal'&&stage!=='conflict'&&!missingDevice&&!multi&&!negated&&m.pitchMm&&Object.keys(s).length){
++ if(stage!=='formal'&&stage!=='conflict'&&!strict.nativeOrdering?.success&&strict.reason!=='scene-conditions-required'&&!missingDevice&&!multi&&!negated&&m.pitchMm&&Object.keys(s).length){
+   for(const row of [...modules].sort((a,b)=>Number(b.size[0]===320&&b.size[1]===160&&b.interface==='HUB75')-Number(a.size[0]===320&&a.size[1]===160&&a.interface==='HUB75')).slice(0,3)){
+    for(const mode of demand.controlMode?[demand.controlMode]:['sync','async']){
+    const hypothesis=structuredClone(demand),assumptions=[];
+@@ -114,7 +122,8 @@
+   }
+   }
+  }
+- if(stage!=='formal'&&stage!=='conflict'&&Object.keys(s).length&&(evidence.length||simulations.length))stage='provisional';
++ if(strict.nativeOrdering?.success)stage='native-preview';
++ else if(stage!=='formal'&&stage!=='conflict'&&Object.keys(s).length&&(evidence.length||simulations.length))stage='provisional';
+  let gridProposal=null;
+  const sample=modules[0];
+  if(sample&&s.physicalWidthMm&&s.physicalHeightMm&&!simulations.length){
+@@ -123,7 +132,9 @@
+    const c=Math.ceil(cols),r=Math.ceil(rows);gridProposal={moduleId:sample.id,columns:c,rows:r,widthMm:c*sample.size[0],heightMm:r*sample.size[1],source:sample.source,requiresConfirmation:true};
+   }
+  }
+- if(!pending.length&&stage!=='formal'){
++ const sceneMissing=require('../../domain/ordering/scene-contract.cjs').sceneMissing(demand);
++ if(sceneMissing.length)pending.unshift(...sceneMissing.map(p=>({path:p.path,question:p.reason})));
++ if(!pending.length&&stage!=='formal'&&stage!=='native-preview'){
+   if(missingDevice)pending.push({path:'/providedDevices',question:'指定设备的选型适用条件尚未建立；可以先不限定设备型号评估吗？'});
+   else if(gridProposal)pending.push({path:'/screen',question:'若采用该候选模组，整拼需调整为'+gridProposal.widthMm/1000+'米×'+gridProposal.heightMm/1000+'米（'+gridProposal.columns+'×'+gridProposal.rows+'张）。允许调整尺寸，还是按现场实际张数核对？'});
+   else if(!simulations.length&&simulationFailures.length)pending.push({path:'/planning',question:'候选模组已尝试计算，但当前计算路径未生成可验证方案；已知条件保留，不需要反复补填相同规格。'});
+@@ -136,6 +147,10 @@
+  let reply;
+  if(multi){stage='needs-input';orderingState.stage=stage;orderingState.candidates=[];orderingState.simulations=[];pending.splice(0,pending.length,{path:'/screen',question:'这是多屏或异形工程；请用“另一块屏”开始，说明其中一块独立矩形屏的宽高，可以吗？'});reply=header+'\n多屏不能合并成单屏配单。\n'+pending[0].question;}
+  else if(stage==='formal')reply=require('./dialogue-service.cjs').formatReply(strict);
++ else if(stage==='native-preview'){
++  const n=strict.nativeOrdering;
++  reply=header+'\n官网原算法选型：'+n.controller.model+(n.receiver?.model?'；接收卡'+n.receiver.model+' '+n.receiver.cardNum+'张':'')+'。\n'+strict.configurationBlockReason;
++ }
+  else if(stage==='conflict')reply=header+'\n当前明确条件存在冲突，不能用默认值替换。\n'+(pending[0]?.question||'请核对模组和屏幕规格是否一致。');
+  else{
+   const lines=[header];
+@@ -167,6 +182,6 @@
+   if(simulations[0].validation?.passed&&preview.plan&&!preview.plan.specialCanvas&&!preview.plan.builtInRegions?.length&&preview.plan.architecture!=='direct')preview.provisionalExportDemand=structuredClone(simulations[0].inputs);
+  }
+  if(preview?.plan)reply+='\n暂定预览：'+preview.plan.module.size.join('×')+'mm、'+preview.plan.module.interface+'；未确认条件只用于预览，现场规格不同须重算。';
+- return {reply,status:stage==='formal'?'answer':'clarify',result:stage==='formal'?strict:{...(preview||{}),exportAllowed:false,status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
++ return {reply,status:stage==='formal'?'answer':'clarify',result:stage==='formal'?strict:stage==='native-preview'?{...strict,nativeDemand:strict.normalizedDemand}:{...(preview||{}),exportAllowed:false,status:stage==='conflict'?'conflict':'needs_input',operation:'ordering',normalizedDemand:demand,progressive:{stage,known,pending:pending.slice(0,1),candidateCount:orderingState.candidates.length,simulatedCount:orderingState.simulations.length},reason:strict.reason},orderingState,businessStatus:{intent:'identified',evidence:stage==='formal'?'validated-calculation':orderingState.candidates.length?'source-candidates':'none',answer:stage}};
+ }
+ module.exports={createOrderingSessions,mergeOrderingDemand,progressiveOrdering};
+--- a/v2/adapters/official/website-worker.cjs
++++ b/v2/adapters/official/website-worker.cjs
+@@ -5,7 +5,7 @@
+ const {verifiedSource,sourceSHA256}=require('../../domain/ordering/official-runtime.cjs');
+ let browserPromise,serverPromise,tail=Promise.resolve(),idle,active=0;
+ async function runtime(){
+- if(!serverPromise)serverPromise=new Promise(resolve=>{const server=http.createServer((req,res)=>{if(req.url==='/source.js'){res.setHeader('Content-Type','text/javascript; charset=utf-8');res.end(verifiedSource()+';window.__official={Jo,Et,Vt,Ay,My,n5,Ht,nV};');}else if(req.url==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<html><body><div id="app"></div><script type="module" src="/source.js"></script></body></html>');}else{res.statusCode=404;res.end();}});server.listen(0,'127.0.0.1',()=>{server.unref();resolve(server)});});
++ if(!serverPromise)serverPromise=new Promise(resolve=>{const server=http.createServer((req,res)=>{if(req.url==='/source.js'){res.setHeader('Content-Type','text/javascript; charset=utf-8');res.end(verifiedSource()+';window.__official={Jo,Et,Vt,Ay,My,n5,Ht,nV,refreshMatch:()=>pL().saveMatchResult(Jo().scene.selectScene.id)};');}else if(req.url==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<html><body><div id="app"></div><script type="module" src="/source.js"></script></body></html>');}else{res.statusCode=404;res.end();}});server.listen(0,'127.0.0.1',()=>{server.unref();resolve(server)});});
+  if(!browserPromise){const driver=require(path.resolve(__dirname,'../../../tmp/feishu-browser-runtime/driver/package'));browserPromise=driver.chromium.launch({channel:'msedge',headless:true,args:['--disable-gpu']});browserPromise.catch(()=>{browserPromise=null});}
+  const [server,browser]=await Promise.all([serverPromise,browserPromise]);return {server,browser};
+ }
+@@ -29,6 +29,10 @@
+   },payload);
+   if(!payload.controllerModel)await page.evaluate(()=>{const api=window.__official;let component;function walk(v){if(!v||component)return;if(v.component){if(v.component.type===api.nV){component=v.component;return;}walk(v.component.subTree);}if(Array.isArray(v.children))v.children.forEach(walk);}walk(api.Ht._container._vnode);if(!component)throw Error('official-component-missing');component.exposed.filterType();});
+   try{await page.waitForFunction(()=>{const api=window.__official,s=api.Jo();return !s.loading&&(!!api.n5().connection.url||!!api.n5().T16.url||!s.productCard?.model||s.matchingResult.length>0&&!s.drawType);},{},{timeout:15000});}catch{errors.push('official-computation-did-not-finish');}
++  // Drawing completes asynchronously after the website first formats its list.
++  // Refresh through its own formatter so T16/card/port counts describe the final
++  // state rather than the initial zero-value list.
++  await page.evaluate(()=>window.__official.refreshMatch());
+   const result=await page.evaluate(()=>({state:JSON.parse(JSON.stringify(window.__official.Jo().$state)),diagrams:JSON.parse(JSON.stringify(window.__official.n5().$state))}));return {...result,errors,sourceSHA256};
+  }finally{await context.close();active--;}});
+  tail=job.catch(()=>{});try{return await job}finally{idle=setTimeout(async()=>{if(active)return;const p=browserPromise;browserPromise=null;if(p)try{await(await p).close()}catch{}},300000);idle.unref();}
+--- a/v2/frontend/v2-components.js
++++ b/v2/frontend/v2-components.js
+@@ -15,8 +15,15 @@
+  if(result.options?.length>1){const choices=document.createElement('div');for(const option of result.options){const b=document.createElement('button');b.type='button';b.textContent='方案'+option.id+' '+option.controller+' '+(option.controlMode==='async'?'异步':'同步')+' / 模组'+option.moduleId;b.onclick=()=>{const input=document.querySelector('#aiInput'),send=document.querySelector('#aiSendBtn');if(!input||!send||send.disabled)return;input.value='配单方案：'+option.id;input.dispatchEvent(new Event('input',{bubbles:true}));send.click();};choices.appendChild(b);}root.appendChild(choices);}
+  if(result.nativeOrdering){const native=result.nativeOrdering;
+   const heading=document.createElement('p');heading.textContent='官网原算法 · '+(native.controller?.model||'选型结果');root.appendChild(heading);
+-  const list=document.createElement('ul');for(const item of native.matchingResult||[]){const row=document.createElement('li');row.textContent=item.key+'：'+item.value;list.appendChild(row);}root.appendChild(list);
+-  for(const diagram of native.diagrams||[]){if(!/^data:image\/(?:jpeg|png);base64,/.test(diagram.url||''))continue;const image=document.createElement('img');image.src=diagram.url;image.alt=diagram.name||'官网连接图';image.style.width='100%';image.style.maxHeight='600px';image.style.objectFit='contain';root.appendChild(image);}
++   const list=document.createElement('ul');for(const item of native.matchingResult||[]){if(item.value===undefined||item.value===null||native.scene?.T16&&item.key==='T902')continue;const row=document.createElement('li');row.textContent=item.key+'：'+item.value;list.appendChild(row);}root.appendChild(list);
++   for(const [index,diagram]of (native.diagrams||[]).entries()){
++    if(!/^data:image\/(?:jpeg|png);base64,/.test(diagram.url||''))continue;
++    const viewport=document.createElement('div');viewport.style.overflow='auto';viewport.style.maxHeight='620px';
++    const image=document.createElement('img');image.src=diagram.url;image.alt=diagram.name||'官网连接图';image.style.width='100%';image.style.maxHeight='600px';image.style.objectFit='contain';viewport.append(image);
++    const zoom=document.createElement('button');zoom.type='button';zoom.className='ord-native-zoom';zoom.textContent='展开原尺寸连接图';zoom.setAttribute('aria-expanded','false');
++    zoom.onclick=()=>{const open=zoom.getAttribute('aria-expanded')!=='true';zoom.setAttribute('aria-expanded',String(open));image.style.width=open?'auto':'100%';image.style.maxWidth=open?'none':'100%';image.style.maxHeight=open?'none':'600px';zoom.textContent=open?'收起原尺寸连接图':'展开原尺寸连接图';};
++    const download=document.createElement('a');download.href=diagram.url;download.download='xiaohuiji-connection-'+(index+1)+(diagram.url.startsWith('data:image/png')?'.png':'.jpg');download.textContent='下载连接图';download.style.marginLeft='12px';root.append(zoom,download,viewport);
++   }
+   const note=document.createElement('p');note.textContent=result.configurationBlockReason||'官网选型和原生图已生成；此分支的标准SSM坐标映射尚未核验。';root.appendChild(note);
+   const button=document.createElement('button');button.type='button';button.textContent='下载官网计算结果包（非SSM）';button.onclick=()=>{const blob=new Blob([JSON.stringify({format:'xiaohuiji-official-result-1',hardwareConfiguration:false,demand:result.nativeDemand,calculation:native},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='xiaohuiji-official-result.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};root.appendChild(button);return root;
+  }
