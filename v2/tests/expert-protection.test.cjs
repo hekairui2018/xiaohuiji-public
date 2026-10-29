@@ -24,13 +24,19 @@ test('reserved model VRAM alone does not trip; low free VRAM and missing metrics
  const guard=createExpertProtection({now:()=>at('10:00:00'),intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>{throw Error('driver lost');}});await guard.refresh();assert.equal(guard.access().reason,'gpu-unavailable');guard.dispose();
 });
 test('transport failure latches but customer cancellation does not',async()=>{
- for(const cancelled of [false,true]){const guard=createExpertProtection({now:()=>at('10:00:00'),intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1200}]});await guard.refresh();const controller=new AbortController();if(cancelled)controller.abort();await assert.rejects(guard.transport(async()=>{throw Error('connection reset');})('http://localhost',{signal:controller.signal}));assert.equal(guard.access().reason,cancelled?null:'model-fault');guard.dispose();}
+ for(const cancelled of [false,true]){const guard=createExpertProtection({now:()=>at('10:00:00'),intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1200}]});await guard.refresh();const controller=new AbortController();if(cancelled)controller.abort();await assert.rejects(guard.transport(async()=>{throw Error('connection reset');})('http://localhost',{method:'POST',signal:controller.signal}));assert.equal(guard.access().reason,cancelled?null:'model-fault');guard.dispose();}
 });
 test('host memory exhaustion and CUDA errors trip protection',async()=>{
  const settings={now:()=>at('10:00:00'),intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1200}]};
  const low=createExpertProtection({...settings,hostFreeMiB:()=>500});await low.refresh();assert.equal(low.access().reason,'host-memory');low.dispose();
- const cuda=createExpertProtection(settings);await cuda.refresh();await cuda.transport(async()=>({ok:false,status:400,json:async()=>({error:'CUDA out of memory'})}))('http://localhost');assert.equal(cuda.access().reason,'model-fault');cuda.dispose();
+ const cuda=createExpertProtection(settings);await cuda.refresh();await cuda.transport(async()=>({ok:false,status:400,json:async()=>({error:'CUDA out of memory'})}))('http://localhost',{method:'POST'});assert.equal(cuda.access().reason,'model-fault');cuda.dispose();
 });
 test('closing window cancels queued and active requests before model reuse',async()=>{
  let clock=at('17:59:59'),aborted=false;const guard=createExpertProtection({now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1200}]});await guard.refresh();const pending=guard.wrap({answer:({signal})=>new Promise(resolve=>signal.addEventListener('abort',()=>{aborted=true;resolve({status:'unavailable'});}))}).answer({});clock=at('18:00:00');await guard.refresh();assert.equal((await pending).error,'expert-protected');assert.equal(aborted,true);guard.dispose();
+});
+
+test('offline health probe after intentional shutdown does not prevent the next scheduled start',async()=>{
+ const guard=createExpertProtection({now:()=>at('10:00:00'),intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:11000}]});await guard.refresh();
+ await assert.rejects(guard.transport(async()=>{throw Error('offline');})('http://localhost/v1/models'));
+ assert.equal(guard.access().available,true);guard.dispose();
 });
