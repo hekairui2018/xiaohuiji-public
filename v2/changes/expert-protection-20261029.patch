@@ -1,0 +1,104 @@
+--- a/v2/tools/start-offline.cjs
++++ b/v2/tools/start-offline.cjs
+@@ -32,9 +32,11 @@
+  const capture=options['bonsai-monitor']===true?require('../dev-monitor/capture.cjs').createCapture({enabled:true}):null;
+  const createExpert=capture?settings=>require('../dev-monitor/expert.cjs').createMonitoredExpert({capture,...settings}):require('../model-adapter/evidence-expert.cjs').createEvidenceExpert;
+  const developmentMonitor=capture?require('../dev-monitor/http.cjs').createMonitorHttp(capture):null;
+- const expert=createExpert({maxConcurrent:5,maxModelCalls:12,maxToolCalls:8,thinkingEnabled:true,baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
++ const protection=require('../model-adapter/expert-protection.cjs').createExpertProtection({stateFile:path.join(dataDirectory,'expert-protection.private.json')});
++ await protection.refresh();
++ const expert=protection.wrap(createExpert({transport:protection.transport(require('../model-adapter/local-model-transport.cjs').localModelTransport),maxConcurrent:3,maxModelCalls:12,maxToolCalls:8,thinkingEnabled:true,baseUrl:options['expert-model-url']||'http://127.0.0.1:8080',onDiagnostic:entry=>{
+   fs.appendFileSync(path.join(dataDirectory,'expert-model-calls.private.jsonl'),JSON.stringify({at:new Date().toISOString(),...entry})+'\n');
+- }});
++ }}));
+  const ragflowConfigFile=options['ragflow-config']||process.env.XHJ_RAGFLOW_CONFIG||null;
+  const driveInventoryFile=options['drive-inventory']||null;
+  let curatedResources=null;
+@@ -74,7 +76,7 @@
+  const runtime={instance:'v2-offline',host,lan,port,resourcePort,publicOrigin:options['public-origin']||null,publicScope:publicCatalog?'product-quick-and-approved-cloud-documents':null,pid:process.pid,indexPid:child.pid,knowledgeVersion:knowledge.version,startedAt:new Date().toISOString()};
+  fs.writeFileSync(path.join(dataDirectory,'runtime.json'),JSON.stringify(runtime,null,2));
+  server.on('request',(req,res)=>{if(!req.url.startsWith('/api/')||req.url.startsWith('/api/health')||req.url.startsWith('/api/huidu/log'))return;const start=Date.now();res.once('finish',()=>{try{logs.activity({sessionId:'v2-runtime',...require('../adapters/http/access-entry.cjs').accessEntry(req),route:req.url.split('?')[0],method:req.method,status:res.statusCode,elapsedMs:Date.now()-start});}catch{console.error('V2 runtime log could not be retained locally');}});});
+- const close=()=>new Promise(resolve=>{logs.close();server.closeAllConnections();server.close(()=>{capture?.clear();child.kill();resolve();});});
++ const close=()=>new Promise(resolve=>{protection.dispose();logs.close();server.closeAllConnections();server.close(()=>{capture?.clear();child.kill();resolve();});});
+  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>close().then(()=>process.exit(0)));
+  child.on('exit',()=>{if(server.listening)console.error('Resource process stopped: product lookup and ordering remain available, original search is temporarily unavailable.');});
+  console.log(JSON.stringify({instance:'v2-offline',url:'http://'+(lan?.address||'127.0.0.1')+':'+port,wiki:'/wiki',consultation:'/huiai',knowledgeVersion:knowledge.version,modelCalls:0,resourcePort,pid:process.pid,indexPid:child.pid}));
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -302,6 +302,7 @@
+     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536)return send(413,{error:'body-too-large'});chunks.push(chunk);}
+     let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
+     const requestedMode=input.mode||req.headers['x-v2-mode']||'quick';if(!['quick','expert'].includes(requestedMode))return send(400,{error:'invalid-mode'});
++    if(requestedMode==='expert'&&expert?.access&&!expert.access().available){const state=expert.access();return send(503,{status:'unavailable',actualMode:'expert',error:'expert-'+state.reason,reply:state.reply,modelCallCount:0});}
+     const localRag=ragflow&&!req.v2Public&&['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket?.remoteAddress);
+     if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
+     if(inFlight.has(input.sessionId))return send(409,{status:'busy',error:'session-request-active',reply:'当前会话仍在处理，请等待完成。'});
+--- a/v2/adapters/http/public-chat.cjs
++++ b/v2/adapters/http/public-chat.cjs
+@@ -45,6 +45,7 @@
+   results:(output.results||[]).filter(r=>approved.has(r.name)).map(r=>({name:r.name,text:r.text?safeReply(r.text):null,download:catalog.transform({name:r.name,url:'approved'}).url})),elapsedMs:output.elapsedMs};}
+  async function answer(input,{signal,onAnswerDelta,onAnswerProgress}={}){
+   if(!input||typeof input.message!=='string'||!input.message.trim()||input.message.length>8000||!['quick','expert'].includes(input.mode||'quick'))return {code:400,body:{error:'invalid-query',reply:'请输入8000字以内的问题，并选择快速或专家模式。'}};
++  if(input.mode==='expert'&&expert?.access&&!expert.access().available){const state=expert.access();return {code:503,body:{status:'unavailable',actualMode:'expert',error:'expert-'+state.reason,reply:state.reply,modelCallCount:0}};}
+   if(active>=32)return {code:429,body:{reply:'等待人数较多，请稍后重试。'}};
+   for(const [id,s]of sessions)if(Date.now()-s.updatedAt>1800000&&!s.busy)sessions.delete(id);
+   const known=typeof input.conversationId==='string'&&sessions.get(input.conversationId);
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -53,6 +53,7 @@
+  const speed=make('div');speed.className='v2-response-modes';speed.setAttribute('role','group');speed.setAttribute('aria-label','回答模式');
+  const fast=make('button','快速模式');fast.type='button';fast.id='v2FastMode';fast.setAttribute('aria-pressed','true');fast.title='不调用本地大模型，使用现有检索与规则';
+  const expert=make('button','专家模式');expert.type='button';expert.id='v2ExpertMode';expert.disabled=true;expert.title='本地大模型接口待接入，暂不可用';expert.setAttribute('aria-describedby','v2ExpertPending');
++ let unavailableReason='本地模型未连接，请检查模型服务';
+  const pending=make('span','专家模式待接入');pending.id='v2ExpertPending';pending.className='v2-mode-pending';speed.append(fast,expert);toolbar.append(speed,pending,reset);document.querySelector('.ai-input-row').before(toolbar);
+  let responseMode='quick',modelAvailable=false,queryBusy=false,modeChosen=false,conversationType='normal';
+  function updateResponseMode(){
+@@ -63,19 +64,21 @@
+   if(!imageEnabled&&!queryBusy)clearOcrImage();
+   fast.setAttribute('aria-pressed',String(ordering||responseMode==='quick'));expert.setAttribute('aria-pressed',String(!ordering&&responseMode==='expert'));
+   fast.disabled=queryBusy;expert.disabled=queryBusy||ordering||!modelAvailable;
+-  expert.title=ordering?'工程配单使用现有规则':modelAvailable?'使用本地大模型结合原文资料回答':'本地模型未连接，请检查模型服务';
++  expert.title=ordering?'工程配单使用现有规则':modelAvailable?'使用本地大模型结合原文资料回答':unavailableReason;
+  }
+  fast.onclick=()=>{modeChosen=true;responseMode='quick';updateResponseMode();};
+  expert.onclick=()=>{if(modelAvailable&&!queryBusy&&mode.value!=='ordering'){modeChosen=true;responseMode='expert';updateResponseMode();}};
+  async function refreshModel(){
+   try{const capability=await json('/v2/offline/capabilities');modelAvailable=capability.expert?.available===true;
+-   pending.textContent=modelAvailable?(capability.expert?.trial?'0.8B检索试用 · 16K · 最近5轮':'本地模型已连接'):'本地模型未连接';pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
++   unavailableReason=capability.expert?.reply||'本地模型未连接，请检查模型服务';
++   pending.textContent=modelAvailable?(capability.expert?.trial?'0.8B检索试用 · 16K · 最近5轮':'本地模型已连接'):unavailableReason;pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
+    expert.textContent=capability.expert?.trial?'0.8B 检索试用':'专家模式';
++   if(!modelAvailable)responseMode='quick';
+    if(modelAvailable&&!modeChosen)responseMode='expert';
+   }catch{modelAvailable=false;pending.textContent='本地模型连接失败';}
+   updateResponseMode();
+  }
+- refreshModel();window.addEventListener('focus',refreshModel);mode.addEventListener('change',updateResponseMode);
++ refreshModel();setInterval(()=>{if(!document.hidden)refreshModel();},30000);window.addEventListener('focus',refreshModel);mode.addEventListener('change',updateResponseMode);
+ 
+  const help=make('details');help.className='v2-order-help';help.hidden=true;help.append(make('summary','配单输入示例与范围'),make('p','填写点间距、模组像素、扫描、接口、模组排列及接收卡。未核实的条件不会自动放行。也可提交标准需求JSON。'),make('code','配单 P2 模组160x80 40扫 HUB75 全彩 室内 同步接收卡 10宽8高 R716'));document.getElementById('aiMessages').before(help);
+  const conditions=make('details');conditions.id='v2Conditions';conditions.append(make('summary','补充现场条件'));const factInputs={};
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -91,7 +91,7 @@
+   <script src="product-card.js?v=20261027-source-label"></script>
+   <script src="session-id.js?v=20261019"></script>
+   <script src="chat-controller.js?v=20261029-inline-choice-v2"></script>
+-  <script src="offline-client.js?v=20261028-curated-search"></script>
++  <script src="offline-client.js?v=20261029-expert-protection"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+--- a/v2/tests/expert-queue.test.cjs
++++ b/v2/tests/expert-queue.test.cjs
+@@ -21,3 +21,10 @@
+  const queue=createExpertQueue({maxConcurrent:1}),releaseA=await queue.acquire({session:'A'}),controller=new AbortController();
+  const b=queue.acquire({session:'B',signal:controller.signal});controller.abort(new DOMException('Only B','AbortError'));await assert.rejects(()=>b,{name:'AbortError'});releaseA();const releaseB=await queue.acquire({session:'B'});releaseB();
+ });
++
++test('three sessions run and fourth queues without crossing session ownership',async()=>{
++ const queue=require('../model-adapter/expert-queue.cjs').createExpertQueue({maxConcurrent:3}),releases=[];
++ for(const session of ['a','b','c'])releases.push(await queue.acquire({session}));
++ let entered=false;const fourth=queue.acquire({session:'d'}).then(release=>{entered=true;return release;});
++ await Promise.resolve();assert.equal(entered,false);releases[0]();const release=await fourth;assert.equal(entered,true);release();releases.forEach(release=>release());
++});
