@@ -37,3 +37,7 @@ function attachLocalSoftware(body,resources){
  return body;
 }
 module.exports.attachLocalSoftware=attachLocalSoftware;
+module.exports.videoQuerySynonyms=synonyms.map(group=>Object.freeze([...group]));
+// Share the existing topic taxonomy with retrieval; a title ending in
+// '操作演示' can still be a specific counting/reset/network tutorial.
+module.exports.videoOperationTopic=name=>topics.find(([, ,pattern])=>pattern.test(String(name||'')))?.[0]||null;

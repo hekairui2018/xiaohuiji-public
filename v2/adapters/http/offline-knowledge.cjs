@@ -24,7 +24,9 @@ function registeredSourceDirectory(locations){
  return clean((drive?drive[1].toUpperCase()+'盘 / ':'')+folder);
 }
 const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
-function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,roleIndexEnabled=false,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo}={}){
+function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo,ragflowConfigFile,driveInventoryFile,resourceAnswer=null,resourceSearch=null,expertMaterials=null,expertMaterialRag=null}={}){
+ const driveCatalog=driveInventoryFile?require('../data/drive-catalog.cjs').createDriveCatalog(driveInventoryFile):null;
+ const ragflow=ragflowConfigFile?require('./ragflow-answer.cjs').createRagflowAnswers({source:require('./ragflow-source.cjs').createRagflowSource({configFile:ragflowConfigFile,authorize:()=>true}),knowledge,lookup:{...knowledge,softwareItems:t=>(app?.resourceMedia?.softwareItems(t)||[]),isSoftware:t=>!!app?.resourceMedia?.softwareItems(t)?.length},clean,catalog:driveCatalog}):null;
  const sessions=createOfflineSessions(sessionDirectory);
  const modelRequests=new Map(),inFlight=new Set();
  const progress=require('./request-progress.cjs').createRequestProgress();
@@ -41,14 +43,14 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
  const originals=new Set(evidenceDocuments.map(x=>x.document.sha256));
  const normalize=r=>require('../../domain/knowledge/resource-view.cjs').resourceView({available:!!(r.locationId||r.locations?.[0]?.id),classificationBasis:'registered-index-match',name:clean(r.name),matchKind:r.kind||null,resourceId:r.resourceId||null,versionId:r.versionId||null,resourceVersionId:r.versionId||null,fileId:r.sha256?'sha256:'+r.sha256:r.versionId||null,sha256:r.sha256||null,blockId:r.blockId||null,
   extension:path.extname(r.name||'').toLowerCase(),sourceDirectory:registeredSourceDirectory(r.locations),localModifiedAt:r.locations?.[0]?.mtime_ns?new Date(r.locations[0].mtime_ns/1e6).toISOString():null,
-  evidenceId:r.unitId?'unit-'+r.unitId:r.sha256&&r.blockId?'blk-'+r.sha256.slice(0,16)+'-'+(r.ordinal??r.blockId):null,
+  evidenceId:r.sha256&&r.blockId?'blk-'+r.sha256.slice(0,16)+'-'+r.ordinal:null,
   text:clean(/\.csv$/i.test(r.name||'')?String(r.text||'').split(' | ').slice(0,3).join(' | '):r.text),
   locator:location(r.locator),versions:r.versions||[],mentionedModels:r.mentionedModels||[],scopeStatus:'原文提及或目录线索，不代表兼容性确认',
   score:r.score,download:(r.locationId||r.locations?.[0]?.id)?fileUrl(r.locationId||r.locations[0].id,r.name):null,
   candidatePassages:r.candidatePassages||0,locationsTruncated:!!r.locationsTruncated,
-  matchedLocations:r.unitId?[]:(r.matchedLocations||[]).filter(m=>Number.isInteger(m.blockId)&&m.blockId>0).map(m=>({blockId:m.blockId,locator:location(m.locator),readUrl:'/v2/offline/read?block='+m.blockId})),
-  readUrl:r.unitId?(r.blockId?'/v2/offline/role-read?unit='+r.unitId:null):r.blockId?'/v2/offline/read?block='+r.blockId:null},{kind:'document'});
- async function request(route){const r=await fetch(resourceBase+route,{signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('resource service unavailable');const body=await r.json();if(!route.startsWith('/proximity/search?'))return body;const permitted=await authorizeResources(body);if(!roleIndexEnabled)return permitted;const keys=await roleDocumentKeys();return {...permitted,results:(permitted.results||[]).filter(r=>keys.has(r.sha256||'metadata:'+r.resourceId))};}
+  matchedLocations:(r.matchedLocations||[]).filter(m=>Number.isInteger(m.blockId)&&m.blockId>0).map(m=>({blockId:m.blockId,locator:location(m.locator),readUrl:'/v2/offline/read?block='+m.blockId})),
+  readUrl:r.blockId?'/v2/offline/read?block='+r.blockId:null},{kind:'document'});
+ async function request(route){const r=await fetch(resourceBase+route,{signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('resource service unavailable');const body=await r.json();return route.startsWith('/proximity/search?')?authorizeResources(body):body;}
  let catalogCache=null,catalogTime=0,catalogError=null,catalogPending=null,catalogSignature=null;
  async function localCatalog(){
   if(catalogCache&&Date.now()-catalogTime<=30000)return catalogCache;
@@ -61,41 +63,6 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   return catalogPending;
  }
  localCatalog.status=()=>({state:catalogError?(catalogCache?'stale-cache':'unavailable'):catalogCache?'ready':'not-loaded',reason:catalogError,lastSuccessfulAt:catalogTime?new Date(catalogTime).toISOString():null,cacheSeconds:30});
- // Role-index candidate limits run inside the explicit readable document scope.
- // Recheck access for every call; no employee/public authorization is cached.
- async function roleDocumentKeys(){
-  const resources=await localCatalog();if(catalogError)throw Error('role-authorization-unavailable');
-  const copies=new Map();for(const r of resources){const key=r.sha256||'metadata:'+r.resourceId;if(!copies.has(key))copies.set(key,[]);copies.get(key).push(r);}
-  const keys=new Set();for(const [key,rows]of copies)if(key!=='metadata:undefined'&&rows.some(r=>!r.availabilityState||r.availabilityState==='present')&&!rows.some(r=>accessInfo(r,rows).accessRestricted))keys.add(key);
-  return keys;
- }
- const roleGrants=new Map();
- async function roleRequest(route,params){
-  const keys=await roleDocumentKeys();
-  const grant=route==='/role/read'?roleGrants.get(params.unit):null;
-  if(route==='/role/read'&&(!grant||!keys.has(grant.key)))throw Error('role-read-not-authorized');
-  const response=await fetch(resourceBase+route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...params,authorized_keys:[...keys]}),signal:AbortSignal.timeout(15000)});
-  if(!response.ok)throw Error('role-index-unavailable');const raw=await response.json();
-  if(route==='/role/read'){
-   if(raw.knowledgeUnit?.id!==params.unit||raw.knowledgeUnit.kind!==grant.unit.kind||!require('node:util').isDeepStrictEqual(raw.knowledgeUnit.sourceSpans,grant.unit.sourceSpans))throw Error('role-unit-identity-mismatch');return raw;
-  }
-  if(!Array.isArray(raw.results))throw Error('role-index-invalid');
-  const permitted=await authorizeResources({...raw,results:raw.results.filter(r=>keys.has(r.sha256||'metadata:'+r.resourceId))});
-  for(const r of permitted.results){if(!/^[a-f0-9]{64}$/.test(r.unitId||'')||r.knowledgeUnit?.id!==r.unitId||!Array.isArray(r.knowledgeUnit.sourceSpans))throw Error('role-index-invalid');roleGrants.set(r.unitId,{key:r.sha256||'metadata:'+r.resourceId,unit:r.knowledgeUnit});}
-  while(roleGrants.size>2000)roleGrants.delete(roleGrants.keys().next().value);
-  return permitted;
- }
- async function readRoleContext(unitId){
-  const blocks=[];let offset=0,raw,characters=0;
-  for(let page=0;page<4;page++){
-   raw=await roleRequest('/role/read',{unit:unitId,offset});
-   for(const block of raw.blocks||[]){characters+=String(block.text||'').length;if(characters>24000)throw Error('role-context-budget');blocks.push(block);}
-   if(raw.nextOffset===null)break;
-   if(!Number.isInteger(raw.nextOffset)||raw.nextOffset<=offset)throw Error('role-context-offset');
-   offset=raw.nextOffset;
-  }
-  return {...raw,blocks};
- }
  const videoFile=x=>/\.(mp4|webm|mov)$/i.test(x?.name||x?.file||'');
  const resourceFile=x=>/\.[a-z0-9]{2,5}$/i.test(x?.name||x?.file||'');
  async function permittedResource(item,req){
@@ -106,7 +73,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
  }
  let directoryCache=null,directoryTime=0,directoryPending=null,directoryPrepared=null,directorySignature=null;
  const directoryIndexes=new Map();
- async function directoryCatalog(req,options={}){
+ async function directoryIndex(req){
   if(req?.v2Public)throw Error('public-route-not-enabled');
   if(!directoryCache||Date.now()-directoryTime>30000){
    if(!directoryPending)directoryPending=request('/directory-catalog').then(raw=>{if(raw.directoryCatalogVersion!==1||!Array.isArray(raw.resources))throw Error('directory-catalog-service-not-updated');const signature=JSON.stringify(raw.resources);if(signature!==directorySignature){directoryIndexes.clear();directoryCache=raw.resources;directoryPrepared=require('../../domain/knowledge/source-directory.cjs').directoryItems(directoryCache);directorySignature=signature;}directoryTime=Date.now();}).finally(()=>{directoryPending=null;});
@@ -118,8 +85,10 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   const allowed=await Promise.all(directoryPrepared.map(async row=>!row.accessRestricted||!!req&&await authorizeRestrictedResource(req,{...row,sources:directoryCache.filter(r=>r.locationId===row.locationId||row.sha256&&r.sha256===row.sha256||row.resourceVersionId&&r.versionId===row.resourceVersionId)})));
   const permissionKey=allowed.map(Boolean).map(Number).join('');
   let index=directoryIndexes.get(permissionKey);if(!index){index=createDirectoryIndex(directoryPrepared.filter((row,i)=>allowed[i]));if(directoryIndexes.size>=4)directoryIndexes.delete(directoryIndexes.keys().next().value);directoryIndexes.set(permissionKey,index);}
-  return {cat:'other',docs:directoryPage(index,options)};
+  return index;
  }
+ async function directoryCatalog(req,options={}){return {cat:'other',docs:require('../../domain/knowledge/source-directory.cjs').directoryPage(await directoryIndex(req),options)};}
+ async function configurationFiles(req,query){const index=await directoryIndex(req);return require('../../domain/knowledge/metadata-query.cjs').rankMetadata(query,index.files.filter(r=>['模组配置文件','2026年新调试  LED模组配置文件'].includes(r.folders?.[0])));}
  async function permittedResourceId(id,req){
   const info=await request('/resource-info?id='+encodeURIComponent(id));
   if(typeof info.isVideo!=='boolean'||!Array.isArray(info.resources))throw Error('resource-access-metadata-unavailable');
@@ -155,7 +124,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   }
   return body;
  }
- const productFacts=require('../../domain/knowledge/product-table-facts.cjs').createProductTableFacts({localCatalog,request});
+ const productFacts=require('../../domain/knowledge/comparison-card.cjs').createComparisonCards({localCatalog,request});
  async function search(q,mode='all',{limit=10,model=null,version=null,groupDocuments=false}={}){
   const raw=await request('/search?q='+encodeURIComponent(q)+'&mode='+mode+'&limit='+limit+(model?'&model='+encodeURIComponent(model):'')+(version?'&version='+encodeURIComponent(version):'')+(groupDocuments?'&group_documents=1':''));
   const results=(await authorizeResources({results:(raw.results||[]).map(normalize)})).results;
@@ -234,18 +203,16 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
  }
  const answers=require('./quick-answer.cjs').createQuickAnswer({app,knowledge,search,searchCases,localCatalog,resolveDocuments,localizeMedia});
  const faqLookup=require('./registered-faq.cjs').createRegisteredFaq({
-  findFiles:async()=>{const out=[];for(const term of ['FQA','FAQ'])out.push(...(await search(term,'files',{limit:32})).results);return out;},
+  findFiles:async()=>(await localCatalog()).filter(f=>/\.csv$/i.test(f.name||'')&&/FAQ|FQA|常见问题|问答/i.test(f.name||'')),
   readPage:(id,offset)=>request('/preview-document?'+new URLSearchParams({id,offset})),
   authorize:id=>permittedResourceId(id,null),normalize,clean
  });
  const quickRetrieval=require('./quick-retrieval.cjs').createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localCatalog,resolveDocuments,localizeMedia,originalDocuments:evidenceDocuments,businessAnswer:answers.answer,filterEvidence:async rows=>(await authorizeResources({results:rows})).results,
-  async searchContext({query,concepts,documents,models,chips,version,role='operation'}){
-   if(roleIndexEnabled&&!chips?.length&&!version){try{const raw=await roleRequest('/role/search',{q:query,role,concepts,documents,models,limit:4});return raw.results.map(r=>({...normalize(r),readAnchor:r.readAnchor,proximity:r.proximity,knowledgeUnit:r.knowledgeUnit,unitId:r.unitId,role:r.role}));}catch{}}
+  async searchContext({query,concepts,documents,models,chips,version}){
    const params=new URLSearchParams({q:query,scope:'text',concepts:JSON.stringify(concepts),documents:JSON.stringify(documents),models:JSON.stringify(models),chips:JSON.stringify(chips),limit:'4'});if(version)params.set('version',version);
    const raw=await request('/proximity/search?'+params);return (raw.results||[]).map(r=>({...normalize(r),readAnchor:r.readAnchor,proximity:r.proximity}));
   },
   async readContext(candidate){
-   if(roleIndexEnabled&&candidate.unitId){const raw=await readRoleContext(candidate.unitId);return {text:(raw.blocks||[]).map(b=>clean(b.text)).join('\n'),contextBoundary:raw.boundary,boundaryWindowLimited:raw.boundaryWindowLimited,contextParts:(raw.blocks||[]).map(b=>({locator:location(b.locator),blockId:b.blockId,charStart:b.charStart,charEnd:b.charEnd})),knowledgeUnit:raw.knowledgeUnit,contextComplete:raw.nextOffset===null};}
    const raw=await request('/proximity/read?'+new URLSearchParams({block:candidate.blockId,anchor:candidate.readAnchor||0}));
    return {text:(raw.blocks||[]).map(b=>clean(b.text)).join('\n'),contextBoundary:raw.boundary,contextParts:(raw.blocks||[]).map(b=>({locator:location(b.locator),blockId:b.blockId})),contextComplete:raw.nextOffset===null};
   }});
@@ -256,7 +223,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
   const original=req.method==='GET'&&p.startsWith('/v2/resources/original/')&&originals.has(p.split('/').pop());
   const image=p==='/api/ocr',logRoute=p==='/api/huidu/log';
   if(!p.startsWith('/v2/offline/')&&!chat&&!legacy&&!original&&!image&&!logRoute)return false;
-  const send=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value,(_k,v)=>typeof v==='string'?clean(v):v));return true;};
+  const send=(code,value)=>{const text=JSON.stringify(value,(_k,v)=>typeof v==='string'?clean(v):v);if(req.v2ChatStream?.finish(code,JSON.parse(text)))return true;res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(text);return true;};
   const host=req.headers.host;if(req.headers.origin&&req.headers.origin!=='http://'+host)return send(403,{error:'origin-not-allowed'});
   try{
    if(logRoute&&req.method==='POST'){if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});}
@@ -307,11 +274,6 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",'Cache-Control':'no-store'});
     res.end(previewPage(raw,id,clean,location));return true;
    }
-   if(req.method==='GET'&&p==='/v2/offline/role-read'){
-    const unit=u.searchParams.get('unit');if(!roleIndexEnabled||!roleGrants.has(unit))return send(403,{error:'role-read-not-authorized'});
-    const raw=await readRoleContext(unit);
-    return send(200,{unitId:unit,knowledgeUnit:raw.knowledgeUnit,contextBoundary:raw.boundary,nextOffset:raw.nextOffset,blocks:(raw.blocks||[]).map(b=>({...b,locator:location(b.locator),text:clean(b.text)}))});
-   }
    if(req.method==='GET'&&p==='/v2/offline/read'){
     const id=u.searchParams.get('block');if(!/^\d+$/.test(id||''))return send(400,{error:'invalid-block'});
     const raw=await request('/read?block='+id);const origin=raw.locations?.[0];if(origin&&!await permittedResource({name:origin.name||path.win32.basename(origin.path||''),sha256:raw.sha256},req))return send(403,{error:'resource-access-denied'});const csv=(raw.locations||[]).some(l=>/\.csv$/i.test(l.path));
@@ -340,42 +302,83 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
     let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536)return send(413,{error:'body-too-large'});chunks.push(chunk);}
     let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
     const requestedMode=input.mode||req.headers['x-v2-mode']||'quick';if(!['quick','expert'].includes(requestedMode))return send(400,{error:'invalid-mode'});
-    if(typeof input.message!=='string'||!input.message.trim()||input.message.length>8000)return send(400,{error:'invalid-query',reply:'请输入8000字以内的问题。'});
+    if(requestedMode==='expert'&&expert?.access&&!expert.access().available){const state=expert.access();return send(503,{status:'unavailable',actualMode:'expert',error:'expert-'+state.reason,reply:state.reply,modelCallCount:0});}
+    const localRag=ragflow&&!req.v2Public&&['127.0.0.1','::1'].includes(require('./request-peer.cjs').peerAddress(req));
+    if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
     if(inFlight.has(input.sessionId))return send(409,{status:'busy',error:'session-request-active',reply:'当前会话仍在处理，请等待完成。'});
     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
     let onProgress;try{onProgress=progress.begin(state.id,input.requestId);}catch{return send(409,{error:'progress-request-reused'});}
     let progressCompleted=false;inFlight.add(state.id);sessions.begin(state.id);
     try{
-    const diagnosticState=require('../../domain/parser/customer-language.cjs').diagnosticContext(input.message,state,answers.expertClassify(input.message,state));
-    state=sessions.recordResult(state.id,{kind:'diagnostic-context',query:input.message,diagnosticState});
     if(requestedMode==='expert'){
-     // Apply customer-origin engineering edits through the same deterministic
-     // task update used by quick mode; assistant/model prose never changes slots.
-     const taskPlan=quickRetrieval.plan(input.message,state).taskPlan;
-     if(taskPlan.ordering){
-      const update=await quickRetrieval.answer(input.message,{state,facts:state.facts,currentFacts:input.facts||{},onProgress});
-      state=sessions.recordResult(state.id,{kind:'all',query:input.message,intent:update.intent,quickContext:update.quickContext,evidenceIds:[]});
-      if(update.result?.planningStatus==='conditional'){
-       const {routeLog,quickContext,queryPlan,retrievalTrace,...customerData}=update;
-       const output={...customerData,requestedMode,actualMode:'quick',modelStatus:'not-used',model:'v2-ordering-calculator',modelCallCount:0,executionReason:'validated-conditional-ordering',results:customerData.results||[]};
-       state=sessions.recordAnswer(state.id,output);progressCompleted=true;onProgress('completed');return send(200,{...output,sessionState:state});
-      }
-     }
      state=sessions.expertState(state.id);
+     // Explicit engineering requests share the same task ownership and
+     // progressive calculation in both modes. Do not reconstruct a demand by
+     // concatenating arbitrary historical product/support conversations.
+     const taskQuery=quickRetrieval.plan(input.message,state);
+     // Keep the existing engineering calculator; all consultation/file choices
+     // belong to the expert rather than a keyword-driven answer shortcut.
+     if(app&&taskQuery.intent==='ordering'){
+      const started=Date.now();
+      const data=await quickRetrieval.answer(input.message,{state,currentFacts:input.facts||{},onProgress});
+      state=sessions.recordResult(state.id,{kind,query:input.message,intent:data.intent,quickContext:data.quickContext,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
+      const {quickContext,queryPlan,routeLog,...visible}=data;
+      const output={...visible,actualMode:'expert',model:'v2-rules',modelStatus:'not-used',modelCallCount:0,elapsedMs:Date.now()-started};
+      output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:routeLog?.entities?.models||[]});
+      state=sessions.recordAnswer(state.id,output);progressCompleted=true;onProgress('completed');
+      try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:data.intent,quickRoute:routeLog,modelCallCount:0,elapsedMs:output.elapsedMs});}catch{}
+      return send(200,{...output,requestedMode,sessionState:state});
+     }
      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
      const route=answers.expertClassify(input.message,state),readableBlocks=new Map();
-     const expertEvidence=require('./expert-evidence.cjs').createExpertEvidence({request,searchCases,caseMap,clean,location,defaultModels:route.models||[],roleIndexEnabled,roleRequest});
+     const expertEvidence=require('./expert-evidence.cjs').createExpertEvidence({request,searchCases,caseMap,clean,location,defaultModels:route.models||[],customerMessage:input.message});
      const calculateOrdering=require('./expert-ordering.cjs').createExpertOrdering({app,userMessages:state.messages.filter(m=>m.role==='user').map(m=>m.content)});
      const execute=async(name,args)=>{
       onProgress(name==='read_document'?'reading':'searching');
       if(name==='calculate_ordering')return calculateOrdering(args);
+      if(name==='quick_answer'){
+       if(!resourceAnswer||typeof args.query!=='string'||!args.query.trim()||args.query.length>240)throw Error('expert-invalid-tool');
+       const found=await resourceAnswer(args.query,{request:req,signal:controller.signal})||{status:'unavailable',reply:'资料检索服务未配置或尚未就绪，当前不能确认资料是否存在。',results:[]};
+       const evidence=require('./shared-quick-evidence.cjs').sharedQuickEvidence(found);
+       if(found.status==='not-found'&&app?.chipLookup)evidence.push(...require('../../domain/knowledge/expert-firmware-evidence.cjs').expertFirmwareEvidence(args.query,{lookup:app.chipLookup,evidence:require('../data/load-resource-evidence.cjs').loadResourceEvidence(),models:route.models||[]}));
+       return {evidence,directAnswer:found.status==='answer'?{status:found.status,intent:found.intent,reply:found.reply,results:found.results,answerBasis:found.answerBasis,retrievalBackend:found.retrievalBackend}:null,notice:{scope:'expert-requested-quick-answer',status:found.status,reply:found.reply,compatibilityConfirmed:false,meaning:'这是快速模式的检索结果和答复候选，由专家决定采用、补查或说明缺口。未找到文件时附带的芯片原表候选不是升级适用批准。'}};
+      }
+      if(name==='search_evidence'&&['files','resources','firmware'].includes(args.kind)&&resourceSearch){
+       if(args.kind==='firmware'&&app?.chipLookup){
+        const refs=require('../../domain/knowledge/expert-firmware-evidence.cjs').expertFirmwareEvidence(args.query,{lookup:app.chipLookup,evidence:require('../data/load-resource-evidence.cjs').loadResourceEvidence(),models:args.models||route.models});
+        if(refs.length)return {evidence:refs,notice:{scope:'verified-chip-firmware-source-table',compatibilityConfirmed:false,meaning:'源表固件类别不等于接收卡当前硬件适用。需要下载原文件时再查询files/resources。'}};
+       }
+       const queries=args.models?.length?args.models.map(model=>model+' '+args.query):[args.query];
+       const foundParts=await Promise.all(queries.map(query=>resourceSearch(query,{request:req,signal:controller.signal,...(args.models?.length?{allowModelSuggestion:false}:{})})));
+       // Reserve one result per selected model before filling secondary copies;
+       // otherwise translated/duplicate files for one model crowd out another.
+       const firstRows=foundParts.map(p=>p?.results?.[0]).filter(Boolean);
+       const found={sourceUnavailable:foundParts.every(p=>!p||p.sourceUnavailable),results:[...new Map([...firstRows,...foundParts.flatMap(p=>p?.results||[])].map(row=>[JSON.stringify([row.sha256,row.name,row.download]),row])).values()]};
+       const rows=require('./shared-quick-evidence.cjs').sharedQuickEvidence(found);
+       if(!rows.length&&expertMaterials){
+        const discovery=expertMaterials.evidence(args.query,{models:args.models||route.models}).filter(e=>e.sourceKind==='structured-product-discovery');
+        if(discovery.length)return {evidence:discovery,notice:{scope:'source-parameter-to-file-discovery',status:'model-candidates',compatibilityConfirmed:false,meaning:'文件名检索无结果；原表已按参数找到候选型号。请自行选择候选继续查所需文件，不要求客户先提供型号，不把竞品当成本公司产品。'}};
+       }
+       return {evidence:rows,notice:{scope:'authorized-file-and-resource-catalogue',status:found.sourceUnavailable?'unavailable':rows.length?'candidates':'not-found',compatibilityConfirmed:false,meaning:'文件登记仅证明文件存在。请结合客户目标决定交付链接、读正文、补查或回答，不能用无关文件代替所需文件。'}};
+      }
+      if(name==='search_evidence'&&expertMaterials&&['products','text'].includes(args.kind)){
+       const added=expertMaterials.evidence(args.query,{models:args.models||route.models,targetedOnly:true});
+       if(added.length)return {evidence:added,notice:{scope:'internal-expert-structured-sources',compatibilityConfirmed:false}};
+      }
+      if(name==='search_evidence'&&expertMaterialRag&&['products','text'].includes(args.kind)&&/控标|投标|招标|竞品|友商|对比|比较/.test(args.query)){
+       try{const added=await expertMaterialRag.search(args.query,{models:args.models||route.models});if(added.length)return {evidence:added,notice:{scope:'internal-expert-supplementary-rag',compatibilityConfirmed:false}};}catch{}
+      }
       if(name==='read_document'){
        const context=await expertEvidence.read(args);if(context)return context;
        if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');
        const parent=readableBlocks.get(args.blockId),raw=await request('/read?block='+args.blockId);for(const b of raw.blocks||[])readableBlocks.set(b.id,parent);return {evidence:(raw.blocks||[]).map(b=>({evidenceId:'block-'+b.id,blockId:b.id,name:parent.name,download:parent.download,readUrl:'/v2/offline/read?block='+b.id,text:clean(b.text),locator:location(b.locator)}))};
       }
+      if(name==='search_evidence'&&['cases','faq'].includes(args.kind)){
+       const found=await expertEvidence.search({...args,kind:'cases'});
+       return {...found,notice:{...found.notice,scope:'case-boundary-search',meaning:'历史案例按完整记录边界与客户型号/芯片条件检索；无结果不代表没有资料，可由专家决定用text查询RAG原文。历史方案不是当前现场已验证方案。'}};
+      }
+      if(localRag&&name==='search_evidence'&&!['files','resources','firmware'].includes(args.kind)){try{const found=await ragflow.retrieve(args.query,{state,kind:args.kind,models:args.models?.length?args.models:route.models,documents:args.documents});if(found.results.length)return {evidence:found.results.map(e=>e.category==='case'?{...e,referenceOnly:true,caseSemantics:require('../../domain/aftersales/case-advice-contract.cjs').caseAdviceContract({sourceExcerpt:e.text})}:e),notice:{scope:'local-operator-private-drive',completeWorkflow:false,compatibilityConfirmed:false}};}catch{}}
       if(['cases','text','faq','firmware'].includes(args.kind))return expertEvidence.search(args);
-      if(roleIndexEnabled&&['products','files'].includes(args.kind))return expertEvidence.search(args);
       if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases','products','resources'].includes(args.kind))throw Error('expert-invalid-tool');
       let planned=answers.classify(args.query);
       planned.hardwareRequested=route.hardwareRequested||planned.hardwareRequested;
@@ -399,13 +402,27 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
       return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
      };
     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+    const progressFacts={models:route.models||[],results:[],modelCallCount:0};
+    const expertProgress=(stage,detail={})=>{onProgress(stage);Object.assign(progressFacts,detail);req.v2ChatStream?.progress(require('./answer-process.cjs').answerProcess({...progressFacts,status:progressFacts.generating?'generating':'running'}));};
+    expertProgress('searching');
+    // Model chooses retrieval targets; do not pre-route the question into a source or answer.
+    const preparedEvidence=[];
+    route.chips=taskQuery.chips||[];
+    expertProgress('evidence-found',{models:route.models||[],results:preparedEvidence||[]});
+    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+    const compared=(preparedEvidence||[]).find(e=>e.sourceKind==='structured-comparison-original');
+    if(compared&&output.status==='answer'){const table=JSON.parse(compared.text);if(table.models?.length>1)output.parameterComparison=table;}
+    output.processingSummary=require('./answer-process.cjs').answerProcess({...output,models:route.models||[]});
     progressCompleted=output.status!=='unavailable';onProgress(progressCompleted?'completed':'failed');
     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
     }
-    const query=input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
+    const query=resourceAnswer&&localRag?input.message:input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
     const started=Date.now();
-    const data=await quickRetrieval.answer(query,{state,facts:state.facts,currentFacts:input.facts||{},onProgress});
+    // The current quick resource path is deliberately one-turn. Chat archives
+    // remain stored, but history and extracted prior facts never enter retrieval.
+    const taskPlan=quickRetrieval.plan(input.message,state);
+    let data=taskPlan.intent==='ordering'?await quickRetrieval.answer(input.message,{state,currentFacts:input.facts||{},onProgress}):resourceAnswer?await resourceAnswer(input.message,{request:req,onProgress}):null;
+    if(!data)data={status:'unavailable',intent:'technical',reply:'RAG 检索未配置，本次未完成资料检索，请联系管理员恢复。',results:[],sourceUnavailable:true,answerBasis:'ragflow-required'};
     state=sessions.recordResult(state.id,{kind,query,intent:data.intent,quickContext:data.quickContext,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
     const {routeLog,quickContext,queryPlan,retrievalTrace,candidateCount,retrievalPolicy,sourceFailures,...customerData}=data;
     const customerResults=(customerData.results||[]).map(({rankingSignals,...evidence})=>evidence);
@@ -417,6 +434,6 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
    return send(404,{error:'offline-route-not-found'});
   }catch{if(!res.headersSent)return send(503,{error:'resource-service-unavailable',reply:'资料服务暂不可用。产品速查和已有工程配单仍可独立使用。'});res.destroy();return true;}
  }
- return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts,authorizeResources,directoryCatalog,authorizeVideoMedia:authorizeResources};
+ return {handle,searchCases,resolveDocuments,localizeMedia,localCatalog,productFacts,authorizeResources,directoryCatalog,configurationFiles,authorizeVideoMedia:authorizeResources};
 }
 module.exports={createOfflineKnowledge};

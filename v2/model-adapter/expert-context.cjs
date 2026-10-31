@@ -29,18 +29,24 @@ function createExpertContext({base,transport}){
   checkBudget(limits);
   if(!capacity){try{const {r,j}=await requestJson('/props',{},limits),n=j.default_generation_settings?.n_ctx;if(r.ok&&Number.isInteger(n)&&n>0){capacity=n;source='server-props';}}catch{checkBudget(limits);}}
   if(!capacity)throw Error('expert-context-unavailable');
-  const available=capacity,reserve=outputBudget+2048,originalHistory=input.history.length;let estimate;
+  const available=capacity,reserve=outputBudget+2048,originalHistory=input.history.length;let estimate,compactedEvidence=0;
   for(;;){
    checkBudget(limits);
    messages[1].content=JSON.stringify(input);
    estimate=await count(JSON.stringify({messages,response_format:format}),limits);
    if(estimate.tokens+reserve<=available)break;
+   // Repeated tool rounds accumulate sources. Keep handles, scope and both
+   // ends of an overlong passage; never present the omitted middle as read.
+   const row=input.preparedEvidence?.evidence?.find(e=>typeof e.text==='string'&&e.text.length>300&&(e.contextCompactionLevel||0)<2);
+   if(row){const keep=row.contextCompactionLevel?120:440;row.text=row.text.slice(0,keep)+'\n[上下文预算：中段省略，不能据此认定流程或案例完整]\n'+row.text.slice(-keep);row.contextComplete=false;row.contextCompacted=true;row.contextCompactionLevel=(row.contextCompactionLevel||0)+1;
+    if(row.caseSemantics?.historicalOutcome?.length>keep*2)row.caseSemantics.historicalOutcome=row.caseSemantics.historicalOutcome.slice(0,keep)+'[中段省略]'+row.caseSemantics.historicalOutcome.slice(-keep);
+    compactedEvidence++;input.contextCompaction={compactedEvidence,meaning:'原文仍保留在工具端；摘录被压缩，不能拼接省略两端成为连续操作。需要缺失步骤时请读取对应授权原文。'};continue;}
    if(!input.history.length)throw Error('expert-context-capacity');
    // Only evict old complete exchanges at actual capacity pressure; current evidence is retained.
    input.history.shift();while(input.history[0]?.role==='assistant')input.history.shift();
   }
   checkBudget(limits);
-  return {capacityTokens:available,capacitySource:source,inputTokens:estimate.tokens,countMethod:estimate.method,reservedOutputTokens:outputBudget,templateSafetyTokens:2048,historyMessages:input.history.length,droppedHistoryMessages:originalHistory-input.history.length,serializedCharacters:JSON.stringify(messages).length};
+  return {capacityTokens:available,capacitySource:source,inputTokens:estimate.tokens,countMethod:estimate.method,reservedOutputTokens:outputBudget,templateSafetyTokens:2048,historyMessages:input.history.length,droppedHistoryMessages:originalHistory-input.history.length,compactedEvidence,serializedCharacters:JSON.stringify(messages).length};
  }
  return {prepare};
 }

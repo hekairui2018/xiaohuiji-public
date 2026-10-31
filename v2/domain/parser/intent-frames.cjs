@@ -12,7 +12,7 @@ const vocabulary={
  edition:['通用类型','通用版本','通用版','专业版','精简版'],
  social:['谢了','谢谢啦','多谢了','谢谢你','感谢你'],
  handling:['排查','检查','自查','核查','检修'],
- request:['对比','比较','分析差异','发我','给一份','请问','我想知道','想了解','想问','只问','只查','只要','我要','给我','帮我','麻烦','请','先查','先给','先看','先问','查','只看'],
+ request:['发我','给一份','请问','我想知道','想了解','想问','只问','只查','只要','我要','给我','帮我','麻烦','请','先查','先给','先看','先问','查','只看'],
  correction:['而是','其实是','改问','改成','现在问','这次问','本次反馈：'],
  negate:['不是','并非','不需要','不用','不要','无需','别'],
  document:['视频讲解','操作说明书','SDK','API文档','操作手册','操作视频','使用教程','调试说明书','使用说明','操作说明','安装程序','升级程序','说明书','说名书','说明数','规格书','手册','安装包','文档','教程','资料'],
@@ -20,7 +20,7 @@ const vocabulary={
  device:['设备','控制卡','接收卡','发送卡','热点','WiFi'],
  question:['有没有','有无','多少','多大','多宽','多高','几个','几路','几级','能否','能不能','可不可以','可以','支持','什么','如何','怎么','咋','哪些','有啥','是什么','吗','么'],
  engineering:['配单','配卡','配屏','选型','BOM'],
- attribute:['电池型号','电池','代载','参数','灰阶','灰度','带载','尺寸','分辨率','网口','接口','功能'],
+ attribute:['输入电源','供电电压','输入电压','电源电压','电源输入','运行内存','存储空间','内部存储','存储容量','内存','存储','电池型号','电池','代载','参数','灰阶','灰度','带载','尺寸','分辨率','网口','接口','功能'],
  conjunction:['同时','还要','并且','另外','以及'],
 };
 // A feature head changes the noun phrase role: 阴影补偿 is a capability,
@@ -59,10 +59,7 @@ function analyzeFrames(text){
  // requests remain together so the existing multi-goal policy can ask priority.
  const requests=active.filter(c=>c.role==='request');
  const corrected=active.filter(c=>c.corrected);
- // A request without its own object (e.g. asking what to check next) refers
- // to the preceding report. Dropping those clauses discards the actual fault.
- const selfContained=requests.some(c=>c.tokens.some(t=>['document','device','attribute','engineering','phenomenon'].includes(t.type))||/\b(?:HD[-_ ]?)?[A-Z]{1,6}\d[A-Z0-9_+-]*|HDPlayer|HDSet|屏掌控|软件|模组/i.test(c.text));
- const selected=corrected.length?[corrected.at(-1)]:requests.length&&selfContained?requests:active;
+ const selected=corrected.length?[corrected.at(-1)]:requests.length?requests:active;
  const changed=!String(text).includes('本次反馈：')&&selected.length>0&&(selected.length!==clauses.length||clauses.some(c=>c.role==='negated'));
  const focusText=changed?selected.map(c=>c.text).join('；'):String(text);
  const relations=clauses.flatMap(c=>{
@@ -90,6 +87,8 @@ function analyzeFrames(text){
  const quantities=/(\d+)台[^，。；]{0,20}只能[^，。；]{0,6}?(\d+)台/.exec(focusText);
  const alternating=/一会(?:儿)?[^，。；]{0,8}一会(?:儿)?/.exec(focusText);
  const reportedStatus=/(?:提示|显示|报错)[^，。；]{0,8}(?:已到期|过期|欠费|未授权|未激活|已锁定|权限不足)/.exec(focusText);
+ const faultState=require('./fault-observation.cjs').faultObservation(focusText);
+ if(!reported&&faultState.observations.length){const o=faultState.observations[0];reported={type:'observed-state',text:o.text,start:o.start,end:o.end};}
  const signal=complement||reportedStatus||partial||alternating||(contrast?[focusText]:null)||(quantities&&Number(quantities[1])>Number(quantities[2])?[quantities[0]]:null);
  if(!reported&&signal)reported={type:'failure-complement',text:signal[0],start:Math.max(0,focusText.indexOf(signal[0])),end:Math.max(0,focusText.indexOf(signal[0]))+signal[0].length};
  const activity=focusedSpans.find(t=>t.type==='activity');

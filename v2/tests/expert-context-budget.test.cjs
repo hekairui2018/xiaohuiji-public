@@ -44,3 +44,9 @@ test('An unavailable tokenizer retains the conservative byte estimate when budge
  const result=await context.prepare(conversation,data,null,512,{deadline:Date.now()+1000});
  assert.equal(result.countMethod,'utf8-byte-upper-bound');assert.equal(result.droppedHistoryMessages,0);assert.equal(result.historyMessages,1);assert.equal(data.facts.model,'R712');assert.match(conversation[2].content,/当前证据/);
 });
+test('accumulated evidence is compacted before customer history at actual capacity pressure',async()=>{
+ const context=fixture(async url=>url.pathname==='/props'?props():{ok:false,json:async()=>({})});
+ const data=input([{role:'user',content:'客户已确认R712和芯片'}]);data.preparedEvidence={evidence:[{evidenceId:'s1',text:'开头条件'+'.'.repeat(15000)+'结尾结果',contextComplete:true,scope:{model:'R712'}},{evidenceId:'s2',text:'另一条事实'}]};
+ const result=await context.prepare(messages(),data,null,4096);
+ assert.equal(result.compactedEvidence,1);assert.equal(result.droppedHistoryMessages,0);assert.equal(data.preparedEvidence.evidence[0].contextComplete,false);assert.match(data.preparedEvidence.evidence[0].text,/开头条件/);assert.match(data.preparedEvidence.evidence[0].text,/结尾结果/);assert.equal(data.preparedEvidence.evidence[0].scope.model,'R712');
+});

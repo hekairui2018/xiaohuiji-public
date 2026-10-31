@@ -26,3 +26,18 @@ test('Expert tools issue public-only read handles and never disclose internal se
  const chat=createPublicChat({app:{quickBrowse:()=>[product]},knowledge:{evidenceDocuments:()=>[{document:doc}]},catalog,expert,verifiedDocuments:[{name,sha256:hash}]});
  const r=await chat.answer({message:'R712 带载多少',mode:'expert'});assert.equal(r.code,200);assert.equal(executed,true);assert.equal(r.body.actualMode,'expert');assert.equal(r.body.toolTrace,undefined);
 });
+test('public expert chooses quick delivery and owns the following turn without prefetched private evidence',async()=>{
+ let calls=0;const expert={status:async()=>({available:true}),answer:async({execute,preparedEvidence,sessionState,message})=>{
+  assert.equal(preparedEvidence,undefined);calls++;
+  if(calls===1){const tool=await execute('quick_answer',{query:'R712规格书'});assert.equal(tool.notice.scope,'explicit-public-allowlist-only');assert.equal(tool.directAnswer.status,'answer');assert(tool.directAnswer.results.every(r=>r.name===name));assert(!JSON.stringify(tool).includes('PRIVATE-CANARY'));return {...tool.directAnswer,actualMode:'expert',modelCallCount:1};}
+  assert(sessionState.messages.some(m=>m.role==='user'&&m.content==='R712规格书'));assert.equal(message,'它的带载呢');return {status:'answer',actualMode:'expert',reply:'继续核对R712。',modelCallCount:1};
+ }};
+ const chat=createPublicChat({app:{quickBrowse:()=>[product]},knowledge:{evidenceDocuments:()=>[{document:doc},{document:{name:'内部私密.pdf',sha256:'b'.repeat(64),accessRestricted:true,pages:[{page:1,text:'PRIVATE-CANARY'}]}}]},catalog,expert,verifiedDocuments:[{name,sha256:hash}]});
+ const first=await chat.answer({message:'R712规格书',mode:'expert'});assert.equal(first.code,200);assert.equal(first.body.actualMode,'expert');assert.equal(first.body.results[0].name,name);
+ const next=await chat.answer({message:'它的带载呢',mode:'expert',conversationId:first.body.conversationId});assert.equal(next.code,200);assert.equal(next.body.conversationId,first.body.conversationId);assert.equal(calls,2);
+});
+test('public file tools return approved metadata rather than unread pages or private original links',async()=>{
+ const expert={status:async()=>({available:true}),answer:async({execute})=>{const r=await execute('search_evidence',{kind:'files',query:'规格书',models:['HD-R712']});assert.equal(r.evidence.length,1);assert.equal(r.evidence[0].name,name);assert.equal(r.evidence[0].sourceKind,'registered-resource-metadata');assert.equal(r.evidence[0].readAvailable,false);assert(!JSON.stringify(r).includes('PRIVATE-CANARY'));return {status:'answer',actualMode:'expert',reply:'文件在这里。',results:r.evidence};}};
+ const chat=createPublicChat({app:{quickBrowse:()=>[product]},knowledge:{evidenceDocuments:()=>[{document:doc}]},catalog,expert,verifiedDocuments:[{name,sha256:hash}]});
+ const r=await chat.answer({message:'R712规格书',mode:'expert'});assert.equal(r.code,200);assert.equal(r.body.results[0].name,name);
+});
