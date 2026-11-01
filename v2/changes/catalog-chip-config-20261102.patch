@@ -1,0 +1,237 @@
+diff --git a/v2/adapters/http/offline-knowledge.cjs b/v2/adapters/http/offline-knowledge.cjs
+index 41b34eb..498ad7e 100644
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -96,7 +96,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+   return index;
+  }
+  async function directoryCatalog(req,options={}){return {cat:'other',docs:require('../../domain/knowledge/source-directory.cjs').directoryPage(await directoryIndex(req),options)};}
+- async function configurationFiles(req,query){if(approvedOnly){const {resources}=await internalRequest('/internal/config-index','config-files');return require('../../domain/knowledge/metadata-query.cjs').rankMetadata(query,resources.map(r=>({...r,url:'/v2/config-files/'+r.locationId,downloadUrl:'/v2/config-files/'+r.locationId+'?download=1',available:true})));}const index=await directoryIndex(req);return require('../../domain/knowledge/metadata-query.cjs').rankMetadata(query,index.files.filter(r=>['模组配置文件','2026年新调试  LED模组配置文件'].includes(r.folders?.[0])));}
++ async function configurationFiles(req,query){if(approvedOnly){const {resources}=await internalRequest('/internal/config-index','config-files');const rows=resources.map(r=>({...r,fileId:'configuration:'+r.locationId,url:'/v2/config-files/'+r.locationId,downloadUrl:'/v2/config-files/'+r.locationId+'?download=1',available:true,configuration2026:r.folders?.[0]==='2026新调试配置'}));return query.trim()?require('../../domain/knowledge/metadata-query.cjs').rankMetadata(query,rows,{limit:rows.length}):rows;}const index=await directoryIndex(req);return require('../../domain/knowledge/metadata-query.cjs').rankMetadata(query,index.files.filter(r=>['模组配置文件','2026年新调试  LED模组配置文件'].includes(r.folders?.[0])));}
+  async function permittedResourceId(id,req){
+   const info=await request('/resource-info?id='+encodeURIComponent(id));
+   if(typeof info.isVideo!=='boolean'||!Array.isArray(info.resources))throw Error('resource-access-metadata-unavailable');
+diff --git a/v2/adapters/http/server.cjs b/v2/adapters/http/server.cjs
+index 85c9027..c41315c 100644
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -83,8 +83,13 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+   if(route==='/v2/curated-search/status'){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}try{curatedSearch();send(200,{enabled:true,scope:['spec','manual','video','firmware','module-config']});}catch{send(200,{enabled:false});}return;}
+   if(route==='/v2/configuration-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'||!offlineKnowledge?.configurationFiles){send(403,{error:'local-only'});return;}
+-   const q=(new URL(req.url,'http://localhost').searchParams.get('q')||'').trim();if(!q||q.length>240){send(400,{error:'invalid-query'});return;}
+-   const entries=await offlineKnowledge.configurationFiles(req,q);send(200,{directoryPage:{id:'root',label:'模组配置文件',query:q,sourceTotal:entries.length,entries,pagination:{nextOffset:null}}});return;
++   const params=new URL(req.url,'http://localhost').searchParams,q=(params.get('q')||'').trim(),directory=params.get('directory')||'root',offset=Number(params.get('offset')||0);
++   if(q.length>240||!Number.isSafeInteger(offset)||offset<0||!/^(root|[a-f0-9]{24})$/.test(directory)){send(400,{error:'invalid-query'});return;}
++   const entries=await offlineKnowledge.configurationFiles(req,q);
++   if(q){send(200,{directoryPage:{id:'root',label:'模组配置文件',query:q,sourceTotal:entries.length,entries:entries.slice(offset,offset+50).map(r=>({...r,type:'file'})),pagination:{total:entries.length,nextOffset:offset+50<entries.length?offset+50:null}}});return;}
++   const catalog=require('../../domain/knowledge/source-directory.cjs'),index=catalog.createDirectoryIndex(entries);
++   if(!index.nodes.has(directory)){send(404,{error:'directory-not-found'});return;}
++   const result=catalog.directoryPage(index,{directory,offset});result.directoryPage.sourceTotal=entries.length;result.directoryPage.label='模组配置文件';send(200,result);return;
+   }
+   if(route==='/v2/curated-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}
+diff --git a/v2/domain/knowledge/resource-service.cjs b/v2/domain/knowledge/resource-service.cjs
+index 8fbf80d..38d264b 100644
+--- a/v2/domain/knowledge/resource-service.cjs
++++ b/v2/domain/knowledge/resource-service.cjs
+@@ -12,16 +12,11 @@ function createResourceService(knowledge,evidence){
+   const items=rows.map(row=>({...row,sourceReference:{...evidence.chips.sourceReference,page:row.page,sourceVersion:evidence.chips.data.sourceVersion},verificationStatus:'source-index-literal-not-device-compatibility'}));
+   const families=items.map(row=>Object.entries(evidence.display.data.firmwareFamilies).find(([,f])=>f.label===row.firmwareType)?.[0]||null),family=items.length===1?families[0]:null;
+   const dedicated=items.some(row=>evidence.display.data.dedicatedMarkers.some(m=>row.firmwareType.includes(m))),decoder=items.some(row=>/译码|解码|借用/.test(row.smartSelection+' '+row.firmwareType));
+-  const requested=providedDevices.map(d=>modelId(d.modelId));const files=[];
+-  if(family&&!dedicated&&!decoder)for(const p of products){if(requested.length&&!requested.includes(p.modelId))continue;
+-   const tails=evidence.suffixes.data.rows.filter(r=>r.models.some(m=>modelId(m)===p.modelId));
+-   for(const f of p.firmware||[])if(f.status==='uploaded'&&f.publicUrl&&modelId(f.card)===p.modelId&&tails.some(r=>r.suffix===f.hwFromFile)&&(family==='common'?f.commonCode===true:f.series===family))files.push({...f,modelId:p.modelId,compatibilityConfirmed:false});
+-  }
++  const requested=providedDevices.map(d=>modelId(d.modelId));let files=[];
+   const primary=items[0],facts=[{label:'智能设置',text:primary.smartSelection||'源表未记录，需核实'},{label:'资料固件类别',text:items.length===1?(primary.firmwareType||'源表未记录，需核实'):'查询命中多个不同记录，请确认完整芯片型号'}];
++  const guidance=require('./chip-firmware-guidance.cjs').guidance({family,dedicated,decoder,requested,evidence,files:allFiles});
++  facts.push(...guidance.facts);files=guidance.files;
+   const known=new Set(items.flatMap(i=>i.models)),prefix=primary.models[0]?.match(/^[A-Z]+/i)?.[0],nearby=evidence.chips.data.rows.filter(row=>row.firmwareType&&row.models.some(m=>m.match(/^[A-Z]+/i)?.[0]===prefix)).flatMap(row=>row.models.filter(m=>!known.has(m)).map(chip=>({chip,firmware:row.firmwareType,sourceReference:{...evidence.chips.sourceReference,page:row.page},relation:'navigation-only-not-compatibility'}))).slice(0,12);
+-  for(const requestedModel of requested){for(const row of evidence.suffixes.data.rows.filter(r=>r.models.some(m=>modelId(m)===requestedModel)))facts.push({label:requestedModel+' 型号尾位（'+row.variant+'）',text:row.suffix,sourceReference:evidence.suffixes.sourceReference});
+-   const group=evidence.display.data.asyncFamilies.find(g=>g.models.some(m=>modelId(m)===requestedModel)),mapping=family&&group?.mappings[family];if(mapping)facts.push({label:requestedModel+' 异步固件源关系',text:mapping.status!=='confirmed'?'该系列尚未核实':mapping.deliveryVerified===false?'仅有系列版本字段依据，尚未确认交付原文件':mapping.suffix+'（需继续核对实际原文件与硬件条件）',sourceReference:evidence.display.sourceReference});
+-  }
+   return {kind:'chips',items,family,files,sourceReferences:[evidence.chips.sourceReference,evidence.display.sourceReference,evidence.suffixes.sourceReference],view:{title:primary.models.join('/')+' · 芯片资料',primary:{chip:primary.models.join(' / '),facts,firmwareFamily:family,isDecoder:decoder},hits:items.map(row=>({chip:row.models.join('/'),firmwareLabel:row.firmwareType,sourceReference:row.sourceReference})),hitCount:items.length,nearby,firmwareItems:files.map(f=>({name:f.file,clean:f.card+' · '+f.file,url:f.publicUrl,conditions:{hardware:f.hwFromFile,variant:f.variant,series:f.series},sourceReference:f.sourceReference})),firmwareSeriesLabel:family?evidence.display.data.firmwareFamilies[family].label:'',source:'芯片选型 '+evidence.chips.data.sourceVersion}};
+  }
+  function query(topic,{providedDevices}={}){
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 94cd06d..e8dff82 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1344,13 +1344,14 @@ function renderChipFirmwareCard(cf) {
+   const fwItems = Array.isArray(cf.firmwareItems) ? cf.firmwareItems : [];
+   if (fwItems.length) {
+     h += `<details class="chip-fw-dl">`;
+-    h += `<summary>📥 下载对应固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 款接收卡）</summary>`;
++    h += `<summary>📥 接收卡固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 份固件）</summary>`;
+     h += `<p class="chip-fw-dl-tip">固件必须按手上接收卡的型号刷（看卡上丝印，如 R708），刷错会黑屏/花屏；列表里没有你的卡型、或拿不准，直接把接收卡型号发我。</p>`;
+     h += `<div class="search-docs"><div class="doc-group doc-group-firmware">`;
+-    fwItems.forEach((it) => {
+-      const label = escHtml(it.clean || it.btn || it.name);
+-      h += `<a class="doc-link fw-link" href="${escHtml(it.url)}" target="_blank" rel="noreferrer" download="${escHtml(it.name || "")}" title="${escHtml(it.name || it.clean || "")}">${label}</a>`;
+-    });
++    for(const it of [...fwItems].sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-Hans-CN'))){
++      const name=String(it.name||''),parts=name.split('_FPGA_'),card=parts[0].replaceAll('_','/'),version=parts[1]?.match(/^V[0-9.]+/)?.[0]||'';
++      const label=card+(version?' · '+version.replace(/\.$/,''):'');
++      h+=`<a class="doc-link fw-link" href="${escHtml(it.url)}" title="${escHtml(name)}" target="_blank" rel="noreferrer" download="${escHtml(name)}">${escHtml(label)}</a>`;
++    }
+     h += `</div></div></details>`;
+   }
+   const others = (cf.hits || []).slice(1);
+@@ -1847,7 +1848,7 @@ const wikiModelKey=s=>String(s||'').replace(/^HD[-_ ]?/i,'').replace(/\s+/g,'').
+ function wikiModelCompare(a,b,category){
+  const x=wikiModelKey(a),y=wikiModelKey(b),numeric=(u,v)=>u.localeCompare(v,'zh-Hans-CN',{numeric:true});
+  if(category==='receiver') {const rank=m=>{const i=receiverOrder.indexOf(m);return i<0?receiverOrder.length:i;};return rank(x)-rank(y)||numeric(x,y);}
+- if(category==='player') {const rank=m=>m.startsWith('A')?0:m.startsWith('H')?1:2;return rank(x)-rank(y)||numeric(x,y);}
++ if(category==='player')return numeric(x,y);
+  const xp=wikiCascadePorts[x],yp=wikiCascadePorts[y];
+  if(Number.isInteger(xp)&&Number.isInteger(yp))return xp-yp||numeric(x,y);
+  if(Number.isInteger(xp)!==Number.isInteger(yp))return Number.isInteger(xp)?-1:1;
+@@ -1965,7 +1966,7 @@ function docFlatRow(model, items, cat, deviceName) {
+   const buckets={zh:[],en:[],neutral:[]};
+   for(const item of present){const language=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':language==='en'||language.includes('英文')||/specification|manual|instruction/i.test(item.name||'')&&!/[\u4e00-\u9fff]/.test(item.name||'')?'en':'zh';buckets[key].push(item);}
+   for(const [key,title] of [['neutral','中性版'],['zh','中文'],['en','英文']]){
+-    if(key==='neutral'&&!buckets[key].length)continue;
++    if(!buckets[key].length)continue;
+     const cell=document.createElement('span');cell.className='doc-pair-cell';cell.dataset.language=key;
+     const heading=document.createElement('small');heading.className='doc-column-title';heading.textContent=title;cell.appendChild(heading);
+     for(const item of buckets[key])cell.appendChild(fileButton(item));
+@@ -2063,22 +2064,12 @@ async function mergedConfigurationEntries(sources,{manufacturerLevel=false,year2
+  return [...directories.sort((a,b)=>a.label.localeCompare(b.label,'zh-Hans-CN')),...[...files.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hans-CN',{numeric:true}))];
+ }
+ async function moduleConfigurationPage(options={}) {
+- if((options.query||'').trim()&&(!options.directory||options.directory==='root')){const check=await fetch('/v2/curated-search/status').then(r=>r.ok?r.json():null).catch(()=>null);if(check?.enabled){const response=await fetch('/v2/configuration-search?q='+encodeURIComponent(options.query));if(!response.ok)throw Error('配置文件检索暂不可用');return (await response.json()).directoryPage;}}
+- const directory=options.directory||'root',query=options.query||'';
+- const root=await fetchDirectoryPage({directory:'root'});
+- const roots=root.directoryPage.entries.filter(e=>e.type==='directory'&&moduleConfigurationFolders.includes(e.label));
+- const node=moduleConfigurationNodes.get(directory);let entries=await mergedConfigurationEntries(directory==='root'?roots.map(e=>({id:e.id,is2026:e.label===moduleConfigurationFolders[1]})):node?.sources||[{id:directory,is2026:false}],{manufacturerLevel:directory==='root',year2026:node?.year2026||[]});
+- if(query.trim()) {
+-  entries=[];let offset=0;
+-  do {
+-   const page=(await fetchDirectoryPage({directory:'root',offset,query,sort:options.sort||'name'})).directoryPage;
+-   entries.push(...page.entries.filter(e=>e.type==='file'&&moduleConfigurationFolders.includes(e.folders?.[0])||e.type==='directory'&&moduleConfigurationFolders.includes(e.label)).map(e=>({...e,configuration2026:e.folders?.[0]===moduleConfigurationFolders[1]})));
+-   offset=page.pagination.nextOffset;
+-  } while(offset!==null);
+- }
+- const offset=options.offset||0;
+- return {...root.directoryPage,id:directory,sourceTotal:roots.reduce((n,e)=>n+e.count,0),label:'模组配置文件',breadcrumb:[{id:'root',label:'模组配置文件'}],query,sort:options.sort||'name',entries:entries.slice(offset,offset+50),pagination:{offset,limit:50,total:entries.length,returned:entries.slice(offset,offset+50).length,nextOffset:offset+50<entries.length?offset+50:null}};
++ const params=new URLSearchParams({q:options.query||'',directory:options.directory||'root',offset:String(options.offset||0)});
++ const response=await fetch('/v2/configuration-search?'+params);
++ if(!response.ok)throw Error('配置文件检索暂不可用');
++ return (await response.json()).directoryPage;
+ }
++
+ async function renderModuleConfigurations(query='') {
+  const requestId=++quickRequestId,key=String(query||'').trim(),cached=moduleConfigurationViews.get(key);searchResults.style.display='block';
+  if(cached){searchResults.replaceChildren(...cached.nodes);if(Date.now()-cached.time<30000)return;}
+@@ -2113,8 +2104,8 @@ async function renderModuleConfigurations(query='') {
+ }
+ 
+ const officialSpecHierarchy=[
+- ['LED控制系统',['接收卡']],
+- ['异步全彩',['双模多媒体播放器','异步全彩播放盒','异步全彩控制卡','海报拼接屏控制卡']],
++ ['R、K系列接收卡',['接收卡']],
++ ['A、B、C、D、H系列异步卡',['双模多媒体播放器','异步全彩播放盒','异步全彩控制卡','海报拼接屏控制卡']],
+  ['视频处理',['同步控制系统','视频处理器','视频拼接处理器','多媒体服务器','分布式系统','智能中控','视频矩阵']],
+  ['单色控制卡',['W系列','E系列','U系列']],
+  ['LCD控制系统',['高性能终端主板','真4K终端主板','智慧终端主板','1080P数字标牌主板','智慧终端播放盒','小灰云星空']],
+@@ -2130,14 +2121,14 @@ function renderOfficialSpecifications(docs,query,states,cat='spec'){
+  const wrap=document.createElement('div');wrap.className='vid-catalog official-spec-hierarchy';searchResults.append(wrap);
+  let shown=0;
+  for(const [main,children] of officialSpecHierarchy){const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??!!term;
+-  for(const child of children){const models=subset.filter(r=>r.category===child);if(!models.length)continue;const sub=docCatSummary(officialCategoryNames[child]||child,models.length+' 款');sub.det.className='doc-cat-group official-sub';sub.body.className='doc-cat-group-body';sub.det.dataset.docState='official-sub:'+child;sub.det.open=states.get(sub.det.dataset.docState)??!!term;
+-   const sorted=models.slice().sort((a,b)=>wikiModelCompare(a.model,b.model,child==='接收卡'?'receiver':child.includes('播放')?'player':''));
++  for(const child of (main==='A、B、C、D、H系列异步卡'?['async-all']:children)){const models=child==='async-all'?subset:subset.filter(r=>r.category===child);if(!models.length)continue;const sub=(child==='接收卡'||main==='A、B、C、D、H系列异步卡')?mainNode:docCatSummary(officialCategoryNames[child]||child,models.length+' 款');if(sub!==mainNode){sub.det.className='doc-cat-group official-sub';sub.body.className='doc-cat-group-body';sub.det.dataset.docState='official-sub:'+child;sub.det.open=states.get(sub.det.dataset.docState)??!!term;}
++   const sorted=models.slice().sort((a,b)=>wikiModelCompare(a.model,b.model,child==='接收卡'?'receiver':child==='async-all'||child.includes('播放')?'player':''));
+    for(const item of sorted){shown++;const p=byModel.get(wikiModelKey(item.model));if(p?.items?.length){sub.body.append(docFlatRow(p.model,p.items,'spec',p.deviceName));continue;}
+     const row=document.createElement('div');row.className='doc-flat';const name=document.createElement('span');name.className='doc-flat-name';name.textContent=item.model;const notice=document.createElement('span');notice.className='official-spec-missing';const key=wikiModelKey(item.model),url=officialSpecFallback[key];notice.textContent=url?(key==='HT01'||key==='HT02'?'官网提供产品手册，本库待关联':'官网提供相关资料，本库待关联'):'网站资料目录尚未关联规格书';row.append(name,notice);
+     if(url){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='查看官网产品及下载';row.append(a);}sub.body.append(row);
+    }
+    // Native details opens only on click, touch, or keyboard activation.
+-   mainNode.body.append(sub.det);
++   if(sub.det!==mainNode.det)mainNode.body.append(sub.det);
+   }
+   wrap.append(mainNode.det);
+  }
+diff --git a/v2/frontend/chip-browser.js b/v2/frontend/chip-browser.js
+index bd70b66..0588e71 100644
+--- a/v2/frontend/chip-browser.js
++++ b/v2/frontend/chip-browser.js
+@@ -24,7 +24,7 @@ window.ChipBrowser=(()=>{
+     for(const g of groups){const b=make('button',g.name);b.type='button';b.setAttribute('aria-pressed',String(active===g.name));b.onclick=()=>{active=g.name;render()};nav.append(b);const o=make('option',g.name);o.value=g.name;select.append(o);}
+     if(!groups.some(g=>g.name===active))active=groups[0]?.name||'';select.value=active;
+     const visible=q?groups:groups.filter(g=>g.name===active);
+-    for(const g of visible){if(q)grid.append(make('strong',g.name));for(const item of g.items.filter(i=>!q||key(i.label+' '+i.records.flatMap(r=>r.models).join(' ')).includes(q))){const b=make('button',item.label);b.type='button';b.className='chip-option';b.setAttribute('aria-pressed','false');b.onclick=()=>show(item,b);grid.append(b);}}
++    for(const g of visible){if(q)grid.append(make('strong',g.name));for(const item of g.items.filter(i=>!q||key(i.label+' '+i.records.flatMap(r=>r.models).join(' ')).includes(q))){const b=make('button',item.label);b.type='button';b.className='chip-option';b.title=item.label;b.setAttribute('aria-pressed','false');b.onclick=()=>show(item,b);grid.append(b);}}
+     if(!grid.childNodes.length)grid.append(make('p','未找到对应芯片，请核对完整型号。'));
+    }
+    search.oninput=()=>{shell.open=true;render()};select.onchange=()=>{active=select.value;render()};render();
+diff --git a/v2/frontend/styles.css b/v2/frontend/styles.css
+index 01cd1ab..1d59c81 100644
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -792,6 +792,7 @@ body[data-view="quick"] #quickCats .qc-btn.active{background:#e5f2e9;color:#3876
+ .chip-fw-dl-tip { font-size: 12px; color: #6b7280; line-height: 1.55; margin: 7px 0 8px; }
+ .chip-fw-dl .search-docs { margin-top: 0; padding-top: 8px; border-top: 0; }
+ .chip-fw-dl .fw-link { margin: 0 6px 6px 0; }
++.chip-fw-dl .doc-group-firmware{display:flex;flex-wrap:wrap;gap:6px}.chip-fw-dl .fw-link{margin:0;padding:5px 10px;font-size:12px;border-radius:999px}
+ 
+ /* 响应式：小屏幕上下排列 */
+ @media (max-width: 900px) {
+@@ -1584,15 +1585,17 @@ body[data-view="ai"] .ai-messages{flex:1 1 0;min-height:0;overflow-y:auto;overfl
+ .chip-browser>summary{font-weight:600;color:var(--text);padding:12px;cursor:pointer}
+ .chip-browser-body{padding:12px;border-top:1px solid var(--border)}
+ .chip-browser-body>input{box-sizing:border-box;width:100%;padding:10px 12px;margin-bottom:12px;border:1px solid var(--border);border-radius:8px;font:inherit}
+-.chip-browser-layout{display:grid;grid-template-columns:135px minmax(0,1fr);gap:14px}
+-.chip-series{display:flex;flex-direction:column;gap:6px}
++.chip-browser-layout{display:grid;grid-template-columns:100px minmax(0,1fr);gap:10px}
++.chip-series{display:flex;flex-direction:column;gap:5px}
+ .chip-series button,.chip-option,.chip-detail button,.chip-series-select{padding:9px 12px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font:inherit;cursor:pointer;text-align:left}
+ .chip-series button[aria-pressed=true],.chip-option[aria-pressed=true]{background:#e8f7fb;border-color:var(--accent)}
+-.chip-content{min-width:0}.chip-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;max-height:340px;overflow:auto;padding:2px}
+-.chip-grid>strong{grid-column:1/-1}.chip-option{overflow-wrap:anywhere}
++.chip-series button,.chip-option{padding:5px 8px;font-size:13px;line-height:1.4;border-radius:5px;transition:background-color .15s ease,border-color .15s ease,color .15s ease}
++.chip-series button:hover,.chip-option:hover,.chip-series button:focus-visible,.chip-option:focus-visible{color:#197ca8;background:var(--file-hover);border-color:#acd5e6}
++.chip-content{min-width:0}.chip-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:5px;max-height:340px;overflow:auto;padding:2px}
++.chip-grid>strong{grid-column:1/-1}.chip-option{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .chip-detail:not(:empty){margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:8px}.chip-detail p{margin:8px 0}.chip-detail small{display:block;margin:8px 0;color:var(--text-muted)}
+ .chip-series-select{display:none;width:100%;margin-bottom:10px}
+-@media(max-width:640px){.chip-browser-layout{grid-template-columns:minmax(0,1fr)}.chip-series{display:none}.chip-series-select{display:block}.chip-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}}
++@media(max-width:640px){.chip-browser-layout{grid-template-columns:minmax(0,1fr)}.chip-series{display:none}.chip-series-select{display:block}.chip-grid{grid-template-columns:repeat(auto-fill,minmax(100px,1fr))}}
+ .v2-source-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.v2-source-title>strong{min-width:0;overflow-wrap:anywhere}.v2-source-title>.pr-actions{flex-shrink:0;display:flex;gap:8px}.v2-source-title>.pr-actions svg{width:18px;height:18px}
+ 
+ /* Ordering choices update the same result panel. */
+diff --git a/v2/resource-index/server.py b/v2/resource-index/server.py
+index 479fa4e..15d18a8 100644
+--- a/v2/resource-index/server.py
++++ b/v2/resource-index/server.py
+@@ -34,13 +34,14 @@ def create_server(work, port=0):
+         if isolated and len(approved)!=697:raise ValueError('Approved SQL index must contain 697 file identities')
+     finally:check.close()
+     token=os.environ.get('XHJ_INTERNAL_TOKEN','')
+-    legacy_file=os.environ.get('XHJ_CONFIG_LEGACY_DB','')
++    config_root=Path('G:/公网发布资料/模组配置文件').resolve()
++    config_file=work/'module-configs.db'
+     def configuration_rows():
+-        if not token or not legacy_file:return []
+-        db=sqlite3.connect(Path(legacy_file).resolve().as_uri()+'?mode=ro',uri=True);db.row_factory=sqlite3.Row
++        if not token or not config_file.is_file():return []
++        db=sqlite3.connect(config_file.resolve().as_uri()+'?mode=ro',uri=True);db.row_factory=sqlite3.Row
+         try:
+-            rows=db.execute("SELECT * FROM locations WHERE state='present' AND lower(extension)='.ssr' AND (path LIKE ? OR path LIKE ?)",('G:\\模组配置文件\\%','G:\\2026年新调试  LED模组配置文件\\%')).fetchall()
+-            return [dict(r) for r in rows if any(Path(r['path']).resolve().is_relative_to(Path(p).resolve()) for p in ('G:/模组配置文件','G:/2026年新调试  LED模组配置文件'))]
++            rows=db.execute('SELECT * FROM configurations ORDER BY path').fetchall()
++            return [dict(r) for r in rows if Path(r['path']).resolve().is_relative_to(config_root) and r['name'].lower().endswith(('.ssr','.ssx'))]
+         finally:db.close()
+     class Handler(BaseHTTPRequestHandler):
+         def log_message(self,*args):pass
+@@ -72,7 +73,7 @@ def create_server(work, port=0):
+                     if purpose!='config-files':return self.send(403,{'error':'forbidden'})
+                     rows=configuration_rows()
+                     if u.path=='/internal/config-index':
+-                        return self.send(200,{'resources':[{'name':r['name'],'locationId':r['id'],'sha256':r['sha256'],'sizeBytes':r['bytes'],'folders':list(Path(r['path']).parts[1:-1]),'sourceDrive':'G:','availabilityState':'present'} for r in rows]})
++                        return self.send(200,{'resources':[{'name':r['name'],'locationId':r['id'],'sha256':r['sha256'],'sizeBytes':r['bytes'],'folders':list(Path(r['path']).relative_to(config_root).parts[:-1]),'sourceDrive':'G:','availabilityState':'present'} for r in rows]})
+                     if u.path=='/internal/config-file':
+                         row=next((r for r in rows if str(r['id'])==first('id')),None)
+                         if not row:return self.send(404,{'error':'resource-not-found'})
