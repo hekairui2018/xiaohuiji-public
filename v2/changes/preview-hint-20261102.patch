@@ -1,0 +1,57 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 889d3e2..fc31d64 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1932,6 +1932,18 @@ function docFileActions(item, isFw = false) {
+   }
+   return actions;
+ }
++const catalogPreviewHint=document.createElement('small');
++catalogPreviewHint.className='catalog-preview-hint';catalogPreviewHint.id='catalogPreviewHint';catalogPreviewHint.textContent='停留预览，点击固定';catalogPreviewHint.hidden=true;
++document.querySelector('.search-box').after(catalogPreviewHint);
++let catalogHintFrame=0;
++function updateCatalogPreviewHint(){
++ cancelAnimationFrame(catalogHintFrame);
++ catalogHintFrame=requestAnimationFrame(()=>{
++  catalogPreviewHint.hidden=!Array.from(searchResults.querySelectorAll('.spec-workspace,.firmware-browser')).some(node=>{for(let parent=node.parentElement;parent&&parent!==searchResults;parent=parent.parentElement)if(parent.tagName==='DETAILS'&&!parent.open)return false;return node.getClientRects().length>0;});
++ });
++}
++searchResults.addEventListener('toggle',updateCatalogPreviewHint,true);
++new MutationObserver(updateCatalogPreviewHint).observe(searchResults,{childList:true});
+ function docCatSummary(text, sizeText) {
+   const det = document.createElement("details");
+   det.className = "vid-item doc-cat-item";
+@@ -2130,7 +2142,7 @@ function specificationWorkspace(models,byModel){
+  close.onclick=()=>{cancel();const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;title.textContent='请选择左侧型号';files.replaceChildren();close.hidden=true;previous?.focus({preventScroll:true});};
+  panel.onpointerenter=cancel;panel.onkeydown=event=>{if(event.key==='Escape')close.click();};header.append(title,close);panel.append(header,files);
+  let first;
+- for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.title='停留预览；点击固定 '+model.model+' 规格书';button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
++ for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
+  layout.append(navigation,panel);if(first)choose(first.button,first.model,false);return layout;
+ }
+ function placeCatalogExpand(button,owner){
+@@ -2217,13 +2229,12 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
+       panel.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection(true);});
+       header.append(title,close);panel.append(header,files);
+       matches.forEach(product=>{
+-        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.title='查看 '+product.model+' 固件';button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-pressed','false');
++        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-pressed','false');
+         button.addEventListener('pointerenter',event=>{
+           cancelPreview();if(event.pointerType==='mouse'&&!pinned)hoverTimer=setTimeout(()=>showFiles(button,product),200);
+         });
+         button.addEventListener('pointerleave',cancelPreview);
+         button.onclick=()=>showFiles(button,product,true);
+-        button.title='停留预览；点击固定 '+product.model+' 固件';
+         models.append(button);
+       });
+       pack.body.append(models,panel);wrap.append(pack.det);
+diff --git a/v2/frontend/styles.css b/v2/frontend/styles.css
+index 6f9224a..08cf7df 100644
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -1647,3 +1647,5 @@ body[data-view="quick"] #searchResults .source-tree-viewport{flex:1 1 auto;min-h
+ .quick-cats .catalog-expand-action{margin-left:auto;padding:4px 9px;font-size:12px;line-height:1.5;border:1px solid #d1e6ed;border-radius:6px;background:#f7fcfd;color:var(--accent);white-space:nowrap;cursor:pointer;flex:0 0 auto}
+ .quick-cats .catalog-expand-action:hover{background:var(--accent-soft)}
+ @media(max-width:640px){.quick-cats .catalog-expand-action{margin-left:0}}
++.catalog-preview-hint{display:block;color:var(--text-muted);font-size:12px;line-height:1.5;margin:5px 2px 0}
++.catalog-preview-hint[hidden]{display:none}
