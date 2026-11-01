@@ -1,0 +1,14 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 343aff1..94cd06d 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1964,7 +1964,8 @@ function docFlatRow(model, items, cat, deviceName) {
+   const line = document.createElement('span'); line.className = 'doc-document-pair doc-three-columns';
+   const buckets={zh:[],en:[],neutral:[]};
+   for(const item of present){const language=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':language==='en'||language.includes('英文')||/specification|manual|instruction/i.test(item.name||'')&&!/[\u4e00-\u9fff]/.test(item.name||'')?'en':'zh';buckets[key].push(item);}
+-  for(const [key,title] of [['zh','中文'],['en','英文'],['neutral','中性版']]){
++  for(const [key,title] of [['neutral','中性版'],['zh','中文'],['en','英文']]){
++    if(key==='neutral'&&!buckets[key].length)continue;
+     const cell=document.createElement('span');cell.className='doc-pair-cell';cell.dataset.language=key;
+     const heading=document.createElement('small');heading.className='doc-column-title';heading.textContent=title;cell.appendChild(heading);
+     for(const item of buckets[key])cell.appendChild(fileButton(item));
