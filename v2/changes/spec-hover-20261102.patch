@@ -1,0 +1,15 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 75a22dd..889d3e2 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -2130,8 +2130,8 @@ function specificationWorkspace(models,byModel){
+  close.onclick=()=>{cancel();const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;title.textContent='请选择左侧型号';files.replaceChildren();close.hidden=true;previous?.focus({preventScroll:true});};
+  panel.onpointerenter=cancel;panel.onkeydown=event=>{if(event.key==='Escape')close.click();};header.append(title,close);panel.append(header,files);
+  let first;
+- for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.title='查看 '+model.model+' 规格书';button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
+- layout.append(navigation,panel);if(first)choose(first.button,first.model,true);return layout;
++ for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.title='停留预览；点击固定 '+model.model+' 规格书';button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
++ layout.append(navigation,panel);if(first)choose(first.button,first.model,false);return layout;
+ }
+ function placeCatalogExpand(button,owner){
+  document.getElementById('catalogExpandAction')?.remove();
