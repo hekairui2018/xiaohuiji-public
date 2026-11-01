@@ -1,13 +1,18 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {modelId}=require('../../domain/identity/model-id.cjs');
-function loadKnowledge(dir=path.resolve(__dirname,'../../data/knowledge'),{manifestFile='active-manifest.json'}={}){
+function loadKnowledge(dir=path.resolve(__dirname,'../../data/knowledge'),{manifestFile='active-manifest.json',firmwareManifestFile=path.resolve(__dirname,'../../../tmp/v2-offline-runtime/curated-local-firmware.json')}={}){
  if(!['active-manifest.json','candidate-manifest.json'].includes(manifestFile))throw Error('Invalid knowledge manifest name');
  const manifest=JSON.parse(fs.readFileSync(path.join(dir,manifestFile),'utf8'));
  if(!/^knowledge-[a-f0-9]{16}$/.test(manifest.versionId))throw Error('Invalid knowledge version');
  const bytes=fs.readFileSync(path.join(dir,manifest.versionId,'index.json'));
  if(crypto.createHash('sha256').update(bytes).digest('hex')!==manifest.sha256)throw Error('Knowledge checksum mismatch');
  const raw=JSON.parse(bytes);if(raw.schemaVersion!=='2.0')throw Error('Invalid knowledge schema');
+ const {createFirmwareScope,projectProductFirmware}=require('../../domain/knowledge/firmware-scope.cjs');
+ const firmwareScope=createFirmwareScope({manifestFile:firmwareManifestFile});
+ // A read-only projection migrates old compiled firmware without rebuilding
+ // the historical cases, FAQ, product parameters or evidence index.
+ for(const product of raw.products)product.firmware=projectProductFirmware(product.modelId,product.firmware,firmwareScope);
  const byModel=new Map(),aliases=new Map();
  for(const p of raw.products){if(!p.modelId)continue;if(byModel.has(p.modelId))throw Error('Duplicate knowledge model');byModel.set(p.modelId,p);
   for(const alias of p.aliases){const key=modelId(alias);if(!key)continue;const owners=aliases.get(key)||new Set();owners.add(p.modelId);aliases.set(key,owners);}}
@@ -31,6 +36,7 @@ function loadKnowledge(dir=path.resolve(__dirname,'../../data/knowledge'),{manif
   }
  }
  return Object.freeze({version:manifest.versionId,counts:Object.freeze(manifest.counts),
+  formalFirmware:()=>clone(firmwareScope.dialogueItems()),
   findProducts(value){const id=modelId(value),owners=aliases.get(id);return clone(byModel.has(id)?[byModel.get(id)]:owners?[...owners].map(key=>byModel.get(key)):[]);},
   evidenceDocuments:()=>clone(evidence),
   evidenceCaseReviews:()=>clone(reviews),

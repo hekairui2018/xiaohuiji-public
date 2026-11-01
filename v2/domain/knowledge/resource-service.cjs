@@ -6,7 +6,7 @@ const {identifyDocument}=require('./document-catalog.cjs');
 const key=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 function createResourceService(knowledge,evidence){
  const products=knowledge?.products()||[],assets=knowledge?.assets()||{videos:[],software:[],manuals:[],softwareCatalog:[]},media=createMediaCatalog(assets);
- const allFiles=products.flatMap(p=>(p.firmware||[]).filter(f=>f.status==='uploaded'&&f.publicUrl).map(f=>({...f,modelId:p.modelId,compatibilityConfirmed:false})));
+ const allFiles=knowledge?.formalFirmware?knowledge.formalFirmware().map(f=>({...f,modelId:modelId(f.card),compatibilityConfirmed:false})):products.flatMap(p=>(p.firmware||[]).filter(f=>f.status==='uploaded'&&f.publicUrl&&!/aliyuncs\.com/i.test(f.publicUrl)).map(f=>({...f,modelId:p.modelId,compatibilityConfirmed:false})));
  function chipLookup(text,providedDevices=[]){
   const tokens=(String(text).match(/[A-Z]*\d+[A-Z0-9_-]*(?:\([A-Z0-9]+\))?/gi)||[]).map(key),exact=evidence.chips.data.rows.filter(row=>[...row.models,...(row.numericAliases||[])].some(name=>key(name)===key(text))),rows=exact.length?exact:evidence.chips.data.rows.filter(row=>[...row.models,...(row.numericAliases||[])].some(name=>tokens.includes(key(name))));if(!tokens.length||!rows.length)return null;
   const items=rows.map(row=>({...row,sourceReference:{...evidence.chips.sourceReference,page:row.page,sourceVersion:evidence.chips.data.sourceVersion},verificationStatus:'source-index-literal-not-device-compatibility'}));
@@ -27,6 +27,9 @@ function createResourceService(knowledge,evidence){
  function query(topic,{providedDevices}={}){
   if(!topic)return null;const text=String(topic),devices=providedDevices||extractKnownModels(text,{findProducts:id=>knowledge?.findProducts(id)||[]}).map(modelId=>({modelId}));
   if(devices.some(d=>d.revisionId)&&/固件|芯片|规格书|说明书|视频|\.bin\b/i.test(text))return {kind:'firmware',status:'needs_input',items:[],reason:'hardware-revision-not-established-in-source'};
+  // Firmware-library models are independent from the website's product list.
+  const firmwareIds=new Set(allFiles.flatMap(f=>(f.models||[f.card]).map(modelId)));
+  if(/固件|firmware|FPGA|\.bin\b/i.test(text))for(const token of require('../identity/extract-models.cjs').extractModelTokens(text)){const id=modelId(token);if(firmwareIds.has(id)&&!devices.some(d=>modelId(d.modelId)===id))devices.push({modelId:id});}
   const modelIds=devices.map(d=>modelId(d.modelId)),namedFiles=allFiles.filter(f=>text.toLowerCase().includes(f.file.toLowerCase()));
   if(namedFiles.length){const matched=namedFiles.filter(f=>!modelIds.length||modelIds.includes(f.modelId));return {kind:'firmware',status:matched.length?'found':'conflict',items:matched,reason:matched.length?null:'named-firmware-conflicts-with-requested-model'};}
   if(/视频|教程|演示/.test(text)){
@@ -37,9 +40,9 @@ function createResourceService(knowledge,evidence){
    return {kind:'videos',status:items.length?'found':'needs_input',items,reason:items.length?null:'no-source-linked-video-for-this-topic-or-model'};
   }
   const chip=devices.length&&!/芯片|固件|智能设置/.test(text)?null:chipLookup(text,devices);if(chip)return chip;
-  if(/固件|\.bin\b/i.test(text)){
+  if(/固件|firmware|FPGA|\.bin\b/i.test(text)){
    if(devices.some(d=>d.revisionId))return {kind:'firmware',status:'needs_input',items:[],reason:'hardware-revision-not-established-in-source'};
-   const items=allFiles.filter(f=>modelIds.includes(f.modelId));if(modelIds.length)return {kind:'firmware',status:items.length?'found':'needs_input',items,reason:items.length?null:'no-original-file-established-for-this-model'};
+   const items=allFiles.filter(f=>modelIds.includes(f.modelId));if(modelIds.length)return {kind:'firmware',status:items.length?'found':'not-found',items,reason:items.length?null:'no-curated-firmware-for-model',...(!items.length?{message:'该型号在当前正式固件清单中无对应固件。'}:{})};
   }
   if(/规格书|说明书|手册/.test(text)&&devices.length){const kind=/规格书/.test(text)?'spec':'manual',items=devices.flatMap(d=>(knowledge?.findProducts(d.modelId)||[]).flatMap(p=>(p.documents||[]).filter(doc=>(identifyDocument({name:doc.name,documentMetadata:doc.documentMetadata})?.kind||doc.kind)===kind).map(doc=>({...doc,modelId:p.modelId}))));return {kind:'documents',status:items.length?'found':'needs_input',items,reason:items.length?null:'no-source-linked-document-for-this-model'};}
   const software=media.softwareItems(text);if(software.length)return {kind:'software',items:software};

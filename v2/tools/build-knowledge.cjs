@@ -11,6 +11,9 @@ function buildKnowledge(root=path.resolve(__dirname,'../..')){
  const read=relative=>{const bytes=fs.readFileSync(path.join(root,relative));sources.push({file:relative.replace(/\\/g,'/'),sha256:hash(bytes)});return JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));};
  const products=read('data/product-index.json').products,specs=read('data/product-specs-index.json').products;
  const firmwares=read('data/firmware-manifest.json').items;
+ read('tmp/v2-offline-runtime/curated-local-firmware.json');
+ const {createFirmwareScope,projectProductFirmware}=require('../domain/knowledge/firmware-scope.cjs');
+ const firmwareScope=createFirmwareScope({manifestFile:path.join(root,'tmp/v2-offline-runtime/curated-local-firmware.json')});
  const assets={software:read('data/software-downloaders-manifest.json').items,manuals:read('data/software-manuals-manifest.json').items,videos:read('data/video-manifest.json').items};
  // Build-time business reference only: export static records, never invoke old services.
  const softwareFile='backend/software-catalog.cjs';sources.push({file:softwareFile,sha256:hash(fs.readFileSync(path.join(root,softwareFile)))});
@@ -38,7 +41,7 @@ function buildKnowledge(root=path.resolve(__dirname,'../..')){
   }
   const claims=[];
   for(const [field,values]of Object.entries(p.fields||{}))for(const text of [...new Set(values||[])])claims.push({claimId:hash(id+'|'+field+'|'+norm(text)).slice(0,20),field,text,sourceReference:{...sources[0],record:index},verificationStatus:'indexed-not-content-verified'});
-  return {modelId:id,model:id?.replace(/^HD-/,''),displayName:p.displayName||p.product,aliases:[...new Set([p.product,...(p.aliases||[])])],claims,parameters:s.keyParameters||{},documents,firmware:firmwares.filter(f=>modelId(f.card)===id).map(f=>({...f,sourceReference:sources[2],verificationStatus:'manifest-model-match-not-hardware-compatibility'})),sourceReferences:[sources[0],sources[1]]};
+  return {modelId:id,model:id?.replace(/^HD-/,''),displayName:p.displayName||p.product,aliases:[...new Set([p.product,...(p.aliases||[])])],claims,parameters:s.keyParameters||{},documents,firmware:projectProductFirmware(id,firmwares.filter(f=>modelId(f.card)===id),firmwareScope),sourceReferences:[sources[0],sources[1]]};
  });
  const parameterConflicts=[];
  for(const p of products){const indexed=(p.facts||[]).join('\n');const pwm=[...indexed.matchAll(/PWM chip[:\s]+(\d+)\s*\*\s*(\d+)/gi)];
