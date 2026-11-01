@@ -1,0 +1,54 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 2472a99..75a22dd 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1287,6 +1287,7 @@ let activeCat = "all";
+ let lastSearch = null; // 最近一次产品搜索 {results, query, data}，切分类时本地重渲染、不重复请求
+ const quickCats = document.getElementById("quickCats");
+ function setActiveCat(cat) {
++  document.getElementById('catalogExpandAction')?.remove();
+   activeCat = CAT_LABEL[cat] ? cat : "all";
+   if (quickCats) {
+     quickCats.querySelectorAll(".qc-btn").forEach((b) => {
+@@ -2132,6 +2133,13 @@ function specificationWorkspace(models,byModel){
+  for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.title='查看 '+model.model+' 规格书';button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
+  layout.append(navigation,panel);if(first)choose(first.button,first.model,true);return layout;
+ }
++function placeCatalogExpand(button,owner){
++ document.getElementById('catalogExpandAction')?.remove();
++ button.id='catalogExpandAction';button.classList.add('catalog-expand-action');button.style.marginLeft='';
++ quickCats.append(button);
++ const observer=new MutationObserver(()=>{if(!owner.isConnected){button.remove();observer.disconnect();}});
++ observer.observe(searchResults,{childList:true,subtree:false});
++}
+ function renderOfficialSpecifications(docs,query,states,cat='spec'){
+  const byModel=new Map();for(const group of docs.groups||[])for(const product of group.products||[]){const key=wikiModelKey(product.model);if(!byModel.has(key))byModel.set(key,{...product,items:[...(product.items||[])]});else byModel.get(key).items.push(...product.items||[]);}
+  const term=String(query||'').trim().toUpperCase(),matches=x=>!term||String(x.model).toUpperCase().includes(term)||(byModel.get(wikiModelKey(x.model))?.items||[]).some(i=>String(i.name||'').toUpperCase().includes(term));
+@@ -2153,6 +2161,7 @@ function renderOfficialSpecifications(docs,query,states,cat='spec'){
+  }
+  if(!shown){const empty=document.createElement('p');empty.textContent='没有找到对应的官网型号或规格书。';wrap.append(empty);}
+  expand.onclick=()=>{const all=[...wrap.querySelectorAll('details')],open=all.some(x=>!x.open);for(const el of all)el.open=open;expand.textContent=open?'全部收起':'全部展开';};
++ placeCatalogExpand(expand,wrap);head.remove();
+ }
+ function renderDocsView(cat, qArg, docs, states = new Map()) {
+   if(docs?.directoryGrouping==='lazy-source-directories'){renderSourceDirectory(docs,qArg);return;}
+@@ -2297,7 +2306,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
+     toggleAll.setAttribute('aria-expanded', String(allOpen));
+   };
+   toggleAll.onclick = () => { const rows = categories(), open = !rows.every(node => node.open); for (const node of rows) node.open = open; updateToggle(); };
+-  wrap.addEventListener('toggle', updateToggle, true); updateToggle(); head.appendChild(toggleAll);
++  wrap.addEventListener('toggle', updateToggle, true); updateToggle(); placeCatalogExpand(toggleAll,wrap);
+   searchResults.appendChild(wrap);
+   searchResults.style.display = "block";
+ }
+diff --git a/v2/frontend/styles.css b/v2/frontend/styles.css
+index 9493c06..6f9224a 100644
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -1644,3 +1644,6 @@ body[data-view="quick"] #searchResults::-webkit-scrollbar-thumb{background:#9eb4
+ body[data-view="quick"] #searchResults:has(.source-tree-viewport){display:flex!important;flex-direction:column;overflow:hidden}
+ body[data-view="quick"] #searchResults .source-tree-viewport{flex:1 1 auto;min-height:0;height:auto;max-height:none}
+ @media(max-width:640px){body[data-view="quick"] .site-main{height:calc(100dvh - 66px);margin:8px auto}body[data-view="quick"] .search-section{padding-bottom:8px}body[data-view="quick"] #searchResults{padding-right:4px}}
++.quick-cats .catalog-expand-action{margin-left:auto;padding:4px 9px;font-size:12px;line-height:1.5;border:1px solid #d1e6ed;border-radius:6px;background:#f7fcfd;color:var(--accent);white-space:nowrap;cursor:pointer;flex:0 0 auto}
++.quick-cats .catalog-expand-action:hover{background:var(--accent-soft)}
++@media(max-width:640px){.quick-cats .catalog-expand-action{margin-left:0}}
