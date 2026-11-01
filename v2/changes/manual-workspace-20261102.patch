@@ -1,0 +1,45 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index fc31d64..b9b5651 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -2122,22 +2122,23 @@ const officialSpecHierarchy=[
+ ];
+ const officialSpecFallback={T902X1:'https://www.huidu.cn/CnProduct/index61.html',T902X2:'https://www.huidu.cn/CnProduct/index61.html',VM0404:'https://www.huidu.cn/CnProduct/index89.html',VM0808:'https://www.huidu.cn/CnProduct/index89.html',VM1616:'https://www.huidu.cn/CnProduct/index89.html',VS0102:'https://www.huidu.cn/CnProduct/index124.html',VS0104:'https://www.huidu.cn/CnProduct/index124.html',VS0108:'https://www.huidu.cn/CnProduct/index124.html',VS0116:'https://www.huidu.cn/CnProduct/index124.html',PS08:'https://www.huidu.cn/CnProduct/index121.html',HT01:'https://www.huidu.cn/CnProduct/index122.html',HT02:'https://www.huidu.cn/CnProduct/index122.html',K524:'https://www.huidu.cn/CnProduct/index82.html'};
+ const officialCategoryNames={'海报拼接屏控制卡':'海报拼接屏专用控制卡','视频矩阵':'视频矩阵系列','1080P数字标牌主板':'1080P高清数字标牌主板','异步继电器':'异步全彩继电器'};
+-function specificationWorkspace(models,byModel){
++function specificationWorkspace(models,byModel,cat='spec'){
++ const kindLabel=cat==='manual'?'说明书':'规格书';
+  const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
+  const layout=el('div','firmware-browser spec-workspace'),navigation=el('div','firmware-models spec-models'),panel=el('section','firmware-panel spec-panel');
+- navigation.setAttribute('aria-label','规格书型号');
++ navigation.setAttribute('aria-label',kindLabel+'型号');
+  const header=el('div','firmware-panel-header'),title=el('strong',null,'请选择左侧型号'),close=el('button','firmware-panel-close','×'),files=el('div','spec-files');
+- title.setAttribute('aria-live','polite');close.type='button';close.setAttribute('aria-label','关闭规格书详情');close.hidden=true;files.setAttribute('aria-label','规格书文件列表');
++ title.setAttribute('aria-live','polite');close.type='button';close.setAttribute('aria-label','关闭'+kindLabel+'详情');close.hidden=true;files.setAttribute('aria-label',kindLabel+'文件列表');
+  let active=null,pinned=false,timer;
+  const cancel=()=>clearTimeout(timer);
+  function choose(button,model,pin=false){
+   cancel();if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));if(!pin)button.dataset.preview='true';
+   const product=byModel.get(wikiModelKey(model.model)),items=(product?.items||[]).filter(i=>i.available!==false);
+-  title.textContent=wikiModelKey(model.model)+' · '+items.length+' 份规格书';close.hidden=false;files.replaceChildren();files.scrollTop=0;
++  title.textContent=wikiModelKey(model.model)+' · '+items.length+' 份'+kindLabel;close.hidden=false;files.replaceChildren();files.scrollTop=0;
+   const buckets={neutral:[],zh:[],en:[]};
+   for(const item of items){const lang=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':lang==='en'||lang.includes('英文')?'en':'zh';buckets[key].push(item);}
+   for(const [key,label] of [['neutral','中性版'],['zh','中文'],['en','英文']]){if(!buckets[key].length)continue;const group=el('div','spec-language-group');group.dataset.language=key;group.append(el('small','doc-column-title',label));for(const item of buckets[key])group.append(docFileActions(item));files.append(group);}
+-  if(!items.length)files.append(el('p','spec-empty','当前资料目录尚未关联该型号规格书。'));
++  if(!items.length)files.append(el('p','spec-empty','当前资料目录尚未关联该型号'+kindLabel+'。'));
+  }
+  close.onclick=()=>{cancel();const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;title.textContent='请选择左侧型号';files.replaceChildren();close.hidden=true;previous?.focus({preventScroll:true});};
+  panel.onpointerenter=cancel;panel.onkeydown=event=>{if(event.key==='Escape')close.click();};header.append(title,close);panel.append(header,files);
+@@ -2162,10 +2163,7 @@ function renderOfficialSpecifications(docs,query,states,cat='spec'){
+  for(const [groupName,children] of officialSpecHierarchy){const main=cat==='manual'&&groupName==='A、B、C、D、H系列异步卡'?'异步全彩':groupName;const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??(!!term||cat==='spec'&&main===officialSpecHierarchy[0][0]);
+   for(const child of (main==='A、B、C、D、H系列异步卡'?['async-all']:children)){const models=child==='async-all'?subset:subset.filter(r=>r.category===child);if(!models.length)continue;const sub=(child==='接收卡'||main==='A、B、C、D、H系列异步卡')?mainNode:docCatSummary(officialCategoryNames[child]||child,models.length+' 款');if(sub!==mainNode){sub.det.className='doc-cat-group official-sub';sub.body.className='doc-cat-group-body';sub.det.dataset.docState='official-sub:'+child;sub.det.open=states.get(sub.det.dataset.docState)??!!term;}
+    const sorted=models.slice().sort((a,b)=>wikiModelCompare(a.model,b.model,child==='接收卡'?'receiver':child==='async-all'||child.includes('播放')?'player':''));
+-   if(cat==='spec'){shown+=sorted.length;sub.body.append(specificationWorkspace(sorted,byModel));}else for(const item of sorted){shown++;const p=byModel.get(wikiModelKey(item.model));if(p?.items?.length){sub.body.append(docFlatRow(p.model,p.items,'spec',p.deviceName));continue;}
+-    const row=document.createElement('div');row.className='doc-flat';const name=document.createElement('span');name.className='doc-flat-name';name.textContent=item.model;const notice=document.createElement('span');notice.className='official-spec-missing';const key=wikiModelKey(item.model),url=officialSpecFallback[key];notice.textContent=url?(key==='HT01'||key==='HT02'?'官网提供产品手册，本库待关联':'官网提供相关资料，本库待关联'):'网站资料目录尚未关联规格书';row.append(name,notice);
+-    if(url){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='查看官网产品及下载';row.append(a);}sub.body.append(row);
+-   }
++   shown+=sorted.length;sub.body.append(specificationWorkspace(sorted,byModel,cat));
+    // Native details opens only on click, touch, or keyboard activation.
+    if(sub.det!==mainNode.det)mainNode.body.append(sub.det);
+   }
