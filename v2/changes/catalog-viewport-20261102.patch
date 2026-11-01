@@ -1,0 +1,53 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index ac08e66..2472a99 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1943,17 +1943,11 @@ function docCatSummary(text, sizeText) {
+   body.className = "vid-body doc-cat-body";
+   det.append(sum, body);
+   sum.addEventListener('click',()=>{
+-   const x=window.scrollX,y=window.scrollY;
+-   const opening=!det.open;
+-   if(!opening&&y>0)document.body.style.minHeight=Math.ceil(y+window.innerHeight)+'px';
++   const opening=!det.open,viewport=document.getElementById('searchResults'),before=viewport.scrollTop;
+    requestAnimationFrame(()=>{
+-    if(!opening){window.scrollTo({left:x,top:y,behavior:'instant'});return;}
+-    const toolbar=document.getElementById('searchToolbar');
+-    if(!toolbar||!det.isConnected)return;
+-    const destination=Math.max(0,window.scrollY+sum.getBoundingClientRect().top-toolbar.getBoundingClientRect().height-10);
+-    // The last category still needs room to align below the pinned search controls.
+-    document.body.style.minHeight=Math.ceil(destination+window.innerHeight)+'px';
+-    window.scrollTo({left:x,top:destination,behavior:'instant'});
++    if(!det.isConnected)return;
++    if(opening){const offset=sum.getBoundingClientRect().top-viewport.getBoundingClientRect().top;viewport.scrollTo({top:Math.max(0,viewport.scrollTop+offset),behavior:'instant'});}
++    else viewport.scrollTop=before;
+    });
+   });
+   return { det, body };
+@@ -2606,4 +2600,4 @@ if(document.body.dataset.audience==='public'){
+ }
+ 
+ 
+-window.addEventListener('scroll',()=>{if(document.body.style.minHeight&&window.scrollY<8)document.body.style.minHeight='';},{passive:true});
++
+diff --git a/v2/frontend/styles.css b/v2/frontend/styles.css
+index 63a254f..9493c06 100644
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -1631,3 +1631,16 @@ body[data-view="quick"] .site-header .subtitle{display:none}
+ .source-tree-viewport{overflow-anchor:none}
+ .search-toolbar{position:sticky;top:0;z-index:30;background:var(--surface);padding:12px 0 8px;margin-top:-12px;border-bottom:1px solid var(--border)}
+ @media(max-width:640px){.search-toolbar{padding-top:8px;margin-top:-8px}.search-toolbar .search-hint{margin-bottom:10px}}
++/* One bounded browsing area below the search controls. */
++body[data-view="quick"]{height:100dvh;overflow:hidden}
++body[data-view="quick"] .site-main{height:calc(100dvh - 78px);margin:12px auto;min-height:0}
++body[data-view="quick"] .search-section{height:100%;min-height:0;display:flex;flex-direction:column;padding-bottom:12px}
++body[data-view="quick"] .search-toolbar{position:relative;top:auto;flex:0 0 auto}
++body[data-view="quick"] .quick-examples{flex:0 0 auto}
++body[data-view="quick"] #searchResults{flex:1 1 auto;min-height:0;overflow-y:scroll;overflow-x:hidden;scrollbar-gutter:stable;overscroll-behavior:contain;padding-right:8px;scrollbar-width:thin;scrollbar-color:#9eb4bf #f1f5f7}
++body[data-view="quick"] #searchResults::-webkit-scrollbar{width:8px}
++body[data-view="quick"] #searchResults::-webkit-scrollbar-track{background:#f1f5f7;border-radius:8px}
++body[data-view="quick"] #searchResults::-webkit-scrollbar-thumb{background:#9eb4bf;border-radius:8px}
++body[data-view="quick"] #searchResults:has(.source-tree-viewport){display:flex!important;flex-direction:column;overflow:hidden}
++body[data-view="quick"] #searchResults .source-tree-viewport{flex:1 1 auto;min-height:0;height:auto;max-height:none}
++@media(max-width:640px){body[data-view="quick"] .site-main{height:calc(100dvh - 66px);margin:8px auto}body[data-view="quick"] .search-section{padding-bottom:8px}body[data-view="quick"] #searchResults{padding-right:4px}}
