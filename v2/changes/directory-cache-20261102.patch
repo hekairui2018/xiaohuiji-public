@@ -1,0 +1,114 @@
+diff --git a/v2/adapters/http/server.cjs b/v2/adapters/http/server.cjs
+index 72416f2..d34708f 100644
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -36,6 +36,17 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+  const loadDocs=async(cat,options,listOnly)=>{const body=await localMedia(await localQuick.docs(cat,options));return listOnly?list(body):body;};
+  const docKey=(cat,history,offset,limit,view,listOnly)=>JSON.stringify([cat,history,offset,limit,view,listOnly]);
+  const inFlight=new Map();let maintenanceUntil=0;
++ let configurationSnapshot=null,configurationPending=null;
++ async function configurationCatalog(req){
++  if(configurationSnapshot&&Date.now()-configurationSnapshot.time<30000)return configurationSnapshot;
++  if(configurationPending)return configurationPending;
++  configurationPending=(async()=>{
++   const entries=await offlineKnowledge.configurationFiles(req,''),catalog=require('../../domain/knowledge/source-directory.cjs');
++   const version=require('node:crypto').createHash('sha256').update(JSON.stringify(entries)).digest('hex');
++   return configurationSnapshot={entries,index:catalog.createDirectoryIndex(entries),version,time:Date.now()};
++  })().finally(()=>{configurationPending=null;});
++  return configurationPending;
++ }
+  const server=http.createServer(async(req,res)=>{
+   if(gatewayTrust&&!gatewayTrust(req,res))return;
+   if(accessGuard&&!accessGuard(req,res))return;
+@@ -85,11 +96,10 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+    if(req.v2Public||!loopback||req.method!=='GET'||!offlineKnowledge?.configurationFiles){send(403,{error:'local-only'});return;}
+    const params=new URL(req.url,'http://localhost').searchParams,q=(params.get('q')||'').trim(),directory=params.get('directory')||'root',offset=Number(params.get('offset')||0),sort=params.get('sort')||'name';
+    if(q.length>240||!Number.isSafeInteger(offset)||offset<0||!/^(root|[a-f0-9]{24})$/.test(directory)||!['name','type'].includes(sort)){send(400,{error:'invalid-query'});return;}
+-   const entries=await offlineKnowledge.configurationFiles(req,'');
+-   const catalog=require('../../domain/knowledge/source-directory.cjs'),index=catalog.createDirectoryIndex(entries);
++   const snapshot=await configurationCatalog(req),{entries,index}=snapshot,catalog=require('../../domain/knowledge/source-directory.cjs');
+    if(!index.nodes.has(directory)){send(404,{error:'directory-not-found'});return;}
+    if(q){let matches=require('../../domain/knowledge/metadata-query.cjs').rankMetadata(q,index.files,{limit:index.files.length});if(sort==='type')matches.sort((a,b)=>a.name.split('.').at(-1).localeCompare(b.name.split('.').at(-1))||a.name.localeCompare(b.name,'zh-Hans-CN',{numeric:true}));send(200,{directoryPage:{id:'root',label:'模组配置文件',breadcrumb:[{id:'root',label:'模组配置文件'}],query:q,sort,sourceTotal:entries.length,entries:matches.slice(offset,offset+50),pagination:{offset,limit:50,returned:matches.slice(offset,offset+50).length,total:matches.length,nextOffset:offset+50<matches.length?offset+50:null}}});return;}
+-   const result=catalog.directoryPage(index,{directory,offset,sort});result.directoryPage.sourceTotal=entries.length;if(directory==='root'){result.directoryPage.label='模组配置文件';result.directoryPage.breadcrumb[0].label='模组配置文件';}send(200,result);return;
++   const result=catalog.directoryPage(index,{directory,offset,sort});result.directoryPage.catalogVersion=snapshot.version;result.directoryPage.sourceTotal=entries.length;if(directory==='root'){result.directoryPage.label='模组配置文件';result.directoryPage.breadcrumb[0].label='模组配置文件';}send(200,result);return;
+   }
+   if(route==='/v2/curated-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 9e2a738..dd598a4 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1942,6 +1942,12 @@ function docCatSummary(text, sizeText) {
+   const body = document.createElement("div");
+   body.className = "vid-body doc-cat-body";
+   det.append(sum, body);
++  sum.addEventListener('click',()=>{
++   const x=window.scrollX,y=window.scrollY;
++   // Preserve room below a collapsed section so the browser cannot clamp scrollY.
++   if(det.open&&y>0){document.body.style.minHeight=Math.ceil(y+window.innerHeight)+'px';}
++   requestAnimationFrame(()=>window.scrollTo({left:x,top:y,behavior:'instant'}));
++  });
+   return { det, body };
+ }
+ // 型号后直接显示文件链接，只有产品大类保留折叠。
+@@ -2063,11 +2069,23 @@ async function mergedConfigurationEntries(sources,{manufacturerLevel=false,year2
+  const directories=[...folders.values()].map(group=>{const id='merged:'+[...group.sources,...group.year2026].map(s=>s.id).sort().join(',');moduleConfigurationNodes.set(id,{sources:group.sources,year2026:group.year2026});return {...group,id};});
+  return [...directories.sort((a,b)=>a.label.localeCompare(b.label,'zh-Hans-CN')),...[...files.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hans-CN',{numeric:true}))];
+ }
+-async function moduleConfigurationPage(options={}) {
++const modulePageCache=window.DirectoryPageCache.create({load:async options=>{
+  const params=new URLSearchParams({q:options.query||'',directory:options.directory||'root',offset:String(options.offset||0),sort:options.sort||'name'});
+  const response=await fetch('/v2/configuration-search?'+params);
+  if(!response.ok)throw Error('配置文件检索暂不可用');
+  return (await response.json()).directoryPage;
++}});
++const moduleConfigurationPage=options=>modulePageCache.get(options);
++let modulePrefetchGeneration=0;
++async function prefetchModuleDirectories(page){
++ const generation=++modulePrefetchGeneration,queue=[...page.entries.filter(e=>e.type==='directory').map(e=>({directory:e.id})),...(page.pagination.nextOffset!==null?[{directory:'root',offset:page.pagination.nextOffset}]:[])];
++ let budget=120;
++ while(queue.length&&budget>0&&generation===modulePrefetchGeneration&&activeCat==='module-config'){
++  const batch=queue.splice(0,2);budget-=batch.length;
++  const loaded=await Promise.all(batch.map(options=>moduleConfigurationPage(options).catch(()=>null)));
++  for(let i=0;i<loaded.length;i++){const next=loaded[i];if(!next)continue;queue.push(...next.entries.filter(e=>e.type==='directory').map(e=>({directory:e.id})));if(next.pagination.nextOffset!==null)queue.push({...batch[i],offset:next.pagination.nextOffset});}
++  await new Promise(resolve=>setTimeout(resolve,50));
++ }
+ }
+ 
+ async function renderModuleConfigurations(query='') {
+@@ -2075,6 +2093,7 @@ async function renderModuleConfigurations(query='') {
+  try {
+   const page=await moduleConfigurationPage({query});if(requestId!==quickRequestId)return;
+   window.SourceDirectoryBrowser.mount({container:searchResults,title:'模组配置文件',treeLabel:'模组配置文件目录',countLabel:'份配置文件',docs:{total:page.sourceTotal,directoryPage:page},load:moduleConfigurationPage,fileActions:docFileActions});
++  if(!query.trim())setTimeout(()=>prefetchModuleDirectories(page),150);
+  }catch(error){if(requestId===quickRequestId)searchResults.textContent='模组配置目录读取失败：'+error.message;}
+ }
+ 
+@@ -2578,3 +2597,5 @@ if(document.body.dataset.audience==='public'){
+  const hint=document.querySelector('.ai-hint');if(hint)hint.textContent='根据已批准公开的资料回答；内部资料与全文检索不对公网开放。';
+ }
+ 
++
++window.addEventListener('scroll',()=>{if(document.body.style.minHeight&&window.scrollY<8)document.body.style.minHeight='';},{passive:true});
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 03ad167..656f069 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -96,6 +96,7 @@
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+   <script src="source-directory-browser.js?v=20261022-lazy-final"></script>
++  <script src="directory-page-cache.js?v=20261102"></script>
+   <script src="chip-browser.js?v=20261028"></script>
+   <script src="app.js?v=20261028-chip-browser"></script>
+   <script src="public-client.js?v=20261026-live-process"></script>
+diff --git a/v2/frontend/styles.css b/v2/frontend/styles.css
+index 90b9971..4bbff40 100644
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -1627,3 +1627,5 @@ body[data-view="quick"] .site-header .subtitle{display:none}
+ .quick-action-bar .quick-mode-button[aria-pressed="true"]{min-height:40px;min-width:128px;padding:8px 24px;font-size:15px;font-weight:650;background:var(--surface);border-color:#c9e2e9;color:var(--accent);box-shadow:0 2px 5px rgba(39,83,103,.08)}
+ #resourceSearchTitle{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+ @media(max-width:640px){.quick-action-bar{margin-bottom:12px}.quick-action-bar .quick-mode-button{min-width:100px;padding:6px 14px}.quick-action-bar .quick-mode-button[aria-pressed="true"]{min-width:116px;padding:8px 18px;font-size:14px}}
++.search-results{overflow-anchor:none}
++.source-tree-viewport{overflow-anchor:none}
