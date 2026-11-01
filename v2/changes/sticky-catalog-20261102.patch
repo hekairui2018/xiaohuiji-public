@@ -1,0 +1,64 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index dd598a4..ac08e66 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1944,9 +1944,17 @@ function docCatSummary(text, sizeText) {
+   det.append(sum, body);
+   sum.addEventListener('click',()=>{
+    const x=window.scrollX,y=window.scrollY;
+-   // Preserve room below a collapsed section so the browser cannot clamp scrollY.
+-   if(det.open&&y>0){document.body.style.minHeight=Math.ceil(y+window.innerHeight)+'px';}
+-   requestAnimationFrame(()=>window.scrollTo({left:x,top:y,behavior:'instant'}));
++   const opening=!det.open;
++   if(!opening&&y>0)document.body.style.minHeight=Math.ceil(y+window.innerHeight)+'px';
++   requestAnimationFrame(()=>{
++    if(!opening){window.scrollTo({left:x,top:y,behavior:'instant'});return;}
++    const toolbar=document.getElementById('searchToolbar');
++    if(!toolbar||!det.isConnected)return;
++    const destination=Math.max(0,window.scrollY+sum.getBoundingClientRect().top-toolbar.getBoundingClientRect().height-10);
++    // The last category still needs room to align below the pinned search controls.
++    document.body.style.minHeight=Math.ceil(destination+window.innerHeight)+'px';
++    window.scrollTo({left:x,top:destination,behavior:'instant'});
++   });
+   });
+   return { det, body };
+ }
+@@ -2137,7 +2145,7 @@ function renderOfficialSpecifications(docs,query,states,cat='spec'){
+  searchResults.replaceChildren();searchResults.style.display='block';const head=document.createElement('div');head.className='search-count';const expand=document.createElement('button');expand.type='button';expand.className='sw-btn-detail';expand.textContent='全部展开';head.append(expand);searchResults.append(head);
+  const wrap=document.createElement('div');wrap.className='vid-catalog official-spec-hierarchy';searchResults.append(wrap);
+  let shown=0;
+- for(const [main,children] of officialSpecHierarchy){const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??(!!term||cat==='spec'&&main===officialSpecHierarchy[0][0]);
++ for(const [groupName,children] of officialSpecHierarchy){const main=cat==='manual'&&groupName==='A、B、C、D、H系列异步卡'?'异步全彩':groupName;const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??(!!term||cat==='spec'&&main===officialSpecHierarchy[0][0]);
+   for(const child of (main==='A、B、C、D、H系列异步卡'?['async-all']:children)){const models=child==='async-all'?subset:subset.filter(r=>r.category===child);if(!models.length)continue;const sub=(child==='接收卡'||main==='A、B、C、D、H系列异步卡')?mainNode:docCatSummary(officialCategoryNames[child]||child,models.length+' 款');if(sub!==mainNode){sub.det.className='doc-cat-group official-sub';sub.body.className='doc-cat-group-body';sub.det.dataset.docState='official-sub:'+child;sub.det.open=states.get(sub.det.dataset.docState)??!!term;}
+    const sorted=models.slice().sort((a,b)=>wikiModelCompare(a.model,b.model,child==='接收卡'?'receiver':child==='async-all'||child.includes('播放')?'player':''));
+    if(cat==='spec'){shown+=sorted.length;sub.body.append(specificationWorkspace(sorted,byModel));}else for(const item of sorted){shown++;const p=byModel.get(wikiModelKey(item.model));if(p?.items?.length){sub.body.append(docFlatRow(p.model,p.items,'spec',p.deviceName));continue;}
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 656f069..bf4b252 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -29,6 +29,7 @@
+   <main class="site-main">
+     <!-- 快查站搜索区 -->
+     <section class="search-section">
++      <div class="search-toolbar" id="searchToolbar">
+       <div class="quick-action-bar" role="group" aria-label="搜索模式">
+         <button id="quickProductTitle" class="quick-mode-button" type="button" aria-pressed="true" aria-controls="quickCats searchResults">产品速查</button>
+         <button id="quickMoreDocsBtn" class="quick-mode-button" type="button" aria-pressed="false" aria-controls="searchResults" title="搜索已索引资料的文件名、目录和正文">全文搜索</button>
+@@ -49,6 +50,7 @@
+         <button type="button" class="qc-btn" data-cat="module-config" role="tab" aria-selected="false" hidden>模组配置文件</button>
+         <button type="button" class="qc-btn" data-cat="other" role="tab" aria-selected="false">🔒 内部资料</button>
+       </div>
++      </div>
+       <div class="quick-examples" id="quickExamples">
+         <span class="qe-label">试试这样搜：</span>
+         <button type="button" class="qe-btn" data-q="R708">R708 参数</button>
+diff --git a/v2/frontend/styles.css b/v2/frontend/styles.css
+index 4bbff40..63a254f 100644
+--- a/v2/frontend/styles.css
++++ b/v2/frontend/styles.css
+@@ -1629,3 +1629,5 @@ body[data-view="quick"] .site-header .subtitle{display:none}
+ @media(max-width:640px){.quick-action-bar{margin-bottom:12px}.quick-action-bar .quick-mode-button{min-width:100px;padding:6px 14px}.quick-action-bar .quick-mode-button[aria-pressed="true"]{min-width:116px;padding:8px 18px;font-size:14px}}
+ .search-results{overflow-anchor:none}
+ .source-tree-viewport{overflow-anchor:none}
++.search-toolbar{position:sticky;top:0;z-index:30;background:var(--surface);padding:12px 0 8px;margin-top:-12px;border-bottom:1px solid var(--border)}
++@media(max-width:640px){.search-toolbar{padding-top:8px;margin-top:-8px}.search-toolbar .search-hint{margin-bottom:10px}}
