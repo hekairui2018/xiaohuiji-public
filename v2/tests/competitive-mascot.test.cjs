@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {advantages}=require('../domain/knowledge/competitive-knowledge.cjs');
-const {plan,resolve}=require('../frontend/mascot-advice.js');
+const {plan,resolve,guide}=require('../frontend/mascot-advice.js');
 const row=(brand,model,value,extra={})=>({kind:'comparison',brand,model,parameter:'环路备份',value,sheet:'接收卡-对比',modelCell:brand==='灰度'?'B3':'C3',parameterCell:'A7',...extra});
 test('only an explicit comparable difference produces a highlight; no competitor or internal source escapes',()=>{
  const data={records:[row('灰度','X10','√'),row('诺瓦','N10','×')]};
@@ -66,4 +66,30 @@ test('normalization preserves product suffixes and blocks non-model searches fro
  for(const query of ['hd-r716l',' HD R716L ','ＨＤ－Ｒ７１６Ｌ'])assert.equal(resolve(query,['HD-R716L']).kind,'exact');
  for(const query of ['6363','HDPlayer','R716怎么接线','P2 10宽10高','<img src=x>',''])assert.equal(resolve(query,['R716L']).kind,'none');
  assert.equal(resolve('R716L',['R716']).kind,'possible-typo');
+});
+
+test('task hints cover device, actual comparison selection, chip, configuration, upgrade and ordering next steps',()=>{
+ const models=['HD-R716','HD-R712','HD-A3L'];
+ assert.equal(guide({query:'A3L',models}).topic,'device');
+ assert.equal(guide({query:'R716 对比 R712',models}).topic,'compare');
+ assert.equal(guide({query:'R716对比未知X123',models}).topic,'device');
+ assert.equal(guide({query:'6363',chip:true}).topic,'chip');
+ for(const [event,topic]of [['module-config','module'],['firmware-download','upgrade'],['ordered','ordered']])assert.equal(guide({event}).topic,topic);
+ assert.equal(guide({query:'P2，宽10块高10块'}).topic,'sizing');
+ assert.equal(guide({query:'R716黑屏',models}).topic,'fault');
+ assert.equal(guide({query:'flickering black screen'}).topic,'fault');
+});
+
+test('previous browsing is a confirmation hint, never an implicit model or download association',()=>{
+ const models=['HD-R716','HD-A3L'];
+ const result=guide({query:'升级',models,previousModel:'HD-R716'});
+ assert.equal(result.topic,'context');assert.equal(result.actions[0].type,'confirm-model');
+ assert.match(result.actions[0].message,/HD-R716/);assert.doesNotMatch(result.actions[1].message,/R716/);
+ assert.notEqual(guide({query:'A3L升级',models,previousModel:'HD-R716'}).topic,'context');
+ assert.notEqual(guide({query:'X999黑屏',models,previousModel:'HD-R716'}).topic,'context');
+ assert.equal(guide({query:'升级',models}),null);
+ const mismatch=guide({query:'HDPlayer',category:'firmware'});assert.equal(mismatch.topic,'category');assert.equal(mismatch.actions[0].category,'software');
+ assert.equal(guide({query:'HDPlayer',category:'software'}),null);
+ const mixed=guide({query:'帮我找 R176 的规格书',models});assert.equal(mixed.topic,'model-correction');assert(mixed.models.includes('HD-R716'));
+ assert.equal(guide({query:'帮我找 X999 的规格书',models}),null);
 });

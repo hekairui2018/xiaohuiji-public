@@ -1476,12 +1476,35 @@ function renderSearchResults(results, query, data) {
 
 let quickRequestId = 0;
 let quickSearchController = null;
+let mascotLastModel=null,mascotLastModelAt=0;
+function mascotRemember(model){mascotLastModel=model;mascotLastModelAt=Date.now();}
+function mascotGuide(event,query='',extra={}){
+ const advice=window.MascotAdvice?.guide({event,query,models:officialWikiCategories.map(x=>x.model),category:activeCat,previousModel:Date.now()-mascotLastModelAt<600000?mascotLastModel:null,...extra});
+ if(advice)window.dispatchEvent(new CustomEvent('v2-mascot-advice',{detail:{...advice,view:document.body.dataset.view}}));
+ return advice;
+}
+function mascotAction(action){
+ stopMediaVideos();
+ if(action.type==='category'){applyView('quick');quickSearchInput.value=action.query||'';onPickCategory(action.category);}
+ else if(action.type==='navigate'){applyView(action.view);}
+ else if(action.type==='ask'||action.type==='confirm-model'){
+  applyView('ai');if(aiInput.disabled||aiInput.value.trim()){window.dispatchEvent(new CustomEvent('v2-mascot-advice',{detail:{kind:'guide',view:'ai',title:'小灰机 · 提醒',message:'输入框已有内容或正在回答，请先处理当前问题，我没有覆盖它。'}}));return;}
+  aiInput.value=action.message;resizeAiInput();aiInput.focus();if(action.type==='confirm-model')mascotRemember(action.model);
+ }
+}
+FrontendApp.events.addEventListener('session-change',()=>{mascotLastModel=null;mascotLastModelAt=0;window.dispatchEvent(new Event('v2-mascot-reset'));});
+FrontendApp.events.addEventListener('user-message',event=>mascotGuide('search',event.detail?.text||''));
+window.addEventListener('v2-mascot-context',event=>mascotGuide('search',event.detail?.query||'',{chip:!!event.detail?.chip}));
+FrontendApp.events.addEventListener('assistant-message',event=>{const data=event.detail;if(data?.result?.bom||data?.ordering?.bom||data?.result?.previewBom)mascotGuide('ordered');});
+// Download links keep their native navigation; this only adds optional guidance.
+document.addEventListener('click',event=>{const link=event.target.closest?.('a[download]');if(!link)return;const href=link.getAttribute('href')||'';if(/\/v2\/curated-firmware\//.test(href)||/\.bin(?:[?#]|$)/i.test(href)||/\.bin$/i.test(link.download))mascotGuide('firmware-download');else if(/\.ssr(?:[?#]|$)/i.test(link.download||href))mascotGuide('module-config');});
 async function doSearch() {
   clearTimeout(searchTimer); // Explicit submission replaces the pending automatic search.
   const q = quickSearchInput.value.trim();
+  window.dispatchEvent(new Event('v2-mascot-reset'));
+  const taskAdvice=mascotGuide('search',q);
   if (activeCat === 'module-config') { await renderModuleConfigurations(q); return; }
   if (!q) return;
-  window.dispatchEvent(new Event('v2-mascot-reset'));
   updateQuickExamples(); // Preserve the final empty-state presentation previously applied by the timer.
   if (activeCat === "software") { await renderSoftwareCategory(q); return; } // 软件分类走独立端点
   if (activeCat === "video") { await renderVideoCategory(q); return; } // 视频分类走独立端点（按操作主题，与型号无关）
@@ -1533,7 +1556,9 @@ async function doSearch() {
       }
     }
     const advice=window.MascotAdvice?.plan({query:q,results:hwResults.filter(r=>isOfficialWikiModel(r.modelId||r.name)||hasConcreteProductResult(r)),models:knownModels,approximateMatch:data.approximateMatch});
-    if(advice)window.dispatchEvent(new CustomEvent('v2-mascot-advice',{detail:advice}));
+    const exact=hwResults.find(r=>wikiModelKey(r.modelId||r.name)===wikiModelKey(q)&&hasConcreteProductResult(r));if(exact)mascotRemember(exact.modelId||exact.name);
+    if(data.chipFirmware)mascotGuide('search',q,{chip:true});
+    else if(advice)window.dispatchEvent(new CustomEvent('v2-mascot-advice',{detail:{...advice,actions:advice.kind==='advantage'?taskAdvice?.actions:[]}}));
     lastSearch = { results: hwResults, query: q, data };
     renderSearchResults(lastSearch.results, q, data);
   } catch (err) {
@@ -2104,6 +2129,7 @@ async function renderModuleConfigurations(query='') {
  try {
   const page=await moduleConfigurationPage({query});if(requestId!==quickRequestId)return;
   window.SourceDirectoryBrowser.mount({container:searchResults,title:'模组配置文件',treeLabel:'模组配置文件目录',countLabel:'份配置文件',docs:{total:page.sourceTotal,directoryPage:page},load:moduleConfigurationPage,fileActions:docFileActions});
+  mascotGuide('module-config',query);
   if(!query.trim())setTimeout(()=>prefetchModuleDirectories(page),150);
  }catch(error){if(requestId===quickRequestId)searchResults.textContent='模组配置目录读取失败：'+error.message;}
 }
@@ -2130,6 +2156,7 @@ function specificationWorkspace(models,byModel,cat='spec'){
  function choose(button,model,pin=false){
   cancel();if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));if(!pin)button.dataset.preview='true';
   const product=byModel.get(wikiModelKey(model.model)),items=(product?.items||[]).filter(i=>i.available!==false);
+  if(pin){mascotGuide('search',model.model);mascotRemember(model.model);}
   title.textContent=wikiModelKey(model.model)+' · '+items.length+' 份'+kindLabel;close.hidden=false;files.replaceChildren();files.scrollTop=0;
   const buckets={neutral:[],zh:[],en:[]};
   for(const item of items){const lang=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':lang==='en'||lang.includes('英文')?'en':'zh';buckets[key].push(item);}
@@ -2217,7 +2244,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       let active=null,pinned=false,hoverTimer;
       function cancelPreview(){clearTimeout(hoverTimer);}
       function clearSelection(restoreFocus=false){cancelPreview();const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;files.replaceChildren();title.textContent='请选择型号查看固件';close.hidden=true;if(restoreFocus)previous?.focus({preventScroll:true});}
-      function showFiles(button,product,pin=false){cancelPreview();if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));button.dataset.preview=String(!pin);title.textContent=product.label+' · '+product.count+' 个固件';close.hidden=false;files.replaceChildren(...product.items.map(item=>docFileActions(item,true)));files.scrollTop=0;}
+      function showFiles(button,product,pin=false){cancelPreview();if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));button.dataset.preview=String(!pin);title.textContent=product.label+' · '+product.count+' 个固件';close.hidden=false;files.replaceChildren(...product.items.map(item=>docFileActions(item,true)));files.scrollTop=0;if(pin){mascotGuide('search',product.model);mascotRemember(product.model);}}
       panel.addEventListener('pointerenter',cancelPreview);
       close.onclick=()=>clearSelection(true);
       panel.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection(true);});
@@ -2350,6 +2377,7 @@ function onPickCategory(cat) {
   setActiveCat(cat);
   updateQuickExamples();
   const q = quickSearchInput.value.trim();
+  window.dispatchEvent(new Event('v2-mascot-reset'));mascotGuide('search',q);
   if(cat==='module-config'){renderModuleConfigurations(q);return;}
   if (cat === "software") { renderSoftwareCategory(q); return; }
   if (cat === "video") { renderVideoCategory(q); return; } // 视频与型号无关，空词也直接浏览全部分组
@@ -2423,7 +2451,7 @@ if (quickCats) {
 })();
 
 // ============ 可拖拽悬浮吉祥物（仅网页；企微无悬浮控件） ============
-// 快查站页放「小灰机」，点它跳小灰机问答；小灰机页放红色「闪电侠」，点它回快查站。位置记忆、可拖、周期冒泡。
+// Clicks interact; page navigation is an explicit action. Dragging never submits a question.
 (function initMascots() {
   const MOVE_TOL = 8;
   // 默认位置改版：版本不一致时，作废上一版存下的所有拖拽位置，回到统一出厂默认（CSS 右侧垂直居中）；在新版下拖动仍逐视图记忆
@@ -2458,19 +2486,36 @@ if (quickCats) {
       ev.stopPropagation(); bubble.classList.remove("show");
     });
     document.body.appendChild(el);
-    let adviceTimer=null;
-    window.addEventListener('v2-mascot-reset',()=>{clearTimeout(adviceTimer);bubble.classList.remove('show');});
-    window.addEventListener('v2-mascot-advice',event=>{
-      if(d.view!=='quick'||document.body.dataset.view!=='quick')return;
-      const advice=event.detail;if(!advice?.message)return;
+    let adviceTimer=null,lastAdvice=null,quietUntil=0;
+    function fitBubble(){
+      if(!el.classList.contains('is-active'))return;
+      const orbBox=el.getBoundingClientRect();if(orbBox.left<4||orbBox.right>innerWidth-4||orbBox.top<4||orbBox.bottom>innerHeight-4){el.style.right='auto';el.style.bottom='auto';el.style.left=Math.max(4,Math.min(orbBox.left,innerWidth-el.offsetWidth-4))+'px';el.style.top=Math.max(4,Math.min(orbBox.top,innerHeight-el.offsetHeight-4))+'px';}
+      bubble.style.transform='';bubble.style.top='';bubble.style.bottom='';
+      if(!bubble.classList.contains('show'))return;
+      let box=bubble.getBoundingClientRect();if(box.top<8){bubble.style.bottom='auto';bubble.style.top='calc(100% + 12px)';box=bubble.getBoundingClientRect();}
+      const dx=box.left<8?8-box.left:box.right>innerWidth-8?innerWidth-8-box.right:0;
+      const dy=box.bottom>innerHeight-8?innerHeight-8-box.bottom:0;
+      bubble.style.transform=`translate(${dx}px,${dy}px)`;
+    }
+    function showAdvice(advice,interaction=false){
+      if(!advice?.message||(!interaction&&Date.now()<quietUntil))return;
+      if(!interaction){lastAdvice=advice;delete el.dataset.mood;}
       clearTimeout(adviceTimer);
       const text=el.querySelector('.xm-bubble-text');text.replaceChildren();
       const heading=document.createElement('strong');heading.className='xm-advice-heading';heading.textContent=advice.title||'小灰机 · 型号提醒';text.append(heading);
       if(advice.highlights?.length){const list=document.createElement('ul');list.className='xm-advice-highlights';for(const value of advice.highlights){const item=document.createElement('li');item.textContent=value;list.append(item);}text.append(list);}
       else {const message=document.createElement('span');message.textContent=advice.message;text.append(message);}
       for(const model of advice.models||[]){const button=document.createElement('button');button.type='button';button.textContent='查 '+model;button.addEventListener('click',ev=>{ev.stopPropagation();quickSearchInput.value=model;bubble.classList.remove('show');doSearch();});text.append(document.createTextNode(' '),button);}
+      for(const action of advice.actions||[]){const button=document.createElement('button');button.type='button';button.textContent=action.label;button.onclick=ev=>{ev.stopPropagation();bubble.classList.remove('show');mascotAction(action);};text.append(document.createTextNode(' '),button);}
       bubble.classList.add('show');
+      fitBubble();
       // Customer controls dismissal. A useful result must not vanish while they read the product card.
+    }
+    window.addEventListener('resize',fitBubble);
+    window.addEventListener('v2-mascot-reset',()=>{clearTimeout(adviceTimer);lastAdvice=null;bubble.classList.remove('show');});
+    window.addEventListener('v2-mascot-advice',event=>{
+      if((event.detail?.view||'quick')!==d.view||document.body.dataset.view!==d.view)return;
+      showAdvice(event.detail);
     });
     window.addEventListener('v2-model-suggestion',event=>{
       const suggestion=event.detail,key=suggestion?.input+'|'+suggestion?.model;
@@ -2484,6 +2529,7 @@ if (quickCats) {
     const syncVis = () => {
       const nowActive = document.body.dataset.view === d.view;
       el.classList.toggle("is-active", nowActive);
+      if(nowActive)requestAnimationFrame(fitBubble);
       // Keep hints passive; navigation never schedules a repeated suggestion.
     };
     syncVis();
@@ -2508,17 +2554,31 @@ if (quickCats) {
     // 不再产生拖影、不再抢走 pointer，也不会误入聊天区图片拖放(OCR)；图片点选/粘贴/拖入链路保持不变
     orb.querySelectorAll("img").forEach((im) => { try { im.draggable = false; } catch (e) {} });
     ["dragstart", "selectstart"].forEach((evName) => orb.addEventListener(evName, (e2) => e2.preventDefault()));
-    let dragging = false, moved = false, jumpFired = false, startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
+    let dragging = false, moved = false, startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-    // 点击互跳：pointerup 与 click 双保险（部分 WebView / 自动化只派发 click），jumpFired 保证只跳一次；发生拖拽(moved)不跳
-    const doJump = () => {
-      if (dragging || moved || jumpFired) return;
-      jumpFired = true;
-      history.pushState({ view: d.target }, "", VIEW_PATHS[d.target]);
-      applyView(d.target, { push: false });
-    };
+    let tapCount=0,lastTap=0,coolUntil=0,motion=null;
+    orb.setAttribute('role','button');orb.tabIndex=0;orb.setAttribute('aria-label','和小灰机互动，长按可拖动');
+    function react(){
+      if(dragging||moved)return;
+      const now=Date.now();if(now<coolUntil)return;
+      tapCount=now-lastTap<1500?tapCount+1:1;lastTap=now;
+      const stage=tapCount>=10?'rest':tapCount>=6?'dizzy':tapCount>=3?'bounce':'wave';el.dataset.mood=stage;
+      motion?.cancel();if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
+        const frames=stage==='dizzy'?[{transform:'rotate(-14deg)'},{transform:'rotate(14deg)'},{transform:'rotate(0)'}]:stage==='bounce'?[{transform:'translateY(0)'},{transform:'translateY(-14px) scale(1.08)'},{transform:'translateY(0)'}]:[{transform:'rotate(0)'},{transform:'rotate(-10deg)'},{transform:'rotate(10deg)'},{transform:'rotate(0)'}];
+        motion=orb.animate(frames,{duration:450,iterations:1});
+      }
+      if(stage==='rest')coolUntil=now+6000;
+      const message=stage==='rest'?'收到十连击！让我缓六秒，再陪你玩。':stage==='dizzy'?'转晕啦，按钮在下面，正事我也没忘。':stage==='bounce'?'我在我在！这么有精神，要不要一起解决个问题？':'我在！轻点找我，拖动可以给我挪个位置。';
+      const actions=[{label:d.view==='quick'?'去客服问答':'去资料搜索',type:'navigate',view:d.target}];
+      showAdvice({title:'小灰机 · '+({wave:'收到啦',bounce:'精神满满',dizzy:'有点晕',rest:'休息一下'}[stage]),message,actions},true);
+      const text=el.querySelector('.xm-bubble-text');
+      if(lastAdvice){const back=document.createElement('button');back.type='button';back.textContent='查看刚才提示';back.onclick=()=>showAdvice(lastAdvice,true);text.append(' ',back);}
+      const quiet=document.createElement('button');quiet.type='button';quiet.textContent='先安静一会';quiet.onclick=()=>{quietUntil=Date.now()+30000;bubble.classList.remove('show');motion?.cancel();};text.append(' ',quiet);fitBubble();
+    }
+    orb.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();moved=false;react();}});
     orb.addEventListener("pointerdown", (ev) => {
-      dragging = true; moved = false; jumpFired = false;
+      if(ev.button!==0)return;
+      dragging = true; moved = false;
       startX = ev.clientX; startY = ev.clientY;
       const r = el.getBoundingClientRect();
       baseLeft = r.left; baseTop = r.top;
@@ -2531,6 +2591,7 @@ if (quickCats) {
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       if (Math.abs(dx) > MOVE_TOL || Math.abs(dy) > MOVE_TOL) { moved = true; ev.preventDefault(); }
       if (moved) {
+        bubble.classList.remove('show');motion?.cancel();
         el.style.left = clamp(baseLeft + dx, 4, window.innerWidth - el.offsetWidth - 4) + "px";
         el.style.top = clamp(baseTop + dy, 4, window.innerHeight - el.offsetHeight - 4) + "px";
       }
@@ -2540,14 +2601,13 @@ if (quickCats) {
       dragging = false;
       try { orb.releasePointerCapture(ev.pointerId); } catch (e) {}
       if (moved) {
-        localStorage.setItem(posKey, JSON.stringify({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) }));
-      } else {
-        doJump();
+        try{localStorage.setItem(posKey, JSON.stringify({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) }));}catch{}
+        tapCount=0;showAdvice({title:'小灰机 · 搬家啦',message:'这个位置也不错，我就在这里陪你。'},true);
       }
     };
     orb.addEventListener("pointerup", endDrag);
-    orb.addEventListener("pointercancel", () => { dragging = false; });
-    orb.addEventListener("click", doJump);  // 兜底：只派发 click 的环境（部分企微 WebView / 自动化）也能互跳
+    orb.addEventListener("pointercancel", () => { dragging = false;moved=true; });
+    orb.addEventListener("click", react);
   });
 })();
 
