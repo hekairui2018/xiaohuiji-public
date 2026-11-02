@@ -841,6 +841,11 @@ body[data-view="quick"] #quickCats .qc-btn.active{background:#e5f2e9;color:#3876
   border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; background: var(--surface);
 }
 .sw-list-main { min-width: 0; }
+.sw-list-item:has(.software-inline-details){display:flex;flex-wrap:wrap}
+.software-inline-details{flex:0 0 100%;box-sizing:border-box;min-width:0;margin:0;padding:12px 0 0;border:0;border-top:1px solid var(--border);box-shadow:none;background:transparent}
+.software-manual-file{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0}
+.software-manual-file>.sw-doc-link{min-width:0;overflow-wrap:anywhere}
+.software-manual-file>.pr-actions{flex-shrink:0}
 .sw-list-title { font-size: 13.5px; margin-bottom: 2px; }
 .sw-list-purpose { font-size: 12px; color: var(--text-muted); line-height: 1.55; }
 .sw-row-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }

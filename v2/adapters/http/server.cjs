@@ -33,6 +33,18 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache({staleMs:60000});
  const localMedia=async body=>offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;
  const list=require('./catalog-list.cjs').catalogList;
+ // Only explicitly registered software manuals join the public file surface.
+ const softwareManuals=curatedLocalDocuments?.publicSoftwareResources?.()||[];
+ const softwareManualPaths=new Set(softwareManuals.map(x=>x.url));
+ for(const route of softwareManualPaths)require('./public-routes.cjs').publicGetRoutes.add(route);
+ function restoreSoftwareLinks(original,value){
+  if(Array.isArray(original))return original.map((item,i)=>restoreSoftwareLinks(item,value?.[i]));
+  if(!original||typeof original!=='object')return value;
+  const out={...value};for(const [key,item] of Object.entries(original))if(item&&typeof item==='object'&&Object.hasOwn(out,key))out[key]=restoreSoftwareLinks(item,out[key]);
+  const file=softwareManuals.find(x=>x.name===original.name&&x.sha256===original.sha256);
+  if(file){out.url=file.url;out.downloadUrl=file.downloadUrl;out.previewUrl=file.url;out.available=true;out.unavailableReason=null;out.unavailableMessage=null;}
+  return out;
+ }
  const loadDocs=async(cat,options,listOnly)=>{const body=await localMedia(await localQuick.docs(cat,options));return listOnly?list(body):body;};
  const docKey=(cat,history,offset,limit,view,listOnly)=>JSON.stringify([cat,history,offset,limit,view,listOnly]);
  const inFlight=new Map();let maintenanceUntil=0;
@@ -76,7 +88,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   if(tracked)inFlight.set(requestId,{method:req.method,route:operationRoute,startedAt:new Date().toISOString()});
   res.once('finish',()=>{responseDone=true;release();});res.once('close',()=>{responseDone=true;release();});
   try{
-  const send=(code,body)=>{const value=req.v2Public?publicCatalog.transform(body):body;if(req.v2ChatStream?.finish(code,value))return;res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(value));};
+  const send=(code,body)=>{const value=req.v2Public?restoreSoftwareLinks(body,publicCatalog.transform(body)):body;if(req.v2ChatStream?.finish(code,value))return;res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',...(req.v2Public?{'Cache-Control':'no-store'}:{})});res.end(JSON.stringify(value));};
   const route=req.url.split('?')[0];
   const loopback=strictApproved||['127.0.0.1','::1'].includes(require('./request-peer.cjs').peerAddress(req));
   if(route==='/v2/chip-browser'){
@@ -129,7 +141,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
   if(route==='/api/ai/chat')req.v2ChatStream=require('./chat-stream.cjs').chatStream(req,res);
   if(!req.v2Public&&developmentMonitor?.handle(req,res))return;
   if(route.startsWith('/v2/curated-videos/')){if(req.v2Public||!loopback||req.method!=='GET'||!curatedLocalVideos){res.writeHead(403);res.end();return;}await curatedLocalVideos.serve(req,res);return;}
-  if(route.startsWith('/v2/curated-documents/')){if(req.v2Public||!loopback||req.method!=='GET'||!curatedLocalDocuments){res.writeHead(403);res.end();return;}await curatedLocalDocuments.serve(req,res);return;}
+  if(route.startsWith('/v2/curated-documents/')){if((req.v2Public?!softwareManualPaths.has(route):!loopback)||req.method!=='GET'||!curatedLocalDocuments){res.writeHead(403);res.end();return;}await curatedLocalDocuments.serve(req,res);return;}
   if(route.startsWith('/v2/curated-documents-preview/')){if(req.v2Public||!loopback||req.method!=='GET'||!curatedLocalDocuments){res.writeHead(403);res.end();return;}await curatedLocalDocuments.preview(req,res);return;}
   if(req.v2Public&&route==='/api/huidu/log'&&req.method==='POST'){if(offlineKnowledge&&await offlineKnowledge.handle(req,res))return;res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'log-store-not-configured'}));return;}
   if(req.v2Public&&!publicCatalog){res.writeHead(503);res.end('Public resources are not configured');return;}
@@ -155,7 +167,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
    const media=async body=>!req.v2Public&&offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body,{requestContext:req}):offlineKnowledge?.authorizeVideoMedia?offlineKnowledge.authorizeVideoMedia(body,req):body;
    if(route==='/v2/software-access/screen-control.png'&&!req.v2Public){const fs=require('node:fs'),path=require('node:path'),file=path.resolve(__dirname,'../../../tmp/v2-offline-runtime/software-assets/pingzhangkong-download.png');if(!fs.existsSync(file)){send(404,{error:'download-image-not-configured'});return;}res.writeHead(200,{'Content-Type':'image/png','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res);return;}
    if(route==='/api/search'){const body=await media(await quick.search(q)),documents=!req.v2Public&&loopback&&curatedLocalDocuments?curatedLocalDocuments.augment(body):body;const result=!req.v2Public&&loopback?assembleFirmwareSearch(documents,q,curatedLocalFirmware):documents;if(competitiveKnowledge)result.results=(result.results||[]).map(product=>({...product,competitiveHighlights:competitiveKnowledge.highlights(product.modelId||product.name)}));send(200,result);return;}
-   if(route==='/api/software'){if(req.v2Public)send(200,await media(await quick.software(q)));else await catalogResponse(req,res,'software:'+q,async()=>localMedia(await localQuick.software(q)));return;}
+   if(route==='/api/software'){const manuals=body=>curatedLocalDocuments?.augmentSoftware?curatedLocalDocuments.augmentSoftware(body):body;if(req.v2Public)send(200,manuals(await media(await quick.software(q))));else await catalogResponse(req,res,'software:'+q,async()=>manuals(await localMedia(await localQuick.software(q))));return;}
    if(route==='/api/videos'){
     if(!req.v2Public&&loopback&&curatedLocalVideos){send(200,{query:q,video:curatedLocalVideos.list(q)});return;}
     const body=quick.videos(q);
@@ -178,8 +190,10 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
      const docs={...curatedLocalFirmware.docs(),includeHistory:history!=='current',historyOnly:history==='only'};
      const body=require('../../domain/knowledge/resource-view.cjs').paginateDocs({cat,docs},{offset,limit,view});send(200,listOnly?list(body):body);return;
     }
-    if(!req.v2Public&&loopback&&curatedLocalDocuments&&['spec','manual'].includes(cat)&&history==='current'){
-     const body=require('../../domain/knowledge/resource-view.cjs').paginateDocs({cat,docs:curatedLocalDocuments.docs(cat)},{offset,limit,view});send(200,listOnly?list(body):body);return;
+    if((!req.v2Public&&loopback||req.v2Public&&cat==='manual')&&curatedLocalDocuments&&['spec','manual'].includes(cat)&&history==='current'){
+     let docs=curatedLocalDocuments.docs(cat);
+     if(req.v2Public){const legacy=await quick.docs(cat,{websiteOnly:true});docs={...legacy.docs,localCurated:true,groups:[...legacy.docs.groups||[],...docs.groups.filter(g=>g.key==='software-manuals')]};}
+     const body=require('../../domain/knowledge/resource-view.cjs').paginateDocs({cat,docs},{offset,limit,view});send(200,listOnly?list(body):body);return;
     }
     if(!req.v2Public&&cat==='other'&&offlineKnowledge?.directoryCatalog){
      const directory=url.searchParams.get('directory')||'root',query=url.searchParams.get('q')||'',sort=url.searchParams.get('sort')||'name';
@@ -217,7 +231,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
  server.prepareCatalogs=async()=>{
   if(!offlineKnowledge)return;
   for(const cat of ['spec','manual','firmware','other','pending'])await catalogResponse.prepare(docKey(cat,'current',0,null,'grouped',true),()=>loadDocs(cat,{websiteOnly:true},true));
-  await catalogResponse.prepare('software:',async()=>localMedia(await localQuick.software('')));
+  await catalogResponse.prepare('software:',async()=>{const body=await localMedia(await localQuick.software(''));return curatedLocalDocuments?.augmentSoftware?curatedLocalDocuments.augmentSoftware(body):body;});
  };
  return server;
 }

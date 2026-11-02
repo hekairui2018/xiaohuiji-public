@@ -521,9 +521,9 @@ function buildSoftwareCard(s) {
     row.className = "sw-doc-row";
     s.manuals.forEach((m) => {
       const a = document.createElement("a");
-      a.className = "sw-doc-link"; a.href = m.url; a.target = "_blank"; a.rel = "noopener";
+      a.className = "sw-doc-link"; a.href = m.previewUrl || m.url; a.target = "_blank"; a.rel = "noopener";
       a.textContent = m.label;
-      row.appendChild(a);
+      const file=document.createElement('div');file.className='software-manual-file';file.append(a,window.ProductResources.fileActions({...m,name:m.name||m.label},{compact:true}));row.appendChild(file);
     });
     mwrap.append(lab, row);
     card.appendChild(mwrap);
@@ -1659,17 +1659,17 @@ async function renderSoftwareCategory(qArg) {
       const toggleDetails=(button)=>{
         if(expandedCard){
           expandedCard.querySelectorAll('video').forEach(releaseMediaVideo);
-          acts.prepend(button);expandedCard.replaceWith(row);expandedCard=null;
+          expandedCard.remove();expandedCard=null;
           button.textContent=button.dataset.collapsedLabel;button.setAttribute('aria-expanded','false');
           button.title='查看视频与说明书：'+s.name;button.setAttribute('aria-label',button.title);
         }else{
           button.dataset.collapsedLabel=button.textContent;expandedCard=buildSoftwareCard(s);
-          expandedCard.querySelector('.sw-head').append(button);
-          const close = document.createElement('button');
-          close.type='button';close.className='sw-btn-detail sw-close-bottom';close.textContent='收起';
-          close.addEventListener('click',()=>toggleDetails(button));
-          expandedCard.querySelector('.sw-actions').append(close);row.replaceWith(expandedCard);
-          const firstVideo=expandedCard.querySelector('.vid-item');if(firstVideo)firstVideo.open=true;
+          expandedCard.classList.add('software-inline-details');
+          expandedCard.querySelector('.sw-head')?.remove();expandedCard.querySelector('.sw-purpose')?.remove();
+          const actions=expandedCard.querySelector('.sw-actions');
+          actions.querySelectorAll('.sw-btn-download,.software-copy').forEach(e=>e.remove());
+          if(!actions.childElementCount)actions.remove();
+          row.append(expandedCard);
           button.textContent='收起';button.setAttribute('aria-expanded','true');
           button.title='收起资料：'+s.name;button.setAttribute('aria-label',button.title);
         }
@@ -1679,7 +1679,7 @@ async function renderSoftwareCategory(qArg) {
           if(bounds.top<0||bounds.bottom>window.innerHeight)row.scrollIntoView({block:'nearest'});
         }
       };
-      const hasMedia = window.VideoGroups.softwareVideos(s).length || (s.manuals && s.manuals.length);
+      const hasMedia = window.VideoGroups.softwareVideos(s).length || (s.manuals && s.manuals.length) || s.manualUrl;
       if (hasMedia) {
         const detail = document.createElement("button");
         detail.type = "button"; detail.className = "sw-btn-detail"; detail.textContent = "资料";
@@ -2172,7 +2172,7 @@ function specificationWorkspace(models,byModel,cat='spec'){
   cancel();if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));if(!pin)button.dataset.preview='true';
   const product=byModel.get(wikiModelKey(model.model)),items=(product?.items||[]).filter(i=>i.available!==false);
   if(pin){mascotGuide('search',model.model);mascotRemember(model.model);}
-  title.textContent=wikiModelKey(model.model)+' · '+items.length+' 份'+kindLabel;close.hidden=false;files.replaceChildren();files.scrollTop=0;
+  title.textContent=(model.subjectType==='software'?model.label:wikiModelKey(model.model))+' · '+items.length+' 份'+kindLabel;close.hidden=false;files.replaceChildren();files.scrollTop=0;
   const buckets={neutral:[],zh:[],en:[]};
   for(const item of items){const lang=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':lang==='en'||lang.includes('英文')?'en':'zh';buckets[key].push(item);}
   for(const [key,label] of [['neutral','中性版'],['zh','中文'],['en','英文']]){if(!buckets[key].length)continue;const group=el('div','spec-language-group');group.dataset.language=key;group.append(el('small','doc-column-title',label));for(const item of buckets[key])group.append(docFileActions(item));files.append(group);}
@@ -2181,7 +2181,7 @@ function specificationWorkspace(models,byModel,cat='spec'){
  close.onclick=()=>{cancel();const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;title.textContent='请选择左侧型号';files.replaceChildren();close.hidden=true;previous?.focus({preventScroll:true});};
  panel.onpointerenter=cancel;panel.onkeydown=event=>{if(event.key==='Escape')close.click();};header.append(title,close);panel.append(header,files);
  let first;
- for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
+ for(const model of models){const button=el('button','firmware-model spec-model',model.subjectType==='software'?model.label:wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
  layout.append(navigation,panel);if(first)choose(first.button,first.model,false);return layout;
 }
 function placeCatalogExpand(button,owner){
@@ -2198,7 +2198,12 @@ function renderOfficialSpecifications(docs,query,states,cat='spec'){
  searchResults.replaceChildren();searchResults.style.display='block';const head=document.createElement('div');head.className='search-count';const expand=document.createElement('button');expand.type='button';expand.className='sw-btn-detail';expand.textContent='全部展开';head.append(expand);searchResults.append(head);
  const wrap=document.createElement('div');wrap.className='vid-catalog official-spec-hierarchy';searchResults.append(wrap);
  let shown=0;
- for(const [groupName,children] of officialSpecHierarchy){const main=cat==='manual'&&groupName==='A、B、C、D、H系列异步卡'?'异步全彩':groupName;const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??(!!term||cat==='spec'&&main===officialSpecHierarchy[0][0]);
+ for(const [groupName,children] of officialSpecHierarchy){
+  if(cat==='manual'&&groupName==='配件产品'){
+   const software=(docs.groups||[]).filter(g=>g.key==='software-manuals').flatMap(g=>g.products||[]).filter(p=>!term||p.model.toUpperCase().includes(term)||p.items.some(i=>i.name.toUpperCase().includes(term)));
+   if(software.length){const node=docCatSummary('软件使用说明',software.length+' 款');node.det.className='doc-cat-group official-main';node.det.dataset.docState='software-manuals';node.det.open=states.get('software-manuals')??!!term;const map=new Map(software.map(p=>[wikiModelKey(p.model),p]));node.body.append(specificationWorkspace(software,map,cat));wrap.append(node.det);shown+=software.length;}
+  }
+  const main=cat==='manual'&&groupName==='A、B、C、D、H系列异步卡'?'异步全彩':groupName;const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??(!!term||cat==='spec'&&main===officialSpecHierarchy[0][0]);
   for(const child of (main==='A、B、C、D、H系列异步卡'?['async-all']:children)){const models=child==='async-all'?subset:subset.filter(r=>r.category===child);if(!models.length)continue;const sub=(child==='接收卡'||main==='A、B、C、D、H系列异步卡')?mainNode:docCatSummary(officialCategoryNames[child]||child,models.length+' 款');if(sub!==mainNode){sub.det.className='doc-cat-group official-sub';sub.body.className='doc-cat-group-body';sub.det.dataset.docState='official-sub:'+child;sub.det.open=states.get(sub.det.dataset.docState)??!!term;}
    const sorted=models.slice().sort((a,b)=>wikiModelCompare(a.model,b.model,child==='接收卡'?'receiver':child==='async-all'||child.includes('播放')?'player':''));
    shown+=sorted.length;sub.body.append(specificationWorkspace(sorted,byModel,cat));
