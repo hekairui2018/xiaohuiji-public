@@ -1,0 +1,53 @@
+--- a/v2/resource-index/server.py
++++ b/v2/resource-index/server.py
+@@ -31,7 +31,14 @@
+     try:
+         isolated=bool(check.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='approved_files'").fetchone())
+         approved=frozenset(r[0] for r in check.execute('SELECT sha256 FROM approved_files')) if isolated else None
+-        if isolated and len(approved)!=697:raise ValueError('Approved SQL index must contain 697 file identities')
++        if isolated:
++            manifest_file=work/'approved-identities.json'
++            if manifest_file.exists():
++                manifest=json.loads(manifest_file.read_text(encoding='utf-8'))
++                identity_hash=hashlib.sha256('\n'.join(sorted(approved)).encode()).hexdigest()
++                if manifest.get('schemaVersion')!='approved-sql-identities-1' or manifest.get('count')!=len(approved) or manifest.get('identitySetSha256')!=identity_hash:
++                    raise ValueError('Approved SQL identity manifest mismatch')
++            elif len(approved)!=697:raise ValueError('Approved SQL index needs an explicit identity manifest')
+     finally:check.close()
+     token=os.environ.get('XHJ_INTERNAL_TOKEN','')
+     config_root=Path('G:/公网发布资料/模组配置文件').resolve()
+--- /dev/null
++++ b/v2/resource-index/test_approved_identities.py
+@@ -0,0 +1,32 @@
++"""Synthetic approval-set checks; no customer originals or production DB."""
++import hashlib,json,sqlite3,tempfile,unittest
++from pathlib import Path
++import server
++
++class ApprovedIdentitiesTest(unittest.TestCase):
++    def fixture(self,count):
++        root=server.engine.PROJECT/'tmp';root.mkdir(exist_ok=True)
++        work=Path(self.enterContext(tempfile.TemporaryDirectory(dir=root)))
++        ids=[hashlib.sha256(str(i).encode()).hexdigest() for i in range(count)]
++        db=sqlite3.connect(work/'resources.db');db.execute('CREATE TABLE approved_files(sha256 TEXT PRIMARY KEY)');db.executemany('INSERT INTO approved_files VALUES(?)',[(i,) for i in ids]);db.commit();db.close()
++        return work,ids
++
++    def manifest(self,work,ids):
++        value={'schemaVersion':'approved-sql-identities-1','count':len(ids),'identitySetSha256':hashlib.sha256('\n'.join(sorted(ids)).encode()).hexdigest()}
++        (work/'approved-identities.json').write_text(json.dumps(value),encoding='utf-8')
++
++    def test_legacy_697_without_manifest_remains_supported(self):
++        work,_=self.fixture(697);instance=server.create_server(work,0);instance.server_close()
++
++    def test_expanded_set_requires_explicit_manifest(self):
++        work,_=self.fixture(715)
++        with self.assertRaisesRegex(ValueError,'explicit identity manifest'):server.create_server(work,0)
++
++    def test_exact_approved_set_is_accepted(self):
++        work,ids=self.fixture(715);self.manifest(work,ids);instance=server.create_server(work,0);instance.server_close()
++
++    def test_same_count_different_identity_is_rejected(self):
++        work,ids=self.fixture(715);ids[-1]='f'*64;self.manifest(work,ids)
++        with self.assertRaisesRegex(ValueError,'identity manifest mismatch'):server.create_server(work,0)
++
++if __name__=='__main__':unittest.main()
