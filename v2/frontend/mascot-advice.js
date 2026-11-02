@@ -30,7 +30,7 @@
   if(exact&&candidates.length)return {kind:'model',message:'你是不是想找 '+candidates.join(' / ')+'？当前仍保留 '+(exact.name||query)+' 的结果。',models:candidates,input:query};
   if(!exact&&candidates.length)return {kind:'model',message:(resolution.kind==='possible-typo'?'型号可能有漏字、错字或顺序写反。':'型号可能没有输完整。')+'相近型号：'+candidates.join(' / ')+'，请核对后选择。',models:candidates,input:query};
   const highlights=exact?.competitiveHighlights?.filter(h=>h&&typeof h.text==='string').slice(0,2);
-  return highlights?.length?{kind:'advantage',message:(exact.name||query)+' 的对标亮点：'+highlights.map(h=>h.text).join('；')+'。',models:[],input:query}:null;
+  return highlights?.length?{kind:'advantage',title:(exact.name||query)+' · 产品亮点',highlights:highlights.map(h=>h.text),message:(exact.name||query)+' 的对标亮点：'+highlights.map(h=>h.text).join('；')+'。',models:[],input:query}:null;
  }
  return {plan,resolve};
 });

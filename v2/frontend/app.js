@@ -2448,7 +2448,7 @@ if (quickCats) {
     el.className = "xhj-mascot " + d.cls;
     const orbInner = d.svg ? d.svg : `<span class="xm-glyph"></span>`;
     el.innerHTML =
-      `<div class="xm-bubble"><span class="xm-bubble-text"></span><span class="xm-bubble-close" title="关闭">×</span></div>` +
+      `<div class="xm-bubble" role="status" aria-live="polite"><span class="xm-bubble-text"></span><button type="button" class="xm-bubble-close" title="关闭" aria-label="关闭小灰机提示">×</button></div>` +
       `<div class="xm-orb">${orbInner}</div>`;
     const bubble = el.querySelector(".xm-bubble");
     el.querySelector(".xm-bubble-text").textContent = d.bubble;
@@ -2464,10 +2464,13 @@ if (quickCats) {
       if(d.view!=='quick'||document.body.dataset.view!=='quick')return;
       const advice=event.detail;if(!advice?.message)return;
       clearTimeout(adviceTimer);
-      const text=el.querySelector('.xm-bubble-text');text.textContent=advice.message;
+      const text=el.querySelector('.xm-bubble-text');text.replaceChildren();
+      const heading=document.createElement('strong');heading.className='xm-advice-heading';heading.textContent=advice.title||'小灰机 · 型号提醒';text.append(heading);
+      if(advice.highlights?.length){const list=document.createElement('ul');list.className='xm-advice-highlights';for(const value of advice.highlights){const item=document.createElement('li');item.textContent=value;list.append(item);}text.append(list);}
+      else {const message=document.createElement('span');message.textContent=advice.message;text.append(message);}
       for(const model of advice.models||[]){const button=document.createElement('button');button.type='button';button.textContent='查 '+model;button.addEventListener('click',ev=>{ev.stopPropagation();quickSearchInput.value=model;bubble.classList.remove('show');doSearch();});text.append(document.createTextNode(' '),button);}
       bubble.classList.add('show');
-      adviceTimer=setTimeout(()=>bubble.classList.remove('show'),advice.kind==='model'?16000:10000);
+      // Customer controls dismissal. A useful result must not vanish while they read the product card.
     });
     window.addEventListener('v2-model-suggestion',event=>{
       const suggestion=event.detail,key=suggestion?.input+'|'+suggestion?.model;
