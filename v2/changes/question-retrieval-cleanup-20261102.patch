@@ -1,0 +1,239 @@
+diff --git a/v2/adapters/http/offline-knowledge.cjs b/v2/adapters/http/offline-knowledge.cjs
+index 8e50fa6..43c030c 100644
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -24,12 +24,12 @@ function registeredSourceDirectory(locations){
+  return clean((drive?drive[1].toUpperCase()+'盘 / ':'')+folder);
+ }
+ const location=l=>Object.fromEntries(Object.entries(l||{}).filter(([k])=>['page','paragraph','table','row','sheet','slide','section','line','part','charStart','charEnd'].includes(k)).map(([k,v])=>[k,typeof v==='string'?clean(v):v]));
+-function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo,ragflowConfigFile,driveInventoryFile,resourceAnswer=null,resourceSearch=null,expertMaterials=null,expertMaterialRag=null,withheldResourcesFile=null,firmwareScope=null,approvedOnly=false,internalToken=null}={}){
++function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',sessionDirectory,logs=null,images=null,expert=null,app=null,authorizeRestrictedVideo=()=>false,authorizeRestrictedResource=authorizeRestrictedVideo,driveInventoryFile,resourceAnswer=null,resourceSearch=null,expertMaterials=null,withheldResourcesFile=null,firmwareScope=null,approvedOnly=false,internalToken=null}={}){
+  const driveCatalog=driveInventoryFile?require('../data/drive-catalog.cjs').createDriveCatalog(driveInventoryFile):null;
+  // A listed file is not necessarily an offerable file: a firmware binary whose
+  // version cannot be tied to any HDSet record must not be downloadable.
+  const withheld=require('../../domain/knowledge/withheld-resources.cjs').load(withheldResourcesFile);
+- const ragflow=ragflowConfigFile?require('./ragflow-answer.cjs').createRagflowAnswers({source:require('./ragflow-source.cjs').createRagflowSource({configFile:ragflowConfigFile,authorize:()=>true}),knowledge,lookup:{...knowledge,softwareItems:t=>(app?.resourceMedia?.softwareItems(t)||[]),isSoftware:t=>!!app?.resourceMedia?.softwareItems(t)?.length},clean,catalog:driveCatalog}):null;
++
+  const sessions=createOfflineSessions(sessionDirectory);
+  const modelRequests=new Map(),inFlight=new Set();
+  const progress=require('./request-progress.cjs').createRequestProgress();
+@@ -343,7 +343,7 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+     let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
+     const requestedMode=input.mode||req.headers['x-v2-mode']||'quick';if(!['quick','expert'].includes(requestedMode))return send(400,{error:'invalid-mode'});
+     if(requestedMode==='expert'&&expert?.access&&!expert.access().available){const state=expert.access();return send(503,{status:'unavailable',actualMode:'expert',error:'expert-'+state.reason,reply:state.reply,modelCallCount:0});}
+-    const localRag=ragflow&&!req.v2Public&&['127.0.0.1','::1'].includes(require('./request-peer.cjs').peerAddress(req));
++
+     if(typeof input.message!=='string'||!input.message.trim()||input.message.length>(requestedMode==='expert'?8000:240))return send(400,{error:'invalid-query',reply:requestedMode==='expert'?'请输入8000字以内的问题。':'请输入240字以内的型号、故障现象或检索词。'});
+     if(inFlight.has(input.sessionId))return send(409,{status:'busy',error:'session-request-active',reply:'当前会话仍在处理，请等待完成。'});
+     let state;try{state=sessions.update(input.sessionId||'anon-'+randomUUID(),input);}catch(e){return send(400,{error:e.message});}
+@@ -370,77 +370,10 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+       return send(200,{...output,requestedMode,sessionState:state});
+      }
+      if(!expert)return send(503,{status:'unavailable',actualMode:'expert',modelStatus:'unavailable',error:'expert-not-configured',reply:'专家模式未连接本地模型，请选择快速模式。',results:[],sessionState:state});
+-     const route=answers.expertClassify(input.message,state),readableBlocks=new Map();
+-     const expertEvidence=require('./expert-evidence.cjs').createExpertEvidence({request,searchCases,caseMap,clean,location,defaultModels:route.models||[],customerMessage:input.message});
++     const route=answers.expertClassify(input.message,state);
+      const calculateOrdering=require('./expert-ordering.cjs').createExpertOrdering({app,userMessages:state.messages.filter(m=>m.role==='user').map(m=>m.content)});
+-     const execute=async(name,args)=>{
+-      onProgress(name==='read_document'?'reading':'searching');
+-      if(name==='calculate_ordering')return calculateOrdering(args);
+-      if(name==='quick_answer'){
+-       if(!resourceAnswer||typeof args.query!=='string'||!args.query.trim()||args.query.length>240)throw Error('expert-invalid-tool');
+-       const found=await resourceAnswer(args.query,{request:req,signal:controller.signal})||{status:'unavailable',reply:'资料检索服务未配置或尚未就绪，当前不能确认资料是否存在。',results:[]};
+-       const evidence=require('./shared-quick-evidence.cjs').sharedQuickEvidence(found);
+-       if(found.status==='not-found'&&app?.chipLookup)evidence.push(...require('../../domain/knowledge/expert-firmware-evidence.cjs').expertFirmwareEvidence(args.query,{lookup:app.chipLookup,evidence:require('../data/load-resource-evidence.cjs').loadResourceEvidence(),models:route.models||[]}));
+-       return {evidence,directAnswer:found.status==='answer'?{status:found.status,intent:found.intent,reply:found.reply,results:found.results,answerBasis:found.answerBasis,retrievalBackend:found.retrievalBackend}:null,notice:{scope:'expert-requested-quick-answer',status:found.status,reply:found.reply,compatibilityConfirmed:false,meaning:'这是快速模式的检索结果和答复候选，由专家决定采用、补查或说明缺口。未找到文件时附带的芯片原表候选不是升级适用批准。'}};
+-      }
+-      if(name==='search_evidence'&&['files','resources','firmware'].includes(args.kind)&&resourceSearch){
+-       if(args.kind==='firmware'&&app?.chipLookup){
+-        const refs=require('../../domain/knowledge/expert-firmware-evidence.cjs').expertFirmwareEvidence(args.query,{lookup:app.chipLookup,evidence:require('../data/load-resource-evidence.cjs').loadResourceEvidence(),models:args.models||route.models});
+-        if(refs.length)return {evidence:refs,notice:{scope:'verified-chip-firmware-source-table',compatibilityConfirmed:false,meaning:'源表固件类别不等于接收卡当前硬件适用。需要下载原文件时再查询files/resources。'}};
+-       }
+-       const queries=args.models?.length?args.models.map(model=>model+' '+args.query):[args.query];
+-       const foundParts=await Promise.all(queries.map(query=>resourceSearch(query,{request:req,signal:controller.signal,...(args.models?.length?{allowModelSuggestion:false}:{})})));
+-       // Reserve one result per selected model before filling secondary copies;
+-       // otherwise translated/duplicate files for one model crowd out another.
+-       const firstRows=foundParts.map(p=>p?.results?.[0]).filter(Boolean);
+-       const found={sourceUnavailable:foundParts.every(p=>!p||p.sourceUnavailable),results:[...new Map([...firstRows,...foundParts.flatMap(p=>p?.results||[])].map(row=>[JSON.stringify([row.sha256,row.name,row.download]),row])).values()]};
+-       const rows=require('./shared-quick-evidence.cjs').sharedQuickEvidence(found);
+-       if(!rows.length&&expertMaterials){
+-        const discovery=expertMaterials.evidence(args.query,{models:args.models||route.models}).filter(e=>e.sourceKind==='structured-product-discovery');
+-        if(discovery.length)return {evidence:discovery,notice:{scope:'source-parameter-to-file-discovery',status:'model-candidates',compatibilityConfirmed:false,meaning:'文件名检索无结果；原表已按参数找到候选型号。请自行选择候选继续查所需文件，不要求客户先提供型号，不把竞品当成本公司产品。'}};
+-       }
+-       return {evidence:rows,notice:{scope:'authorized-file-and-resource-catalogue',status:found.sourceUnavailable?'unavailable':rows.length?'candidates':'not-found',compatibilityConfirmed:false,meaning:'文件登记仅证明文件存在。请结合客户目标决定交付链接、读正文、补查或回答，不能用无关文件代替所需文件。'}};
+-      }
+-      if(name==='search_evidence'&&expertMaterials&&['products','text'].includes(args.kind)){
+-       const added=expertMaterials.evidence(args.query,{models:args.models||route.models,targetedOnly:true});
+-       if(added.length)return {evidence:added,notice:{scope:'internal-expert-structured-sources',compatibilityConfirmed:false}};
+-      }
+-      if(name==='search_evidence'&&expertMaterialRag&&['products','text'].includes(args.kind)&&/控标|投标|招标|竞品|友商|对比|比较/.test(args.query)){
+-       try{const added=await expertMaterialRag.search(args.query,{models:args.models||route.models});if(added.length)return {evidence:added,notice:{scope:'internal-expert-supplementary-rag',compatibilityConfirmed:false}};}catch{}
+-      }
+-      if(name==='read_document'){
+-       const context=await expertEvidence.read(args);if(context)return context;
+-       if(!Number.isInteger(args.blockId)||!readableBlocks.has(args.blockId))throw Error('expert-invalid-tool');
+-       const parent=readableBlocks.get(args.blockId),raw=await request('/read?block='+args.blockId);for(const b of raw.blocks||[])readableBlocks.set(b.id,parent);return {evidence:(raw.blocks||[]).map(b=>({evidenceId:'block-'+b.id,blockId:b.id,name:parent.name,download:parent.download,readUrl:'/v2/offline/read?block='+b.id,text:clean(b.text),locator:location(b.locator)}))};
+-      }
+-      if(name==='search_evidence'&&['cases','faq'].includes(args.kind)){
+-       const found=await expertEvidence.search({...args,kind:'cases'});
+-       return {...found,notice:{...found.notice,scope:'case-boundary-search',meaning:'历史案例按完整记录边界与客户型号/芯片条件检索；无结果不代表没有资料，可由专家决定用text查询RAG原文。历史方案不是当前现场已验证方案。'}};
+-      }
+-      if(localRag&&name==='search_evidence'&&!['files','resources','firmware'].includes(args.kind)){try{const found=await ragflow.retrieve(args.query,{state,kind:args.kind,models:args.models?.length?args.models:route.models,documents:args.documents});if(found.results.length)return {evidence:found.results.map(e=>e.category==='case'?{...e,referenceOnly:true,caseSemantics:require('../../domain/aftersales/case-advice-contract.cjs').caseAdviceContract({sourceExcerpt:e.text})}:e),notice:{scope:'local-operator-private-drive',completeWorkflow:false,compatibilityConfirmed:false}};}catch{}}
+-      if(['cases','text','faq','firmware'].includes(args.kind))return expertEvidence.search(args);
+-      if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['text','files','cases','products','resources'].includes(args.kind))throw Error('expert-invalid-tool');
+-      let planned=answers.classify(args.query);
+-      planned.hardwareRequested=route.hardwareRequested||planned.hardwareRequested;
+-      if(['products','resources'].includes(args.kind)&&route.models.length&&!planned.models.length)planned={...planned,query:route.models.join(' ')+' '+planned.query,models:route.models};
+-      if(args.kind==='cases')planned={...planned,intent:'aftersales'};
+-      if(args.kind==='products')planned={...planned,intent:'product'};
+-      if(args.kind==='resources')planned={...planned,intent:'resources',category:planned.category||route.category};
+-      const data=['products','resources','cases'].includes(args.kind)?await answers.answer(planned,{facts:state.facts,sessionId:state.id+'-tool'}):await search(planned.query,args.kind,{limit:8});
+-      if(!data.retrievalTrace)data.results=answers.filter(planned.query,data.results,planned.models).slice(0,4);
+-      for(const r of data.results||[])if(r.blockId)readableBlocks.set(r.blockId,r);
+-      let evidence=(data.results||[]).slice(0,4).map((r,i)=>({evidenceId:r.id||r.evidenceId||r.resourceId||'evidence-'+require('node:crypto').createHash('sha256').update(JSON.stringify([r.name,r.text,r.download])).digest('hex').slice(0,16),blockId:r.blockId||null,name:clean(r.name||r.sources?.[0]?.name||('历史案例：'+(r.title||'未命名'))).split(/\r?\n/)[0].slice(0,110),text:clean(r.sourceExcerpt||r.text||r.phenomenon||r.name||'').slice(0,1000),scope:r.scope||null,modelIds:r.modelIds||r.mentionedModels||planned.models,verificationStatus:r.verificationStatus||'unknown',locator:r.locator||(r.sources?.[0]?.locator?{section:r.sources[0].locator}:null),readUrl:r.readUrl||null,download:r.download||r.sources?.find(s=>s.original)?.original||null,referenceOnly:true}));
+-      if(planned.intent==='product'){
+-       const anchor=/HUB75E?|HDMI|DVI|USB/i.exec(planned.query)?.[0],query=anchor?planned.models.join(' ')+' '+anchor:planned.query;
+-       const body=await search(query,'text',{limit:8}),relevant=answers.filter(query,body.results,planned.models).slice(0,4);
+-       const passages=relevant.map(r=>{if(r.blockId)readableBlocks.set(r.blockId,r);return {evidenceId:r.evidenceId,blockId:r.blockId,name:r.name,text:r.text.slice(0,1000),download:r.download,readUrl:r.readUrl,locator:r.locator,modelIds:planned.models,verificationStatus:'original-passage-not-compatibility'};});
+-       evidence=[...passages,...evidence];
+-      }
+-      const wanted=/接口|HUB|网口/i.test(planned.query)?'ports':/带载|像素|分辨率/i.test(planned.query)?'load':null;
+-      const claims=[];for(const product of data.result?.knowledge?.records||[])for(const c of (product.claims||[]).filter(c=>!wanted||c.field===wanted).slice(0,3)){const ref=c.sourceReference;if(ref)claims.push({evidenceId:c.claimId,name:ref.originalName||product.displayName+' 产品索引',text:c.text,download:ref.url||null,locator:ref.page?{page:ref.page}:ref.record?{row:ref.record}:null,modelIds:[product.modelId],verificationStatus:c.verificationStatus||'indexed-not-content-verified'});}
+-      if(planned.intent==='product'){const near=await expertEvidence.search(args);evidence=[...near.evidence,...claims,...evidence.filter(e=>!e.blockId)];}
+-      return {intent:planned.intent,notice:{status:data.status||'completed',category:planned.category||null,exactModels:planned.models||[],userModels:route.models||[],additionalModels:(planned.models||[]).filter(m=>!route.models.includes(m)),resultCount:data.results?.length||0,compatibilityConfirmed:false,searchSemantics:args.kind==='resources'?'按精确型号和资料类别查目录；HD前缀及同义词改写不改变目录。如有新的原文目标可用files/text；缺说明书不能以规格书替代':null},evidence:evidence.slice(0,6)};
+-     };
++     const sectionTools=require('./section-tools.cjs').createSectionTools({resourceSearch,expertMaterials,calculateOrdering,onProgress,signal:()=>controller.signal});
++     const execute=sectionTools.execute;
+     const controller=new AbortController(),disconnected=()=>{if(!res.writableEnded)controller.abort();};modelRequests.set(state.id,controller);res.once('close',disconnected);
+     const progressFacts={models:route.models||[],results:[],modelCallCount:0};
+     const expertProgress=(stage,detail={})=>{onProgress(stage);Object.assign(progressFacts,detail);req.v2ChatStream?.progress(require('./answer-process.cjs').answerProcess({...progressFacts,status:progressFacts.generating?'generating':'running'}));};
+@@ -456,14 +389,14 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+     progressCompleted=output.status!=='unavailable';onProgress(progressCompleted?'completed':'failed');
+     state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
+     }
+-    const query=resourceAnswer&&localRag?input.message:input.continueQuery===true&&state.messages.length>1?state.messages.filter(m=>m.role==='user').slice(-2).map(m=>m.query||m.content).join(' '):input.message;
++    const query=input.message;
+     const started=Date.now();
+     // The current quick resource path is deliberately one-turn. Chat archives
+     // remain stored, but history and extracted prior facts never enter retrieval.
+     const taskPlan=quickRetrieval.plan(input.message,state);
+     let data=taskPlan.intent==='ordering'?await quickRetrieval.answer(input.message,{state,currentFacts:input.facts||{},onProgress}):resourceAnswer?await resourceAnswer(input.message,{request:req,onProgress}):null;
+-    if(!data&&approvedOnly){const found=await search(input.message,'all',{limit:6});data={status:'answer',intent:'technical',reply:found.results?.length?found.results.map(r=>[r.name,r.text].filter(Boolean).join('：')).join('\n\n'):'当前批准资料中未找到对应答案。FAQ 检索已停用。',results:found.results||[],answerBasis:'approved-sql'};}
+-    if(!data)data={status:'unavailable',intent:'technical',reply:'RAG 检索未配置，本次未完成资料检索，请联系管理员恢复。',results:[],sourceUnavailable:true,answerBasis:'ragflow-required'};
++
++    if(!data)data={status:'unavailable',intent:'technical',reply:'全文检索暂不可用，本次未完成资料查询。',results:[],sourceUnavailable:true,answerBasis:'sections-sql-bm25-vector'};
+     state=sessions.recordResult(state.id,{kind,query,intent:data.intent,quickContext:data.quickContext,evidenceIds:(data.results||[]).map(r=>r.id||r.evidenceId||r.resourceId).filter(Boolean)});
+     const {routeLog,quickContext,queryPlan,retrievalTrace,candidateCount,retrievalPolicy,sourceFailures,...customerData}=data;
+     const customerResults=(customerData.results||[]).map(({rankingSignals,...evidence})=>evidence);
+diff --git a/v2/adapters/http/server.cjs b/v2/adapters/http/server.cjs
+index 03452e5..d44111d 100644
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -22,14 +22,13 @@ function assembleFirmwareSearch(body,query,registry){
+  if(!found)results.push(fill({features:{},specFiles:[],specLinks:[]}));
+  return {...body,results,count:results.length,productCount:results.length};
+ }
+-function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,graydeskReceiver=null,curatedLocalVideos=null,curatedLocalDocuments=null,curatedLocalFirmware=null,firmwareScope=null,curatedResources=null,sectionSearch=null,competitiveKnowledge=null,assistantUpdates=null,graydeskUpdates=null,gatewayTrust=null,serveFrontend=true}={}){
++function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,graydeskReceiver=null,curatedLocalVideos=null,curatedLocalDocuments=null,curatedLocalFirmware=null,firmwareScope=null,sectionSearch=null,competitiveKnowledge=null,assistantUpdates=null,graydeskUpdates=null,gatewayTrust=null,serveFrontend=true}={}){
+  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
+  app={...app,dialogue:app.customerDialogue||app.dialogue};
+  const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app);
+  const localQuick=createQuickService(app,{resolveDocuments:offlineKnowledge?.resolveDocuments,localCatalog:offlineKnowledge?.localCatalog,productFacts:offlineKnowledge?.productFacts}),dialogue=createDialogueService(app),original=createOriginalResource({evidenceDocuments:app.originalDocuments});
+  const orderingDialogue=createDialogueService(app,{operation:'ordering'});
+  const wikiAdmin=require('./wiki-admin.cjs').createWikiAdmin();
+- const curatedSearch=()=>{if(!curatedResources)throw Error('curated-search-not-configured');return curatedResources;};
+  const catalogResponse=require('./catalog-response-cache.cjs').createCatalogResponseCache({staleMs:60000});
+  const localMedia=async body=>offlineKnowledge?.localizeMedia?offlineKnowledge.localizeMedia(body):body;
+  const list=require('./catalog-list.cjs').catalogList;
+@@ -90,8 +89,8 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+    res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Length':bytes.length,'Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(item.name),'Cache-Control':'no-store'});res.end(bytes);return;
+   }
+   if(offlineKnowledge?.health?.().catalog?.status==='approved-sql'&&(route.startsWith('/official-files/')||route.startsWith('/v2/curated-docx/')||route.startsWith('/v2/source-pdf/'))){send(404,{error:'resource-not-found'});return;}
+-  if(route.startsWith('/v2/curated-docx/')||route.startsWith('/v2/source-pdf/')||route.startsWith('/v2/curated-firmware/')){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}await curatedSearch().original(req,res);return;}
+-  if(route==='/v2/curated-search/status'){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}try{if(!sectionSearch)curatedSearch();send(200,{enabled:true,backend:sectionSearch?'sections-sql-bm25-vector':'curated',scope:['spec','manual','video','firmware','module-config']});}catch{send(200,{enabled:false});}return;}
++  if(route.startsWith('/v2/curated-docx/')||route.startsWith('/v2/source-pdf/')){send(404,{error:'resource-not-found'});return;}
++  if(route==='/v2/curated-search/status'){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}send(200,{enabled:!!sectionSearch,backend:sectionSearch?'sections-sql-bm25-vector':null,scope:['spec','manual','video','firmware','module-config']});return;}
+   if(route==='/v2/configuration-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'||!offlineKnowledge?.configurationFiles){send(403,{error:'local-only'});return;}
+    const params=new URL(req.url,'http://localhost').searchParams,q=(params.get('q')||'').trim(),directory=params.get('directory')||'root',offset=Number(params.get('offset')||0),sort=params.get('sort')||'name';
+@@ -104,7 +103,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+   if(route==='/v2/curated-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}
+    const q=(new URL(req.url,'http://localhost').searchParams.get('q')||'').trim();if(!q||q.length>240){send(400,{error:'invalid-query'});return;}
+-   try{const result=sectionSearch?await sectionSearch.search(q):await curatedSearch().search(q,{request:req});
++   try{if(!sectionSearch)throw Error('fulltext-not-configured');const result=await sectionSearch.search(q);
+     send(200,result);}catch{send(503,{error:'检索暂不可用，请重试'});}return;
+   }
+   if(route.startsWith('/v2/fulltext-file/')){
+diff --git a/v2/tests/section-search.test.cjs b/v2/tests/section-search.test.cjs
+index f93cf10..5810a36 100644
+--- a/v2/tests/section-search.test.cjs
++++ b/v2/tests/section-search.test.cjs
+@@ -1,6 +1,22 @@
+ 'use strict';
+ const test=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
+ const {createSectionSearch}=require('../adapters/http/section-search.cjs');
++const {createServer}=require('../adapters/http/server.cjs');
++test('fulltext never falls back to the shared legacy question-answer source',async()=>{
++ for(const mode of ['missing','failed','ready']){
++  let legacyCalls=0,newCalls=0;
++  const server=createServer(undefined,{curatedResources:{search(){legacyCalls++;throw Error('legacy must never run');}},sectionSearch:mode==='missing'?null:{async search(){newCalls++;if(mode==='failed')throw Error('index offline');return {results:[],retrievalBackend:'sections-sql-bm25-vector'};}}});
++  await new Promise(r=>server.listen(0,'127.0.0.1',r));
++  try{
++   const base='http://127.0.0.1:'+server.address().port;
++   const status=await fetch(base+'/v2/curated-search/status').then(r=>r.json());
++   assert.equal(status.enabled,mode!=='missing');assert.equal(status.backend,mode==='missing'?null:'sections-sql-bm25-vector');
++   const response=await fetch(base+'/v2/curated-search?q=X100');
++   assert.equal(response.status,mode==='ready'?200:503);
++   assert.equal(legacyCalls,0);assert.equal(newCalls,mode==='missing'?0:1);
++  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
++ }
++});
+ test('section bridge passes only the explicit query with its private capability',async()=>{
+  const observed=[];const upstream=http.createServer((req,res)=>{observed.push({url:req.url,token:req.headers['x-internal-token'],purpose:req.headers['x-internal-purpose']});res.setHeader('Content-Type','application/json');res.end(JSON.stringify({results:[],retrievalBackend:'sections-sql-bm25-vector'}));});
+  await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
+diff --git a/v2/tools/start-offline.cjs b/v2/tools/start-offline.cjs
+index cac5c2f..5320fc2 100644
+--- a/v2/tools/start-offline.cjs
++++ b/v2/tools/start-offline.cjs
+@@ -61,14 +61,12 @@ async function startOffline(options={}){
+  const curatedLocalFirmware=fs.existsSync(firmwareManifestFile)?await require('../adapters/http/curated-local-firmware.cjs').createCuratedLocalFirmware({manifestFile:firmwareManifestFile,rootDirectory:'G:/公网发布资料'}):null;
+  if(curatedLocalFirmware?.problems?.length)console.log(JSON.stringify({event:'firmware-verification-problem',problems:curatedLocalFirmware.problems}));
+  const firmwareScope=require('../domain/knowledge/firmware-scope.cjs').createFirmwareScope({manifestFile:firmwareManifestFile});
+- let curatedResources=null;
+  const sectionSearch=fs.existsSync(path.join(index,'section-search.json'))?require('../adapters/http/section-search.cjs').createSectionSearch({resourceBase,internalToken}):null;
++ const resourceAnswers=require('../adapters/http/section-answers.cjs').createSectionAnswers(sectionSearch);
+  const competitiveKnowledge=options['expert-comparison']?require('../domain/knowledge/competitive-knowledge.cjs').createCompetitiveKnowledge(options['expert-comparison']):null;
+  const expertMaterialsFile=options['expert-materials']||path.join(root,'tmp/expert-structured-20261028/materials.private.json');
+- const expertMaterials=fs.existsSync(expertMaterialsFile)?require('../domain/knowledge/expert-materials.cjs').createExpertMaterials(expertMaterialsFile):null;
+- const expertRagConnection=path.join(root,'tmp/ragflow-comparison-20261025/connection.private.json'),expertRagState=path.join(root,'tmp/expert-structured-20261028/rag-import.private.json');
+- const expertMaterialRag=fs.existsSync(expertRagConnection)&&fs.existsSync(expertRagState)?require('../adapters/http/expert-material-rag.cjs').createExpertMaterialRag({connectionFile:expertRagConnection,stateFile:expertRagState,materialSource:expertMaterials}):null;
+- const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert,ragflowConfigFile:approvedOnly?null:ragflowConfigFile,driveInventoryFile:approvedOnly?null:driveInventoryFile,expertMaterials:competitiveKnowledge?.materials||(approvedOnly?null:expertMaterials),expertMaterialRag:approvedOnly?null:expertMaterialRag,approvedOnly,internalToken,resourceAnswer:(message,settings)=>!approvedOnly&&curatedResources?curatedResources.answer(message,settings):null,resourceSearch:(message,settings)=>!approvedOnly&&curatedResources?curatedResources.search(message,settings):null,withheldResourcesFile:path.join(dataDirectory,'withheld-firmware.private.json'),firmwareScope});
++ const expertMaterials=competitiveKnowledge?.materials||(fs.existsSync(expertMaterialsFile)?require('../domain/knowledge/expert-materials.cjs').createExpertMaterials(expertMaterialsFile):null);
++ const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert,expertMaterials,approvedOnly,internalToken,resourceAnswer:resourceAnswers.answer,resourceSearch:resourceAnswers.search,withheldResourcesFile:path.join(dataDirectory,'withheld-firmware.private.json'),firmwareScope});
+  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
+  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
+  const accessGuard=lan?require('../adapters/http/lan-access.cjs').createLanGuard({...lan,port,publicOrigin:options['public-origin']||null}):null;
+@@ -80,21 +78,9 @@ async function startOffline(options={}){
+  const curatedLocalVideos=fs.existsSync(curatedManifest)?await require('../adapters/http/curated-local-videos.cjs').createCuratedLocalVideos({manifestFile:curatedManifest,rootDirectory:'G:/公网发布资料'}):null;
+  const curatedDocumentsManifest=path.join(catalogDirectory,'curated-local-documents.json');
+  const curatedLocalDocuments=fs.existsSync(curatedDocumentsManifest)?await require('../adapters/http/curated-local-documents.cjs').createCuratedLocalDocuments({manifestFile:curatedDocumentsManifest,rootDirectory:'G:/公网发布资料',resourceBase}):null;
+- if(ragflowConfigFile&&curatedLocalDocuments&&!approvedOnly){
+-  const source=require('../adapters/http/curated-search.cjs').createCuratedSearch({manifestFile:curatedDocumentsManifest,configFile:ragflowConfigFile,extraFile:path.join(root,'tmp/ragflow-comparison-20261025/curated-missing.private.json'),docxFile:path.join(root,'tmp/ragflow-comparison-20261025/official-docx-import.private.json'),addonFile:path.join(root,'tmp/v2-offline-runtime/curated-software-manuals.json'),pdfMapFile:path.join(root,'tmp/chip-rag-delivery-20261028/pdf/source-pdfs.private.json'),videosFile:curatedManifest,softwareLinksFile:path.join(root,'tmp/chip-rag-delivery-20261028/model-software-audit.private.json'),softwareModelsFile:path.join(root,'tmp/chip-rag-delivery-20261028/software-model-audit.private.json'),firmwareManifestFile});
+-  const lookup=require('../adapters/http/quick-service.cjs').createQuickService(app,{resolveDocuments:offlineKnowledge.resolveDocuments,localCatalog:offlineKnowledge.localCatalog});
+-  curatedResources=require('../adapters/http/curated-resources.cjs').createCuratedResources({source,chipLookup:app.chipLookup,firmwareEvidence:require('../adapters/data/load-resource-evidence.cjs').loadResourceEvidence(),configurationFiles:(req,q)=>offlineKnowledge.configurationFiles(req,q),firmwareFiles:async req=>{
+-   // Preserve the existing current-Wiki scope and request access checks. The
+-   // public folder is a verified original location, not the whole local Wiki.
+-   const modelKey=require('../domain/knowledge/resource-query.cjs').normalize;
+-   const preferred=source.firmwareFiles(),preferredNames=new Set(preferred.flatMap(f=>f.models.map(m=>modelKey(m)+'\0'+f.name)));
+-   let body=await lookup.docs('firmware',{includeHistory:false,historyOnly:false,websiteOnly:true});body=await offlineKnowledge.localizeMedia(body,{requestContext:req});const files=[...preferred];
+-   for(const g of body.docs?.groups||[])if(source.isOfficialModel(g.model))for(const f of g.items||[])if(f.available!==false&&!preferredNames.has(modelKey(g.model)+'\0'+f.name))files.push({...f,models:[g.model],folders:[g.model]});return files;
+-  }});
+- }
+  const assistantUpdates=require('../external-services/assistant-updates.cjs').createAssistantUpdates({configFile:process.env.XHJ_ASSISTANT_UPDATE_CONFIG||path.join(root,'.private/assistant-updates/config.json')});
+  const graydeskUpdates=require('../external-services/graydesk-updates.cjs').createGraydeskUpdates({configFile:path.join(root,'.private/graydesk-updates/config.json')});
+- const server=createServer({...app,health:()=>({...app.health(),competitiveKnowledge:competitiveKnowledge?.counts||null,graydesk:{configured:graydeskReceiver.configured},assistantUpdates:{protocol:1},graydeskUpdates:{protocol:1},feishu:logs.status(),fulltext:sectionSearch?{backend:'sections-sql-bm25-vector'}:null,trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'expert-opt-in',ragflowConfigured:!!ragflowConfigFile,driveCatalogConfigured:!!driveInventoryFile,knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid,architecture:apiPort?'separated-web-api':'combined',...(apiPort?{apiPort}:{}),codeProtection:options.codeProtection||null}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor,graydeskReceiver,curatedLocalVideos,curatedLocalDocuments,curatedLocalFirmware,firmwareScope,curatedResources,sectionSearch,competitiveKnowledge,assistantUpdates,graydeskUpdates,gatewayTrust:apiPort?require('../adapters/http/request-peer.cjs').createGatewayTrust({key:gatewayKey}):null,serveFrontend:!apiPort});
++ const server=createServer({...app,health:()=>({...app.health(),competitiveKnowledge:competitiveKnowledge?.counts||null,graydesk:{configured:graydeskReceiver.configured},assistantUpdates:{protocol:1},graydeskUpdates:{protocol:1},feishu:logs.status(),fulltext:sectionSearch?{backend:'sections-sql-bm25-vector'}:null,trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'expert-opt-in',ragflowConfigured:!!ragflowConfigFile,driveCatalogConfigured:!!driveInventoryFile,knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid,architecture:apiPort?'separated-web-api':'combined',...(apiPort?{apiPort}:{}),codeProtection:options.codeProtection||null}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor,graydeskReceiver,curatedLocalVideos,curatedLocalDocuments,curatedLocalFirmware,firmwareScope,sectionSearch,competitiveKnowledge,assistantUpdates,graydeskUpdates,gatewayTrust:apiPort?require('../adapters/http/request-peer.cjs').createGatewayTrust({key:gatewayKey}):null,serveFrontend:!apiPort});
+  const preparationStarted=Date.now();
+  let webServer=null;
+  try{
