@@ -553,6 +553,17 @@ function buildSoftwareCard(s) {
 
 // 软件列表沿用文件区的蓝色图标操作，保留原按钮及事件。
 function styleSoftwareActions(actions, software) {
+  // Copy only explicit public destinations; never turn a local QR image into a download URL.
+  actions.querySelectorAll('a.sw-btn-download').forEach(link=>{
+    if(link.nextElementSibling?.classList.contains('software-copy'))return;
+    const url=link.getAttribute('href');
+    if(!/^https?:\/\//i.test(url||''))return;
+    const hostname=new URL(url).hostname;
+    if(/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(hostname))return;
+    const copy=window.ProductResources.copyButton({downloadUrl:url});
+    copy.classList.add('software-copy');copy.title='复制链接：'+software.name+' · '+link.textContent;
+    copy.setAttribute('aria-label',copy.title);link.after(copy);
+  });
   actions.querySelectorAll('.sw-btn-detail, .sw-btn-download').forEach(action => {
     const download=action.classList.contains('sw-btn-download');
     // 扫码和地区访问入口保留原文字，只有实际安装包使用下载图标。

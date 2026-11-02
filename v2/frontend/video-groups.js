@@ -50,15 +50,22 @@ function topic(name){
 function organize(groups){
  const out=[];
  for(const source of groups||[]){
-  const videos=Array.isArray(source.videos)?source.videos:[];
+  const videos=sortVideos(Array.isArray(source.videos)?source.videos:[]);
   if(!videos.length)continue;
   const sections=Array.isArray(source.sections)&&source.sections.length
-   ?source.sections.filter(s=>Array.isArray(s.videos)&&s.videos.length)
+   ?source.sections.filter(s=>Array.isArray(s.videos)&&s.videos.length).map(s=>({...s,videos:sortVideos(s.videos)}))
    :[{label:source.label||'操作视频',videos}];
   out.push({...source,key:source.key||'other',label:source.label||'其他',videos,
     sections,count:videos.length});
  }
  return out;
+}
+// Browse priority, not measured popularity. Preserve names, identities and categories.
+function sortVideos(items){
+ const language=v=>/中文|汉语|^(zh|zh-cn)$/i.test(v.language||'')?0:/英文|英语|english|^en$/i.test(v.language||'')?2:/[\u3400-\u9fff]/.test(v.name||'')?0:2;
+ const topics=[/基本操作|基础操作|入门|连接|接线|调试/,/节目|发布|发送/,/Wi.?Fi|配网|网络|密码/i,/U.?盘|U.?disk/i,/复位|恢复出厂|reset/i,/屏参|亮度|分辨率/,/升级|固件|firmware/i,/同步|拼接|投屏/,/定时|开关机/];
+ const priority=v=>{const i=topics.findIndex(re=>re.test(v.name||''));return i<0?topics.length:i;};
+ return [...(items||[])].sort((a,b)=>language(a)-language(b)||priority(a)-priority(b));
 }
 // Software cards show explicitly named tutorials, never every video in a shared folder.
 function softwareVideos(software){
@@ -81,5 +88,5 @@ function softwareVideos(software){
   return /^(?:基本操作|基础操作|简易操作|操作视频|操作演示|操作教程|操作动画|使用教程|入门教程|操作)(?:[（(].*[）)]|[-—]?(?:中文版|英文版|中文|英文|英语|中|英|印尼语)|V?\d[\d.px-]*|x264)*$/i.test(rest);
  });
 }
-const api={organize,classify,topic,softwareVideos};if(typeof module==='object'&&module.exports)module.exports=api;else root.VideoGroups=api;
+const api={organize,classify,topic,softwareVideos,sortVideos};if(typeof module==='object'&&module.exports)module.exports=api;else root.VideoGroups=api;
 })(typeof window==='object'?window:globalThis);
