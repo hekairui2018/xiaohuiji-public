@@ -1,0 +1,19 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
+const {loadKnowledge}=require('../adapters/data/load-knowledge.cjs');
+const {createApp}=require('../app/bootstrap.cjs');
+const {createOfflineKnowledge}=require('../adapters/http/offline-knowledge.cjs');
+
+test('quick ordering requests redirect to expert without calculating, calling the model or retrieving documents',async()=>{
+ const knowledge=loadKnowledge();let api,modelCalls=0,sourceCalls=0;
+ const server=http.createServer((req,res)=>api.handle(req,res));
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ api=createOfflineKnowledge({knowledge,app:createApp({knowledge}),resourceAnswer:async()=>{sourceCalls++;throw Error('unexpected retrieval');},expert:{answer:async()=>{modelCalls++;throw Error('unexpected model');}}});
+ try{
+  for(const message of ['配单P2室内屏','配屏，整屏分辨率1600×800','帮我选设备算接收卡，P2宽10张高5张']){
+   const response=await fetch('http://127.0.0.1:'+server.address().port+'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'quick',message,sessionId:'quick-ordering-boundary'})});
+   const data=await response.json();assert.equal(response.status,200);assert.equal(data.status,'needs-expert');assert.equal(data.intent,'ordering');assert.equal(data.modelCallCount,0);assert.deepEqual(data.results,[]);assert(!data.result?.bom);assert.match(data.reply,/专家模式/);
+  }
+  assert.equal(sourceCalls,0);assert.equal(modelCalls,0);
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
