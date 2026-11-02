@@ -1,0 +1,16 @@
+diff --git a/v2/tools/start-offline.cjs b/v2/tools/start-offline.cjs
+index 5320fc2..3ea712b 100644
+--- a/v2/tools/start-offline.cjs
++++ b/v2/tools/start-offline.cjs
+@@ -62,10 +62,10 @@ async function startOffline(options={}){
+  if(curatedLocalFirmware?.problems?.length)console.log(JSON.stringify({event:'firmware-verification-problem',problems:curatedLocalFirmware.problems}));
+  const firmwareScope=require('../domain/knowledge/firmware-scope.cjs').createFirmwareScope({manifestFile:firmwareManifestFile});
+  const sectionSearch=fs.existsSync(path.join(index,'section-search.json'))?require('../adapters/http/section-search.cjs').createSectionSearch({resourceBase,internalToken}):null;
+- const resourceAnswers=require('../adapters/http/section-answers.cjs').createSectionAnswers(sectionSearch);
+  const competitiveKnowledge=options['expert-comparison']?require('../domain/knowledge/competitive-knowledge.cjs').createCompetitiveKnowledge(options['expert-comparison']):null;
+  const expertMaterialsFile=options['expert-materials']||path.join(root,'tmp/expert-structured-20261028/materials.private.json');
+  const expertMaterials=competitiveKnowledge?.materials||(fs.existsSync(expertMaterialsFile)?require('../domain/knowledge/expert-materials.cjs').createExpertMaterials(expertMaterialsFile):null);
++ const resourceAnswers=require('../adapters/http/section-answers.cjs').createSectionAnswers(sectionSearch,{materials:expertMaterials});
+  const offlineKnowledge=createOfflineKnowledge({app,knowledge,resourceBase,sessionDirectory:path.join(dataDirectory,'sessions'),logs,images,expert,expertMaterials,approvedOnly,internalToken,resourceAnswer:resourceAnswers.answer,resourceSearch:resourceAnswers.search,withheldResourcesFile:path.join(dataDirectory,'withheld-firmware.private.json'),firmwareScope});
+  if(options['public-origin']&&!lan)throw Error('Public origin requires explicit LAN tunnel configuration');
+  const publicCatalog=options['public-origin']?require('../adapters/http/public-catalog.cjs').createPublicCatalog({configFile:options['oss-config']||path.join(root,'scripts/.oss-config.json'),allowlistFile:options['public-allowlist']||path.join(dataDirectory,'public-cloud-allowlist.json')}):null;
