@@ -1,0 +1,20 @@
+{
+  "HDPlayer": {
+    "videoCategories": ["异步全彩"],
+    "excludedScopes": ["LCD", "液晶", "数字标牌", "智慧终端", "智慧主板", "单双色", "单色", "双色"]
+  },
+  "HDSet": {
+    "videoCategories": ["接收卡", "视频处理", "同步"],
+    "excludedScopes": ["LCD", "液晶", "数字标牌", "智慧终端", "智慧主板", "单双色", "单色", "双色"]
+  },
+  "屏掌控": {
+    "videoCategories": ["异步全彩", "视频处理"],
+    "excludedScopes": ["LCD", "液晶", "数字标牌", "智慧终端", "智慧主板"]
+  },
+  "HD2020": {"videoCategories": [], "excludedScopes": ["LCD", "异步全彩"]},
+  "HDSign": {"videoCategories": [], "excludedScopes": ["LCD", "异步全彩"]},
+  "HD2018": {"videoCategories": [], "excludedScopes": ["LCD", "异步全彩"]},
+  "HDShow": {"videoCategories": [], "excludedScopes": []},
+  "LCDPlayer": {"videoCategories": [], "excludedScopes": []},
+  "小灰云": {"videoCategories": [], "excludedScopes": []}
+}

@@ -3,36 +3,50 @@
 Reuse parsed sections, embeddings and the shared retrieval implementation. Never
 write an index, infer hardware compatibility, or mutate the fulltext instance.
 """
+
 import collections
-import copy
 import threading
 import re
 import numpy as np
+from section_search import SectionIndex
+
+MAX_SOFTWARE_VIEWS = 8
 
 
 class QuickSections:
     def __init__(self, index):
         self.index = index
-        self.views = {}
+        self.views = collections.OrderedDict()
         self.lock = threading.Lock()
 
     def view(self, software):
         if not isinstance(software, list) or not all(isinstance(s, str) for s in software):
-            raise ValueError('Invalid software scope')
-        normalize = lambda s: re.sub(r'[\s_-]+', '', s.casefold())
+            raise ValueError("invalid-software-scope")
+        normalize = lambda s: re.sub(r"[\s_-]+", "", s.casefold())
         names = tuple(sorted({normalize(s) for s in software if s.strip()}))
         if not names or len(names) > 8:
-            raise ValueError('Invalid software scope')
+            raise ValueError("invalid-software-scope")
         with self.lock:
             if names in self.views:
+                self.views.move_to_end(names)
                 return self.views[names]
             base = self.index
-            files = {key: f for key, f in base.files.items()
-                     if f['kind'] == 'manual'
-                     and f['attributes'].get('subjectType') == 'software'
-                     and any(normalize(str(s)) in names for s in f['attributes'].get('software', []))}
-            positions = [i for i, row in enumerate(base.rows) if row['file_id'] in files]
-            view = copy.copy(base)
+            files = {
+                key: f
+                for key, f in base.files.items()
+                if f["kind"] == "manual"
+                and f["attributes"].get("subjectType") == "software"
+                and any(normalize(str(s)) in names for s in f["attributes"].get("software", []))
+            }
+            positions = [i for i, row in enumerate(base.rows) if row["file_id"] in files]
+            # Explicit fields prevent a newly added shared-index field from
+            # silently exposing global search state in a scoped view.
+            view = SectionIndex.__new__(SectionIndex)
+            view.directory = base.directory
+            view.dbfile = base.dbfile
+            view.embed = base.embed
+            view.cache = {}
+            view.cache_lock = threading.Lock()
             view.files = files
             view.rows = [base.rows[i] for i in positions]
             view.search_rows = list(view.rows)
@@ -50,10 +64,12 @@ class QuickSections:
             view.known = []  # Software manuals do not acquire hardware identities.
             view.attribute_units = []
             self.views[names] = view
+            while len(self.views) > MAX_SOFTWARE_VIEWS:
+                self.views.popitem(last=False)
             return view
 
     def search(self, query, software):
         result = self.view(software).search(query, limit=12)
-        result['scope'] = 'registered-software-manuals'
-        result['software'] = software
+        result["scope"] = "registered-software-manuals"
+        result["software"] = software
         return result

@@ -1,0 +1,9 @@
+{
+  "name": "xiaohuiji-source-quality",
+  "private": true,
+  "description": "Development-only formatting and syntax checks; not a runtime dependency.",
+  "dependencies": {
+    "acorn": "8.15.0",
+    "prettier": "3.6.2"
+  }
+}

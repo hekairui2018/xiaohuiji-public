@@ -1,0 +1,134 @@
+diff --git a/v2/adapters/http/quick-retrieval.cjs b/v2/adapters/http/quick-retrieval.cjs
+index 66779d3..791f064 100644
+--- a/v2/adapters/http/quick-retrieval.cjs
++++ b/v2/adapters/http/quick-retrieval.cjs
+@@ -6,7 +6,18 @@ const {createQuickService}=require('./quick-service.cjs');
+ const {aftersalesGuidance,operationExcerpt,relevantEvidence}=require('./quick-answer.cjs');
+ const {canonical,evidencePlan,compareScene,capabilityExcerpt}=require('../../domain/knowledge/evidence-plan.cjs');
+ const {videoPurpose}=require('../../domain/knowledge/video-purpose.cjs');
+-function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localCatalog,resolveDocuments,localizeMedia=async x=>x,originalDocuments=[],businessAnswer,searchContext,readContext,filterEvidence=async rows=>rows}){
++function createQuickRetrieval({app,
++ knowledge,
++ search,
++ searchCases,
++ localCatalog,
++ resolveDocuments,
++ localizeMedia=async x=>x,
++ originalDocuments=[],
++ businessAnswer,
++ searchContext,
++ readContext,
++ filterEvidence=async rows=>rows}){
+  const indexedProducts=new Map((knowledge?.products?.()||[]).map(p=>[p.modelId,p]));
+  const lookup={findProducts:id=>knowledge?.findProducts?.(id)||(indexedProducts.has(id)?[indexedProducts.get(id)]:app?.quickSearch?.(id).records||[]),products:()=>[...indexedProducts.values()],chipLookup:t=>app?.chipLookup?.(t),softwareItems:t=>app?.resourceMedia?.softwareItems(t)||[],isSoftware:t=>!!app?.resourceMedia?.softwareItems(t).length};
+  const quick=app&&createQuickService(app,{localCatalog,resolveDocuments});
+@@ -94,7 +105,38 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
+   if(q.intent==='ordering'&&q.decision.orderingKind!=='catalog-selection'&&businessAnswer){const data=await businessAnswer({intent:'ordering',query:q.executionText||q.original,models:q.models,demand:q.demand,taskUpdate:q.taskUpdate,unknownModels:q.unknownModels,hardwareRequested:q.versions.some(v=>v.kind==='hardware')||!!facts.hardwareVersions?.length,progressive:true,orderingContext:q.orderingContext},{facts,sessionId:state.id});trace.push(...data.retrievalTrace||[]);return complete({...base,...data,answerType:'engineering'});}
+   const add=(source,rows)=>{routeLog.recall.push(...rows.map(r=>({source,name:r.name,type:r.type,sha256:r.sha256,locator:r.locator,beforeRankingTruncated:false})));lists.push({source,rows});trace.push({name:source,count:rows.length,sourceKind:'evidence-list'});};
+   async function call(name,fn){onProgress('searching');const at=Date.now();try{const rows=await fn();if(rows.length)onProgress('evidence-found');trace.push({name,elapsedMs:Date.now()-at,count:rows.length});return rows;}catch{failures.push(name);trace.push({name,elapsedMs:Date.now()-at,count:0,unavailable:true});return [];}}
+-  async function textSearch(query){const rows=await Promise.all((q.models.length?q.models.slice(0,3):[null]).map(model=>search(query,'text',{limit:24,model:model?.replace(/^HD-/,''),version:q.versions.find(v=>v.kind==='version')?.value})));const candidates=rows.flatMap(d=>d.results||[]).map(r=>{const parts=(r.text||'').split(' | '),faq=/\.csv$/i.test(r.name||'')&&/FAQ|FQA|常见问题|问答/i.test(r.name||'')&&parts.length>=3;return {...r,type:faq?'faq':'passage',...(faq?{standardQuestion:parts[1],standardAnswer:parts[2],faqExact:norm(q.original).replace(/[\s，。！？!?]/g,'')===norm(parts[1]).replace(/[\s，。！？!?]/g,'')}:{} )};});return faqLookup?.hydrate?faqLookup.hydrate(candidates):candidates;}
++  async function textSearch(query) {
++    const rows = await Promise.all(
++      (q.models.length ? q.models.slice(0, 3) : [null]).map((model) =>
++        search(query, 'text', {
++          limit: 24,
++          model: model?.replace(/^HD-/, ''),
++          version: q.versions.find((v) => v.kind === 'version')?.value,
++        }),
++      ),
++    );
++    const candidates = rows
++      .flatMap((d) => d.results || [])
++      .map((r) => {
++        const parts = (r.text || '').split(' | '),
++          faq =
++            /\.csv$/i.test(r.name || '') && /FAQ|FQA|常见问题|问答/i.test(r.name || '') && parts.length >= 3;
++        return {
++          ...r,
++          type: faq ? 'faq' : 'passage',
++          ...(faq
++            ? {
++                standardQuestion: parts[1],
++                standardAnswer: parts[2],
++                faqExact:
++                  norm(q.original).replace(/[\s，。！？!?]/g, '') ===
++                  norm(parts[1]).replace(/[\s，。！？!?]/g, ''),
++              }
++            : {}),
++        };
++      });
++    return candidates;
++  }
+   if(q.evidencePlan.purpose==='component-dependency'&&q.models.length&&!q.versions.length){
+    const rows=[];for(const id of q.models)for(const d of originalByModel.get(id)||[])for(const page of d.pages||[]){const text=capabilityExcerpt(page.text,q.evidencePlan);if(text)rows.push({type:'capability',name:d.name,text,modelIds:[id],sha256:d.sha256,locator:{page:page.page},download:'/v2/resources/original/'+d.sha256,evidenceId:d.sha256+'-architecture-'+page.page,sourceRole:'original-component-architecture'});}
+    const allowed=await filterEvidence(rows),ranked=rank(q,[{source:'original-architecture',rows:allowed}],lookup,routeLog.filtered,routeLog.candidates);
+@@ -120,20 +162,6 @@ function createQuickRetrieval({app,knowledge,search,searchCases,faqLookup,localC
+    const allowed=(await filterEvidence(rows)).filter(r=>matchesResourceRequest(q,r));
+    if(allowed.length)return complete({...base,status:'answer',answerType:genericSoftwareOperation?'software-start-directions':'registered-software-resources',reply:genericSoftwareOperation?items.map(i=>i.name+'：'+i.purpose).join('\n')+'\n已列出对应操作资料。你现在要连接设备、编辑发送节目，还是调屏？': '已找到对应的'+(q.categories.includes('video')?'操作视频':q.categories.includes('manual')?'操作说明':'软件下载入口')+'，可从下方打开。',results:allowed.slice(0,8)});
+   }
+-  // An exact existing FAQ question is evidence, never an intent classifier.
+-  // Present its complete row first rather than burying it under unrelated cases.
+-  if(faqLookup){
+-   const exact=await filterEvidence(await call('registered-faq-exact',()=>faqLookup(q.original)));
+-   if(exact.length){
+-    const answerGroups=new Map();for(const r of exact){const key=r.standardAnswer.trim();if(!answerGroups.has(key))answerGroups.set(key,[]);answerGroups.get(key).push(r);}
+-    const answers=[...answerGroups.keys()];
+-    const conflict=answers.length>1;
+-    const warning=q.compatibility?'仍需核对固件文件、硬件、芯片和当前实读版本；这条历史记录不能确认现场兼容，请勿据此互刷。':'这是已有FAQ原记录，请核对原文中的型号、版本及现场条件；其中历史固件或参数不自动视为当前推荐。';
+-    return complete({...base,status:conflict?'clarify':'answer',answerType:conflict?'faq-conflicting-records':'faq-exact-record',results:exact,
+-     businessStatus:{intent:q.intent==='clarify'?'needs-clarification':'identified',evidence:conflict?'conflicting-exact-records':'exact-question-row',answer:conflict||q.compatibility?'needs-input':'conditional-reference'},
+-     reply:(conflict?'同一问题有不同FAQ原记录，不能合并成一个确定结论。\n\n':'')+[...answerGroups.values()].map(group=>{const r=group[0];return 'FAQ原记录（原问题匹配）：'+r.standardQuestion+'\n'+r.standardAnswer+'\n来源：'+group.map(x=>x.name+' · 第'+x.locator.row+'行').join('；');}).join('\n\n')+'\n\n'+warning});
+-   }
+-  }
+   // Structured catalog preparation is shared by all categories for a model.
+   if(q.intent==='operation'&&q.models.length&&/(?:用|使用).{0,4}(?:什么|哪个|那个|哪款)软件|调试软件/.test(q.original)){
+    const rows=[];
+diff --git a/v2/resource-index/server.py b/v2/resource-index/server.py
+index 5f9dbe9..43990ba 100644
+--- a/v2/resource-index/server.py
++++ b/v2/resource-index/server.py
+@@ -41,6 +41,16 @@ def create_server(work, port=0):
+     section_lock=__import__('threading').Lock()
+     quick_file=os.environ.get('XHJ_QUICK_KNOWLEDGE','')
+     quick_index=None
++    quick_sections=None
++    file_registry_cache=None
++    def get_file_registry():
++        nonlocal file_registry_cache
++        if file_registry_cache is None:
++            with section_lock:
++                if file_registry_cache is None:
++                    from file_registry_cache import FileRegistryCache
++                    file_registry_cache=FileRegistryCache(section_config,work)
++        return file_registry_cache.get()
+     def get_section_index():
+         nonlocal section_index
+         if section_index is None:
+@@ -80,13 +90,14 @@ def create_server(work, port=0):
+                     if not token or not secrets.compare_digest(self.headers.get('X-Internal-Token',''),token):return self.send(403,{'error':'forbidden'})
+                     purpose=self.headers.get('X-Internal-Purpose','')
+                     if purpose=='quick-knowledge' and u.path=='/internal/quick-sections':
++                        nonlocal quick_sections
+                         if not section_config.is_file():return self.send(503,{'error':'section-index-not-configured'})
+                         from quick_sections import QuickSections
+                         index=get_section_index()
+                         # Attach a separate quick-only view cache; public search is unchanged.
+                         with section_lock:
+-                            if not hasattr(index,'quick_sections'):index.quick_sections=QuickSections(index)
+-                        return self.send(200,index.quick_sections.search(first('q'),json.loads(first('software','[]'))))
++                            if quick_sections is None:quick_sections=QuickSections(index)
++                        return self.send(200,quick_sections.search(first('q'),json.loads(first('software','[]'))))
+                     if purpose=='quick-knowledge' and u.path=='/internal/quick-knowledge':
+                         nonlocal quick_index
+                         if not quick_file:return self.send(503,{'error':'quick-knowledge-not-configured'})
+@@ -99,9 +110,7 @@ def create_server(work, port=0):
+                         return self.send(200,get_section_index().search(first('q')))
+                     if purpose=='fulltext' and u.path=='/internal/file-registry':
+                         if not section_config.is_file():return self.send(503,{'error':'section-index-not-configured'})
+-                        from file_registry import FileRegistry
+-                        config=json.loads(section_config.read_text(encoding='utf-8'))
+-                        return self.send(200,FileRegistry(config['index'],work).search(first('q'),int(first('limit','10'))))
++                        return self.send(200,get_file_registry().search(first('q'),int(first('limit','10'))))
+                     if purpose=='fulltext' and u.path=='/internal/fulltext-file':
+                         if not section_config.is_file():return self.send(404,{'error':'not-found'})
+                         index=get_section_index();row=index.files.get(first('id'))

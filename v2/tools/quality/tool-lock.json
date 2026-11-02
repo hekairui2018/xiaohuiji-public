@@ -1,0 +1,12 @@
+{
+  "acorn": {
+    "version": "8.15.0",
+    "integrity": "sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==",
+    "tarball": "https://registry.npmjs.org/acorn/-/acorn-8.15.0.tgz"
+  },
+  "prettier": {
+    "version": "3.6.2",
+    "integrity": "sha512-I7AIg5boAr5R0FFtJ6rCfD+LFsWHp81dolrFD8S79U9tb8Az2nGrJncnMSnys+bpQJfRUzqs9hnA81OAA3hCuQ==",
+    "tarball": "https://registry.npmjs.org/prettier/-/prettier-3.6.2.tgz"
+  }
+}
