@@ -34,4 +34,4 @@ function operationCoverage(text,target){
  });
  return {steps,primarySupported:steps.length?steps[0].supported:null,complete:steps.length>0&&steps.every(s=>s.instructionLocated)};
 }
-module.exports={operationTarget,operationCoverage};
+module.exports={operationTarget,operationCoverage,actionGroups};

@@ -1,0 +1,59 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {createSectionAnswers}=require('../adapters/http/section-answers.cjs');
+const manual={name:'SYN手册.pdf',kind:'manual',models:['HD-X100'],text:'修改密码：打开设置，进入WiFi热点页面，输入新密码并保存。',download:'/registered/syn.pdf'};
+test('file delivery never calls body, FAQ or model tools',async()=>{
+ const app=createSectionAnswers({async registry(){return {results:[{...manual,kind:'spec'}],retrievalBackend:'file-registry-sql',vectorUsed:false};},async search(){throw Error('body must not run');},async knowledge(){throw Error('FAQ must not run');}});
+ const r=await app.answer('给我X100规格书');assert.equal(r.intent,'resources');assert.equal(r.vectorUsed,false);assert.equal(r.results[0].download,manual.download);
+});
+test('a default-password FAQ is not an instruction to modify a password',async()=>{
+ const app=createSectionAnswers({async knowledge(q,{kind}){return {kind,results:kind==='faq'?[{parameter:'WiFi默认密码是多少',value:'旧版默认值',text:'旧版默认值',models:[],name:'FAQ.csv'}]:[]};},async search(){return {results:[manual]};},async registry(){return {results:[]};}},{materials:{data:{records:[{kind:'comparison',model:'X100'}]},evidence:()=>[]}});
+ const r=await app.answer('X100怎么修改WiFi密码');assert.doesNotMatch(r.reply,/旧版默认值/);assert.equal(r.results[0].download,manual.download);
+});
+test('an explicitly related HDSet video remains available when a receiver has no dedicated manual',async()=>{
+ const queries=[];const video={name:'HDSet操作.mp4',kind:'video',download:'/registered/video'};
+ const app=createSectionAnswers({async search(q){queries.push(q);return {results:[]};},async registry(q){queries.push(q);return {results:[video]};},async knowledge(){return {results:[]};}});
+ const r=await app.answer('R712怎么调屏');assert.equal(r.status,'partial');assert(r.results.some(x=>x.kind==='video'));assert(queries.some(q=>q.includes('HDSet')));assert.doesNotMatch(r.reply,/补充型号/);
+});
+test('decoder selection uses the existing mapping and never invents a firmware file',async()=>{
+ const app=createSectionAnswers({async search(){throw Error('not needed');}},{chipLookup:()=>({items:[{page:11,models:['SYN2015'],smartSelection:'138'}],view:{primary:{chip:'SYN2015'},source:'合成选型来源'}})});
+ const r=await app.answer('SYN2015怎么选');assert.match(r.reply,/译码/);assert.match(r.reply,/138/);assert(!r.results.some(x=>x.download));
+});
+test('later sections in the same original remain available when an earlier section shares the password keyword',async()=>{
+ const wrong={...manual,name:'A3L说明书.pdf',sha256:'a'.repeat(64),evidenceId:'template',models:['HD-A3L'],text:'模板设置：点击保存模板。支持WiFi和密码功能。'};
+ const right={...wrong,evidenceId:'network',locator:{section:'网络设置'},text:'WiFi密码设置：打开设置菜单，选择网络设置，输入WiFi新密码，再点击确定。'};
+ const app=createSectionAnswers({async search(){return {results:[wrong,right]};},async registry(){return {results:[]};},async knowledge(){return {results:[]};}});
+ const r=await app.answer('A3L的wifi密码在哪改');assert.match(r.reply,/选择网络设置/);assert.doesNotMatch(r.reply,/保存模板/);assert.equal(r.results[0].download,manual.download);
+});
+test('an exact standard symptom answer takes precedence over a coincidental parameter label',async()=>{
+ const app=createSectionAnswers({async knowledge(q,{kind}){assert.equal(kind,'faq');return {kind,results:[{name:'合成FAQ.csv',parameter:q,value:'检查供电条件。',conditions:'仅适用该记录的设备条件',exactQuestion:true,models:[],locator:{record:2}}]};},async search(){throw Error('not needed');}});
+ const r=await app.answer('设备会一直自动重启');assert.match(r.reply,/检查供电条件/);assert.equal(r.answerBasis,'faq-source-row');
+});
+test('a video filename containing the word firmware is still delivered as a video',async()=>{
+ const name='SYNX20固件升级方法.mp4';
+ const app=createSectionAnswers({async registry(){return {results:[{name,kind:'video',download:'/registered/video'}],retrievalBackend:'file-registry-sql'};},async search(){throw Error('not needed');}});
+ const r=await app.answer('发我 '+name);assert.equal(r.intent,'resources');assert.equal(r.results[0].kind,'video');
+});
+test('a named device never borrows another playback box menu just because both mention WiFi',async()=>{
+ const own={...manual,name:'A3L手册.pdf',models:['HD-A3L'],evidenceId:'own-wifi',text:'步骤1：打开HDPlayer，进入网络设置。\n步骤2：设置WiFi密码，设置完成点击确定。'};
+ const other={...own,name:'H8手册.pdf',models:['HD-H8'],evidenceId:'other-wifi',text:'步骤1：用遥控器打开系统设置。\n步骤2：设置WiFi密码，点击确定。'};
+ const app=createSectionAnswers({async search(){return {results:[other,own]};},async registry(){return {results:[]};},async knowledge(){return {results:[]};}});
+ const r=await app.answer('A3L的WiFi密码在哪改');assert.match(r.reply,/HDPlayer/);assert.doesNotMatch(r.reply,/遥控器/);assert(r.results.every(x=>x.models.includes('HD-A3L')));
+});
+test('an unnamed device expands to a labeled sample without retaining the generic device noun',()=>{
+ const {operationContext}=require('../domain/knowledge/quick-operation-context.cjs');
+ const context=operationContext('播放盒的密码在哪改',{models:[],software:[],focus:'播放盒 密码在哪改',terms:[]});
+ assert(context.example);assert(context.queries.includes('A3L 密码在哪改'));
+});
+test('software instructions take precedence over a device example for an unnamed playback box',async()=>{
+ const example={...manual,name:'A3L手册.pdf',models:['HD-A3L'],evidenceId:'device',text:'步骤1：进入示例设备菜单。\n步骤2：设置WiFi密码，点击确定。'};
+ const software={...manual,name:'HDPlayer手册.pdf',models:[],attributes:{subjectType:'software',software:['HDPlayer']},evidenceId:'software',text:'步骤1：打开HDPlayer的设备信息。\n步骤2：设置WiFi密码，点击确定。'};
+ const app=createSectionAnswers({async search(){return {results:[example]};},async softwareSections(q,scope){assert.deepEqual(scope.software,['HDPlayer']);return {results:[software]};},async registry(){return {results:[]};},async knowledge(){return {results:[]};}});
+ const r=await app.answer('播放盒的WiFi密码在哪改');assert.match(r.reply,/HDPlayer的设备信息/);assert.doesNotMatch(r.reply,/示例设备菜单/);assert.doesNotMatch(r.reply,/设备手册的操作示例/);
+});
+test('mobile processor tasks search mobile manuals without declaring all processors compatible',()=>{
+ const {operationContext,operationScope}=require('../domain/knowledge/quick-operation-context.cjs');
+ const context=operationContext('视频处理器怎么用手机发节目',{models:[],software:[],focus:'手机 发节目',terms:[]});
+ assert.deepEqual(context.software,['屏掌控']);assert(context.mobileReference);
+ assert(!operationScope({name:'屏掌控单色操作说明.pdf',kind:'manual',models:[]},context,{models:[]}));
+});
