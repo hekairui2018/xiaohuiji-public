@@ -16,13 +16,13 @@ test('Regrouping preserves every original record and URL including languages, ve
  assert.equal(JSON.stringify(input),before);assert.equal(out.reduce((n,g)=>n+g.count,0),4);assert.deepEqual(new Set(out.flatMap(g=>g.videos)),new Set(items));assert.deepEqual(out.flatMap(g=>g.sections.flatMap(s=>s.videos)).sort((a,b)=>a.url.localeCompare(b.url)),[...items].sort((a,b)=>a.url.localeCompare(b.url)));
 });
 
-test('Software card videos contain only the matching introductory walkthroughs',()=>{
+test('Software card videos use explicit software names and include feature tutorials',()=>{
  const {softwareVideos}=require('../frontend/video-groups.js');
- const names=['不对称多开接线和设置.mp4','HDset操作.mp4','HDPlayer操作.mp4','HDPlayer动态数据功能.mp4','HDPlayer操作视频（720P）.mp4','HDShow操作演示.mp4','屏掌控单色版简易操作.mp4','HD2020操作.mp4'];
+ const names=['不对称多开接线和设置.mp4','HDset操作.mp4','HDPlayer操作.mp4','HDPlayer动态数据功能.mp4','HDPlayer操作视频（720P）.mp4','HDShow操作演示.mp4','屏掌控单色版简易操作.mp4','HD2020操作.mp4','HDSign多节目发布.mp4','HDSign计时操作.mp4'];
  const videos={primary:{name:names[0]},more:names.slice(1).map(name=>({name}))};
  assert.deepEqual(softwareVideos({id:'HDSet',videos}).map(v=>v.name),['HDset操作.mp4']);
- assert.deepEqual(softwareVideos({id:'HDPlayer',videos}).map(v=>v.name),['HDPlayer操作.mp4','HDPlayer操作视频（720P）.mp4']);
- assert.deepEqual(softwareVideos({id:'HDSign',videos}),[]);
+ assert.deepEqual(softwareVideos({id:'HDPlayer',videos}).map(v=>v.name),['HDPlayer操作.mp4','HDPlayer动态数据功能.mp4','HDPlayer操作视频（720P）.mp4']);
+ assert.deepEqual(softwareVideos({id:'HDSign',videos}).map(v=>v.name),['HDSign多节目发布.mp4','HDSign计时操作.mp4']);
  assert.deepEqual(softwareVideos({id:'PingZhangKong',videos}).map(v=>v.name),['屏掌控单色版简易操作.mp4']);
  assert.deepEqual(softwareVideos({id:'HD2018',videos:{}}),[]);
 });

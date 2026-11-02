@@ -60,7 +60,7 @@ function organize(groups){
  }
  return out;
 }
-// Software cards show introductory walkthroughs, not every video in a shared folder.
+// Software cards show explicitly named tutorials, never every video in a shared folder.
 function softwareVideos(software){
  const media=software.videos||{},items=[media.primary,...(media.more||[])].filter(Boolean);
  const pc={HDSet:'HDSet',HDPlayer:'HDPlayer',HDShow:'HDShow',HD2020:'HD2020',HD2018:'HD2018',HDSign:'HDSign',LCDPlayer:'LCDPlayer'};
@@ -70,6 +70,8 @@ function softwareVideos(software){
   if(pc[software.id]){
    const prefix=pc[software.id];if(name.slice(0,prefix.length).toLowerCase()!==prefix.toLowerCase())return false;
    rest=name.slice(prefix.length);
+   // Software-named tutorials include feature guides, not only introductory walkthroughs.
+   return Boolean(rest);
   }else if(software.id==='PingZhangKong'){
    if(!/^(屏掌控|全彩APP标准版|APP操作动画)/i.test(name))return false;
    rest=name.replace(/^屏掌控(?:APP)?(?:标准版|单色版)?[-—]?(?:全彩卡|单色卡)?|^全彩APP标准版|^APP(?=操作动画)/i,'');
