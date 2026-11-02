@@ -22,25 +22,29 @@ const aiSendBtn = document.getElementById("aiSendBtn");
 const aiMessages = document.getElementById("aiMessages");
 // Chat scrolling and composer sizing share one presentation-only owner.
 const nearChatBottom=()=>aiMessages.scrollHeight-aiMessages.clientHeight-aiMessages.scrollTop<=40;
-let followChat=true,chatScrollFrame=0;
+let followChat=true,chatScrollFrame=0,readingReply=null,manualChatScroll=false;
+function replyStart(){return readingReply?.isConnected?Math.max(0,Math.min(aiMessages.scrollHeight-aiMessages.clientHeight,aiMessages.scrollTop+readingReply.getBoundingClientRect().top-aiMessages.getBoundingClientRect().top-12)):aiMessages.scrollHeight;}
 function followChatUpdates(){
   cancelAnimationFrame(chatScrollFrame);
-  chatScrollFrame=requestAnimationFrame(()=>{if(followChat)aiMessages.scrollTop=aiMessages.scrollHeight;});
+  chatScrollFrame=requestAnimationFrame(()=>{if(followChat)aiMessages.scrollTop=replyStart();});
 }
-aiMessages.addEventListener('scroll',()=>{followChat=nearChatBottom();},{passive:true});
-aiMessages.addEventListener('wheel',event=>{if(event.deltaY<0)followChat=false;},{passive:true});
+aiMessages.addEventListener('scroll',()=>{followChat=!manualChatScroll&&(nearChatBottom()||!!(readingReply?.isConnected&&Math.abs(aiMessages.scrollTop-replyStart())<2));},{passive:true});
+const stopChatFollowing=()=>{manualChatScroll=true;followChat=false;};
+aiMessages.addEventListener('wheel',stopChatFollowing,{passive:true});
+aiMessages.addEventListener('pointerdown',stopChatFollowing,{passive:true});
+aiMessages.addEventListener('keydown',event=>{if(['PageUp','PageDown','Home','End','ArrowUp','ArrowDown'].includes(event.key))stopChatFollowing();});
 function appendChatMessage(node){
-  followChat=nearChatBottom();aiMessages.appendChild(node);if(followChat)aiMessages.scrollTop=aiMessages.scrollHeight;
+  const user=node.classList.contains('ai-msg-user'),follow=user||!manualChatScroll&&(followChat||nearChatBottom());if(user)manualChatScroll=false;aiMessages.appendChild(node);readingReply=node.classList.contains('ai-msg-assistant')?node:null;followChat=follow;if(followChat)aiMessages.scrollTop=replyStart();
 }
-function scrollChatToBottom(){followChat=true;aiMessages.scrollTop=aiMessages.scrollHeight;followChatUpdates();}
+function scrollChatToBottom(){manualChatScroll=false;followChat=true;readingReply=document.getElementById('aiLoading');aiMessages.scrollTop=replyStart();followChatUpdates();}
 function resizeAiInput(){
   if(!aiInput.getClientRects().length)return;
-  const follow=nearChatBottom(),top=aiMessages.scrollTop,style=getComputedStyle(aiInput);
+  const follow=followChat,top=aiMessages.scrollTop,style=getComputedStyle(aiInput);
   aiInput.style.height='auto';
   const border=parseFloat(style.borderTopWidth)+parseFloat(style.borderBottomWidth);
   const height=Math.max(parseFloat(style.minHeight)||0,Math.min(aiInput.scrollHeight+border,parseFloat(style.maxHeight)||180));
   aiInput.style.height=height+'px';aiInput.style.overflowY=aiInput.scrollHeight+border>height+1?'auto':'hidden';
-  if(follow)scrollChatToBottom();else{followChat=false;aiMessages.scrollTop=top;}
+  if(follow)followChatUpdates();else{followChat=false;aiMessages.scrollTop=top;}
 }
 aiInput.addEventListener('input',resizeAiInput);
 new MutationObserver(followChatUpdates).observe(aiMessages,{childList:true,subtree:true,characterData:true});
@@ -2653,7 +2657,7 @@ function buildSoftwareAccessButton(s) {
 
 // Explicit dependencies shared by the selected channel and browser-local conversation store.
 Object.assign(FrontendApp, {
- input:aiInput,sendButton:aiSendBtn,messages:aiMessages,resizeInput:resizeAiInput,appendChatMessage,scrollChatToBottom,
+ input:aiInput,sendButton:aiSendBtn,messages:aiMessages,resizeInput:resizeAiInput,appendChatMessage,scrollChatToBottom,followChatUpdates,
  state:{get history(){return chatHistory;},set history(v){chatHistory=v;},get triage(){return triagePath;},set triage(v){triagePath=v;},get numeric(){return lastNumericOptions;},set numeric(v){lastNumericOptions=v;}},
  getSessionId:getSid,setSessionId(id){activeSessionId=id;window.__v2SessionId=id;FrontendApp.events.dispatchEvent(new Event("session-change"));},
  resetState(){chatHistory=[];triagePath=null;lastNumericOptions=null;window.__v2LastReply=null;},

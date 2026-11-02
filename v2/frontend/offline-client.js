@@ -4,12 +4,28 @@ window.OfflineClient = Object.freeze({create(ui) {
  const make=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
  const fetchOriginal=window.fetch.bind(window);
  const {state,getSessionId:getSid,clearImage:clearOcrImage}=ui;
- async function json(url,init){const response=await fetchOriginal(url,init);let data;try{data=await response.json();}catch{throw Error('服务返回格式异常，请稍后重试。');}if((!response.ok||data.error)&&!(data.actualMode==='expert'&&data.reply))throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
+ async function json(url,init,onText,onSummary){const response=await fetchOriginal(url,init);let data;try{data=await window.ChatController.readResponse(response,onText,onSummary);}catch{throw Error('服务回复中断或格式异常，请稍后重试。');}if(!response.ok||data.error)throw Error(data.reply||data.message||(typeof data.error==='string'?data.error:(data.reason||'服务暂不可用（'+response.status+'）')));return data;}
 
  const place=l=>typeof l==='string'?l:Object.entries(l||{}).map(([k,v])=>({page:'页',paragraph:'段',row:'行',sheet:'工作表',slide:'幻灯片',table:'表',section:'章节',part:'位置',line:'行'}[k]||k)+'：'+v).join(' · ');
  const labels={chips:'芯片',pitches:'点间距',scans:'扫描方式',softwareVersions:'软件版本',firmwareVersions:'固件版本',hardwareVersions:'硬件版本',additionalConditions:'其他条件'};
  const safeUrl=s=>typeof s==='string'&&/^\/[^/]/.test(s);
  function link(box,url,label,downloadName){if(!safeUrl(url))return;const a=make('a',label);a.href=url;a.target='_blank';a.rel='noopener noreferrer';if(downloadName!==undefined){a.download=downloadName;a.removeAttribute('target');}box.append(a);}
+ function sourceHeader(resource){const header=make('div');header.className='v2-source-title';header.append(make('strong',resource.name||'来源资料'));const url=resource.previewUrl||resource.download,downloadUrl=resource.downloadUrl||resource.download;if(window.ProductResources&&safeUrl(url))header.append(window.ProductResources.fileActions({...resource,url,previewUrl:resource.previewUrl||(['video','spec','manual','document'].includes(resource.kind)?url:null),downloadUrl,available:true},{compact:true,firmware:['firmware','module-config'].includes(resource.kind)}));return header;}
+ const fileRecord=r=>['firmware','module-config','software','video'].includes(r.kind)||r.locator?.section==='文件登记信息';
+ function fileCard(r){
+  const box=make('article');box.className='v2-record v2-chat-file';
+  const details=make('details');details.className='v2-chat-file-info';const summary=make('summary');summary.setAttribute('aria-label','查看文件信息 '+r.name);
+  const firmware=r.kind==='firmware',name=String(r.name||'资料'),parts=firmware?/^(.+?)_FPGA_(V[0-9.]+?)(?=_(?:MCU|E\d)|\.bin$)/i.exec(name):null;
+  const label=parts?parts[1].replaceAll('_','/')+' · '+parts[2]:name;
+  const badge=make('span',({firmware:'固件','module-config':'配置',software:'软件',video:'视频',manual:'说明书',spec:'规格书'}[r.kind]||'资料'));badge.className='v2-chat-file-kind';
+  const title=make('span',label);title.className='v2-chat-file-name';summary.append(badge,title);details.append(summary);
+  const info=make('div');info.className='v2-chat-file-body';info.append(make('strong',name));
+  if(r.text)info.append(make('pre',r.text));const locator=[place(r.locator),(r.versions||[]).join('、')].filter(Boolean).join(' · ');if(locator)info.append(make('small',locator));
+  if(r.resourceScope)info.append(make('small',r.resourceScope));if(r.pdfGenerated)info.append(make('small','由 DOCX 生成的 PDF 预览副本'));
+  if(safeUrl(r.readUrl)){const button=make('button','阅读上下文');button.type='button';button.onclick=()=>read(r);info.append(button);}
+  if(!safeUrl(r.download))info.append(make('small','原文件链接暂未提供'));
+  details.append(info);box.append(details);const header=sourceHeader(r),actions=header.querySelector('.pr-actions');if(actions)box.append(actions);return box;
+ }
  const reader=make('dialog');reader.className='v2-reader';reader.setAttribute('aria-labelledby','v2ReaderTitle');
  const readerTitle=make('h3');readerTitle.id='v2ReaderTitle';const closeReader=make('button','关闭');closeReader.type='button';closeReader.onclick=()=>reader.close();
  const readerHead=make('header');readerHead.append(readerTitle,closeReader);const readerLinks=make('div');readerLinks.className='v2-reader-links';const readerText=make('pre');readerText.tabIndex=0;readerText.setAttribute('aria-live','polite');const retryRead=make('button','重新读取');retryRead.type='button';reader.append(readerHead,readerLinks,readerText,retryRead);document.body.append(reader);
@@ -18,14 +34,14 @@ window.OfflineClient = Object.freeze({create(ui) {
  async function read(resource){const id=++readId;readerTitle.textContent=resource.name||'原文阅读';readerLinks.replaceChildren();link(readerLinks,resource.download,'打开原文件');link(readerLinks,resource.download,'下载文件',resource.name||'');readerText.textContent='读取原文…';readerText.scrollTop=0;retryRead.disabled=true;retryRead.onclick=()=>read(resource);if(!reader.open)reader.showModal();
   try{const r=await json(resource.readUrl);if(id!==readId)return;readerText.textContent=(r.blocks||[]).map(b=>place(b.locator)+'\n'+b.text).join('\n\n')||'该位置暂无正文，请打开原文件。';}catch(error){if(id!==readId)return;readerText.textContent='原文读取失败：'+error.message;}finally{if(id===readId)retryRead.disabled=false;}}
  function card(r,isCase=false){
-  const box=make('article');box.className='v2-record';box.append(make('strong',isCase?r.title:r.name));
+  if(!isCase&&fileRecord(r))return fileCard(r);
+  const box=make('article');box.className='v2-record';box.append(isCase?make('strong',r.title):sourceHeader(r));
   if(isCase){
-   box.append(make('small',(r.modelIds||[]).join(' / ')||'适用型号未明确'),make('p',r.quickSummary||r.phenomenon));
-   if(r.applicabilityNote)box.append(make('small',r.applicabilityNote));
+   box.append(make('small',(r.modelIds||[]).join(' / ')||'适用型号未明确'),make('p',r.phenomenon));
    const scope=Object.entries(r.scope||{}).filter(([,v])=>Array.isArray(v)&&v.length).map(([k,v])=>(labels[k]||k)+'：'+v.join('、')).join('\n');
    box.append(make('pre','适用条件\n'+(scope||'原记录未完整记载，请核对型号、软硬件版本及现场条件。')));
    if(r.checks?.length){const d=make('details');d.append(make('summary','参考排查（原记录）'),make('pre',r.checks.map(x=>x.text).join('\n')));box.append(d);}
-   if(r.historicalMeasure){const details=make('details');details.append(make('summary','历史处理措施（需核对适用条件）'),make('pre',r.historicalMeasure));box.append(details);}
+   if(r.historicalMeasure)box.append(make('pre','历史处理措施（不代表当前已解决）\n'+r.historicalMeasure));
    if(r.facts?.checkResults?.length)box.append(make('pre','原记录的检查结果\n'+r.facts.checkResults.join('\n')));
    if(r.facts?.engineeringJudgement)box.append(make('pre','原记录的工程判断（限当时条件）\n'+r.facts.engineeringJudgement));
    if(r.facts?.recordedResult?.length)box.append(make('pre','原记录的结果栏（按原文保留）\n'+r.facts.recordedResult.join('\n')));
@@ -36,16 +52,13 @@ window.OfflineClient = Object.freeze({create(ui) {
    if(r.missingEvidence)box.append(make('small','仍需核对：'+r.missingEvidence));
   }else{
    box.append(make('small',[place(r.locator),(r.versions||[]).join('、')].filter(Boolean).join(' · ')));
-   if(r.applicabilityNote)box.append(make('small',r.applicabilityNote));
-   if(r.quickSummary)box.append(make('p',r.quickSummary));
-   if(r.text){const excerpt=make('pre',r.text);if(r.text.length>360||r.requiresExpertReview||r.quickSummary){const details=make('details');details.append(make('summary','查看正文摘录'),excerpt);box.append(details);}else box.append(excerpt);}
+   if(r.text){const details=make('details');details.append(make('summary','查看引用原文'),make('pre',r.text));box.append(details);}
    if(r.mentionedModels?.length)box.append(make('small','正文提及：'+r.mentionedModels.join('、')+'（不代表兼容性确认）'));
-   link(box,r.download,'打开原文件');link(box,r.download,'下载文件',r.name||'');
+   if(r.pdfGenerated)box.append(make('small','由 DOCX 生成的 PDF 预览副本'));
+   if(r.resourceScope)box.append(make('small',r.resourceScope));
    if(!safeUrl(r.download))box.append(make('small','原文件链接暂未提供'));
    if(safeUrl(r.readUrl)){const button=make('button','阅读上下文');button.type='button';button.onclick=()=>read(r);box.append(button);}
-  }
-  if(isCase&&r.quickSummary){const details=make('details');details.append(make('summary','查看案例条件与原文'));for(const node of [...box.children].slice(r.applicabilityNote?4:3))details.append(node);box.append(details);}
-  return box;
+  }return box;
  }
  const toolbar=make('div');toolbar.className='v2-toolbar';const mode=make('select');mode.id='v2WorkMode';
  for(const [value,label]of [['all','资料与操作检索'],['cases','历史售后案例'],['ordering','工程配单']]){const o=make('option',label);o.value=value;mode.append(o);}
@@ -56,6 +69,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  const speed=make('div');speed.className='v2-response-modes';speed.setAttribute('role','group');speed.setAttribute('aria-label','回答模式');
  const fast=make('button','快速模式');fast.type='button';fast.id='v2FastMode';fast.setAttribute('aria-pressed','true');fast.title='不调用本地大模型，使用现有检索与规则';
  const expert=make('button','专家模式');expert.type='button';expert.id='v2ExpertMode';expert.disabled=true;expert.title='本地大模型接口待接入，暂不可用';expert.setAttribute('aria-describedby','v2ExpertPending');
+ let unavailableReason='本地模型未连接，请检查模型服务';
  const pending=make('span','专家模式待接入');pending.id='v2ExpertPending';pending.className='v2-mode-pending';speed.append(fast,expert);toolbar.append(speed,pending,reset);document.querySelector('.ai-input-row').before(toolbar);
  let responseMode='quick',modelAvailable=false,queryBusy=false,modeChosen=false,conversationType='normal';
  function updateResponseMode(){
@@ -66,19 +80,21 @@ window.OfflineClient = Object.freeze({create(ui) {
   if(!imageEnabled&&!queryBusy)clearOcrImage();
   fast.setAttribute('aria-pressed',String(ordering||responseMode==='quick'));expert.setAttribute('aria-pressed',String(!ordering&&responseMode==='expert'));
   fast.disabled=queryBusy;expert.disabled=queryBusy||ordering||!modelAvailable;
-  expert.title=ordering?'工程配单使用现有规则':modelAvailable?'使用本地大模型结合原文资料回答':'本地模型未连接，请检查模型服务';
+  expert.title=ordering?'工程配单使用现有规则':modelAvailable?'使用本地大模型结合原文资料回答':unavailableReason;
  }
  fast.onclick=()=>{modeChosen=true;responseMode='quick';updateResponseMode();};
  expert.onclick=()=>{if(modelAvailable&&!queryBusy&&mode.value!=='ordering'){modeChosen=true;responseMode='expert';updateResponseMode();}};
  async function refreshModel(){
   try{const capability=await json('/v2/offline/capabilities');modelAvailable=capability.expert?.available===true;
-   pending.textContent=modelAvailable?(capability.expert?.trial?'0.8B检索试用 · 16K · 最近5轮':'本地模型已连接'):'本地模型未连接';pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
+   unavailableReason=capability.expert?.reply||'本地模型未连接，请检查模型服务';
+   pending.textContent=modelAvailable?(capability.expert?.trial?'0.8B检索试用 · 16K · 最近5轮':'本地模型已连接'):unavailableReason;pending.title=capability.expert?.model?'服务模型：'+capability.expert.model:'请启动本地模型服务';
    expert.textContent=capability.expert?.trial?'0.8B 检索试用':'专家模式';
-   // Keep the customer's selected mode; connecting a model never silently switches it.
+   if(!modelAvailable)responseMode='quick';
+   if(modelAvailable&&!modeChosen)responseMode='expert';
   }catch{modelAvailable=false;pending.textContent='本地模型连接失败';}
   updateResponseMode();
  }
- refreshModel();window.addEventListener('focus',refreshModel);mode.addEventListener('change',updateResponseMode);
+ refreshModel();setInterval(()=>{if(!document.hidden)refreshModel();},30000);window.addEventListener('focus',refreshModel);mode.addEventListener('change',updateResponseMode);
 
  const help=make('details');help.className='v2-order-help';help.hidden=true;help.append(make('summary','配单输入示例与范围'),make('p','填写点间距、模组像素、扫描、接口、模组排列及接收卡。未核实的条件不会自动放行。也可提交标准需求JSON。'),make('code','配单 P2 模组160x80 40扫 HUB75 全彩 室内 同步接收卡 10宽8高 R716'));document.getElementById('aiMessages').before(help);
  const conditions=make('details');conditions.id='v2Conditions';conditions.append(make('summary','补充现场条件'));const factInputs={};
@@ -104,24 +120,25 @@ window.OfflineClient = Object.freeze({create(ui) {
   if(!ordering)fetchOriginal('/v2/offline/suggestions?q='+encodeURIComponent(body.message.slice(0,240))).then(r=>r.ok?r.json():null).then(data=>{if(data?.suggestion&&getSid()===body.sessionId)window.dispatchEvent(new CustomEvent('v2-model-suggestion',{detail:{...data.suggestion,view:'ai'}}));}).catch(()=>{});
   const requestId=window.createV2SessionId(),sessionId=body.sessionId;body={...body,requestId};
   let done=false,timer,pollController;
-  const stages={understanding:'正在理解问题',searching:'正在检索资料',reading:'正在阅读原文','evidence-found':'已找到相关依据',composing:'正在整理回答',completed:'回答已完成',failed:'本次处理未完成'};
+  const stages={queued:'正在排队等候，空出名额后自动开始',understanding:'正在理解问题',searching:'正在检索资料',reading:'正在阅读原文','evidence-found':'已找到相关依据',composing:'正在整理回答',completed:'回答已完成',failed:'本次处理未完成'};
   const poll=async()=>{if(done||getSid()!==sessionId)return;pollController=new AbortController();try{
    const response=await fetchOriginal('/v2/offline/progress?session='+encodeURIComponent(sessionId)+'&request='+encodeURIComponent(requestId),{signal:pollController.signal});
-   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');window.dispatchEvent(new CustomEvent('v2-answer-progress',{detail:{sessionId,label:stages[event.stage]}}));}}}
+   if(response.ok){const event=await response.json();if(!done&&getSid()===sessionId){const target=document.querySelector('#aiLoading .ai-msg-bubble');if(target&&stages[event.stage]&&target.textContent!==stages[event.stage]+'…'&&target.parentElement.dataset.streaming!=='true'){target.textContent=stages[event.stage]+'…';target.setAttribute('role','status');window.dispatchEvent(new CustomEvent('v2-answer-progress',{detail:{sessionId,label:stages[event.stage]}}));}}}
   }catch{}finally{if(!done)timer=setTimeout(poll,300);}};
   if(!ordering)poll();
-  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value}:{})},body:JSON.stringify(body)});}
+  try{return await json(ordering?'/v2/ordering/chat':'/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json',...(!ordering?{'X-V2-Offline-Knowledge':mode.value,'Accept':'application/x-ndjson'}:{})},body:JSON.stringify(body)},text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId,text}})),summary=>window.dispatchEvent(new CustomEvent('v2-answer-summary',{detail:{sessionId,summary}})));}
   finally{done=true;clearTimeout(timer);pollController?.abort();}
  }
  function render(data){
   if(data.model!=='v2-offline-search'&&data.actualMode!=='expert'&&!data.error)return false;
-  const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';bubble.append(make('p',data.reply||'请求未完成，请稍后重试。'));
-  if(data.result?.plan&&(data.result.bom||data.result.previewBom)&&typeof renderV2Ordering==='function')bubble.append(renderV2Ordering(data.result));
-  for(const r of data.results||[])bubble.append(card(r,data.kind==='cases'));
+  const row=make('div');row.className='ai-msg ai-msg-assistant';const bubble=make('div');bubble.className='ai-msg-bubble';
+  const results=data.results||[],filesOnly=data.kind!=='cases'&&results.length&&results.every(fileRecord),fileNames=new Set(results.map(r=>r.name));
+  // Only remove standalone names already rendered as file controls. Keep all explanatory text.
+  const reply=filesOnly?String(data.reply||'').split('\n').filter(line=>!fileNames.has(line.trim())).join('\n').trim():data.reply;
+  bubble.append(make('p',reply||'相关资料：'));
+  if((data.result?.nativeOrdering||data.result?.plan&&(data.result.bom||data.result.previewBom))&&typeof renderV2Ordering==='function')bubble.append(renderV2Ordering(data.result));
+  if(filesOnly){const files=make('div');files.className='v2-chat-files';files.setAttribute('aria-label','相关资料文件');for(const r of results)files.append(card(r));bubble.append(files);}else for(const r of results)bubble.append(card(r,data.kind==='cases'));
   if(data.rawEvidence?.length){bubble.append(make('h4','相关原始资料（不等于已核验案例）'));for(const r of data.rawEvidence)bubble.append(card(r));}
-  if(data.interpretation?.corrections?.length)bubble.append(make('small','按以下词义检索：'+data.interpretation.corrections.map(c=>c.from+' → '+c.to).join('、')+'；原话已保留。'));
-  if(data.expertSuggestion?.recommended){const notice=make('p',data.expertSuggestion.reason),button=make('button',data.expertSuggestion.label);button.type='button';button.className='v2-expert-handoff';
-   const sourceSession=getSid();button.onclick=async()=>{if(queryBusy||getSid()!==sourceSession)return;await refreshModel();if(!modelAvailable){notice.textContent='专家模型暂未连接，已有问题和资料已保留；连接后可继续。';return;}responseMode='expert';modeChosen=true;updateResponseMode();await window.FrontendApp.chat.send(data.expertSuggestion.message,'请专家结合上文继续分析');};bubble.append(notice,button);}
   row.append(bubble);const messages=document.getElementById('aiMessages');ui.appendChatMessage(row);window.__v2LastReply=data;return true;
  };
  const moreButton=document.getElementById('quickMoreDocsBtn');
@@ -164,6 +181,7 @@ window.OfflineClient = Object.freeze({create(ui) {
  const scopeStatus=make('p');scopeStatus.className='v2-scope-status';scopeStatus.setAttribute('role','status');scopeStatus.hidden=true;
  document.querySelector('.search-box').after(scopeStatus);
  let products=true,searchId=0,controller;
+ // Full-text uses the curated RAG endpoint exclusively; outages must be visible.
  function invalidate(){searchId++;controller?.abort();ui.catalog.invalidate();document.getElementById('searchResults').setAttribute('aria-busy','false');}
  function updateScope(){
   document.getElementById('resourceSearchTitle').textContent=products?'产品速查':'全文搜索';
@@ -187,27 +205,29 @@ window.OfflineClient = Object.freeze({create(ui) {
   invalidate();const id=searchId,q=searchInput.value.trim(),out=document.getElementById('searchResults');out.style.display='block';out.replaceChildren(make('p','检索中…'));
   if(!q||q.length>240){out.replaceChildren(make('p',!q?'请输入文件名、目录名或正文关键词。':'检索词最多240字，请缩短后重试。'));return;}
   controller=new AbortController();out.setAttribute('aria-busy','true');
-  try{const response=await json('/v2/offline/search?q='+encodeURIComponent(q)+'&mode=all&limit=50&view=list',{signal:controller.signal});if(id!==searchId)return;
+  try{const curated=true;const response=await json('/v2/curated-search?q='+encodeURIComponent(q),{signal:controller.signal});if(id!==searchId)return;
+   if(curated){scopeStatus.textContent='全文搜索 · 规格书、说明书、视频、固件、模组配置文件';document.getElementById('resourceSearchHint').textContent='文档搜索已解析原文，视频、固件和配置文件搜索登记信息。';}
    // Defensive deduplication for old servers; the new server already groups
    // documents by content identity before applying its result limit.
    const grouped=new Map();for(const hit of response.results||[]){
-    const key=hit.fileId||hit.sha256||hit.versionId||hit.download||hit.blockId;
+    const key=hit.pdfSha256||hit.fileId||hit.sha256||hit.versionId||hit.download||hit.blockId;
     if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(hit);
    }
    const capped=response.limitReached||(response.results||[]).length>=50;
    const heading=make('p','本次显示 '+grouped.size+' 份相关资料'+(capped?' · 最多展示前50份，请补充关键词缩小范围':''));
    heading.className='v2-search-summary';out.replaceChildren(heading);
-   if(!response.results?.length)out.append(make('p','未找到资料，请更换关键词或切回产品速查。'));
-   const list=make('div');list.className='v2-search-list';for(const hits of grouped.values())list.append(searchRow(hits,q));out.append(list);
+   if(response.sourceUnavailable)out.append(make('p','正文检索暂不可用，以下仅显示文件登记匹配。'));
+   if(!response.results?.length)out.append(make('p',response.sourceUnavailable?'RAG 正文检索暂不可用，本次未完成检索，请稍后重试。':'未找到资料，请更换关键词或切回产品速查。'));
+   const list=make('div');list.className='v2-search-list';for(const hits of grouped.values()){if(!curated){list.append(searchRow(hits,q));continue;}const box=make('article');box.className='v2-record';box.append(sourceHeader(hits[0]));if(hits[0].pdfGenerated)box.append(make('small','由 DOCX 生成的 PDF 预览副本'));for(const hit of hits){if(hit.locator)box.append(make('small',place(hit.locator)));if(hit.queryMatch&&!hit.queryMatch.exact)box.append(make('small','接近匹配 · 请核对完整文件名'));if(hit.candidate)box.append(make('small','同名同版本 DOCX 候选 · 请核对原文'));if(hit.text)box.append(make('pre',hit.text));}list.append(box);}out.append(list);
   }catch(error){if(id!==searchId||error.name==='AbortError')return;out.replaceChildren(make('p','资料检索失败：'+error.message));const retry=make('button','重试');retry.type='button';retry.onclick=search;out.append(retry);}
   finally{if(id===searchId)out.setAttribute('aria-busy','false');}
  }
  document.getElementById('quickSearchBtn').addEventListener('click',e=>{if(products)return;e.preventDefault();e.stopImmediatePropagation();search();},true);
  searchInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&!products){e.preventDefault();e.stopImmediatePropagation();search();}},true);
  return {request,render,legacy:false,mode,reset,setMode:modeChange,setConversationType(value){conversationType=value;},releaseGuest(sessionId){fetchOriginal('/v2/offline/session/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId}),keepalive:true}).catch(()=>{});},
-  validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>8000){feedback.textContent='问题最多8000字，请精简后重试。';conditions.hidden=false;conditions.open=true;return false;}return true;},
+  validate(text){feedback.textContent='';if(mode.value!=='ordering'&&text.trim().length>240){feedback.textContent='检索词最多240字。请将完整描述放入现场条件，输入简短检索词。';conditions.hidden=false;conditions.open=true;return false;}return true;},
   allowImages:()=>responseMode==='expert'&&modelAvailable&&mode.value!=='ordering',
   beforeSend:forgetUndo,setBusy(busy){reset.disabled=busy;mode.disabled=busy;queryBusy=busy;updateResponseMode();},loadingLabel:()=>mode.value==='ordering'?'计算并校验方案…':responseMode==='expert'?'正在阅读资料并思考…':'检索资料…',
-  acceptOcr(result){if(result.text.length<=8000)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
+  acceptOcr(result){if(result.text.length<=240)return true;originalMessage.value=result.text.slice(0,8000);conditions.hidden=false;conditions.open=true;ui.addAssistantMessage({model:'v2-offline-search',reply:'已识别文字并放入原始描述栏，完整识别结果已本地留存。请输入简短检索词后查询。'});return false;}
  };
 }});
