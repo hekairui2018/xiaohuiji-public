@@ -2462,13 +2462,12 @@ if (quickCats) {
       localStorage.setItem("xhj_mascot_pos_ver", MASCOT_POS_VER);
     }
   } catch (e) {}
-  // 闪电侠卡通头像（红色头盔 + 两侧金色横闪电耳翼 + 白色上挑瞪眼 + 露下巴），纯内联 SVG、无外部资源
-  // 红金机甲英雄（Q 版钢铁侠风格）圆形头像，图片资源；位于小灰机问答页，点击回快查站
-  const FLASH_SVG =
-    '<img class="xm-iron" src="img/mascot-iron.png" alt="快速查参数" width="60" height="60">';
+  // Wiki uses the fast armored mascot; the question-and-answer view uses the robot.
+  const IRON_AVATAR =
+    '<img class="xm-iron" src="img/mascot-iron.png" alt="Wiki资料速查吉祥物" width="60" height="60">';
   const defs = [
-    { view: "quick", cls: "mascot-plane", glyph: "\u{1F916}", target: "ai", bubble: "配单、售后故障，点我问小灰机" },
-    { view: "ai", cls: "mascot-bolt", svg: FLASH_SVG, target: "quick", bubble: "快速查参数、找资料，点我" },
+    { view: "quick", cls: "mascot-plane", svg: IRON_AVATAR, target: "ai", label: "Wiki速查吉祥物", bubble: "快速查参数、找资料，我来帮你" },
+    { view: "ai", cls: "mascot-bolt", glyph: "\u{1F916}", target: "quick", label: "客服问答吉祥物", bubble: "配单、售后故障，问小灰机" },
   ];
   const shownSuggestions=new Set();
   defs.forEach((d) => {
@@ -2557,7 +2556,7 @@ if (quickCats) {
     let dragging = false, moved = false, startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
     let tapCount=0,lastTap=0,coolUntil=0,motion=null;
-    orb.setAttribute('role','button');orb.tabIndex=0;orb.setAttribute('aria-label','和小灰机互动，长按可拖动');
+    orb.setAttribute('role','button');orb.tabIndex=0;orb.setAttribute('aria-label',d.label+'，点击互动，按住可拖动');
     function react(){
       if(dragging||moved)return;
       const now=Date.now();if(now<coolUntil)return;
