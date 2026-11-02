@@ -4,6 +4,18 @@
 // 职责：页面交互、调用后端 API、按契约渲染响应
 // 禁止：意图分类、型号识别、知识检索（这些在后端）
 
+const VIDEO_EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const VIDEO_EYE_OFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3l18 18M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a15 15 0 0 1-3.2 3.9M6.4 6.5C3.5 8.3 2 12 2 12s3.5 7 10 7a11.6 11.6 0 0 0 3.8-.6"/></svg>';
+let activeMediaVideo=null;
+function releaseMediaVideo(video){video.pause();video.removeAttribute('src');for(const source of video.querySelectorAll('source'))source.removeAttribute('src');video.load();if(activeMediaVideo===video)activeMediaVideo=null;}
+function playMediaVideo(video,url){
+ if(activeMediaVideo&&activeMediaVideo!==video){const previous=activeMediaVideo;releaseMediaVideo(previous);const details=previous.closest('details.vid-item');if(details)details.open=false;}
+ activeMediaVideo=video;video.src=url;video.play().catch(()=>{});
+}
+function stopMediaVideos(){for(const video of document.querySelectorAll('video[src]')){releaseMediaVideo(video);const details=video.closest('details.vid-item');if(details)details.open=false;}}
+new MutationObserver(records=>{for(const record of records)for(const node of record.removedNodes){if(node.nodeType!==1)continue;for(const video of [...(node.tagName==='VIDEO'?[node]:[]),...node.querySelectorAll('video')])if(!video.isConnected)releaseMediaVideo(video);}}).observe(document.body,{childList:true,subtree:true});
+document.addEventListener('toggle',event=>{if(event.target.tagName==='DETAILS'&&!event.target.open)for(const video of event.target.querySelectorAll('video[src]')){releaseMediaVideo(video);const item=video.closest('details.vid-item');if(item&&item!==event.target)item.open=false;}},true);
+document.querySelector('.view-switch')?.addEventListener('click',stopMediaVideos);
 const FrontendApp = { events: new EventTarget(), channel: null };
 const aiInput = document.getElementById("aiInput");
 const aiSendBtn = document.getElementById("aiSendBtn");
@@ -347,7 +359,7 @@ function addAssistantMessage(data) {
   }
   lastNumericOptions = _numOpts.length ? { options: _numOpts, at: Date.now() } : null;
 
-  if ((data.result?.operation === "ordering" && data.result?.bom) || data.result?.previewBom) {
+  if ((data.result?.operation === "ordering" && data.result?.bom) || data.result?.previewBom || data.result?.nativeOrdering) {
     bubble.appendChild(renderV2Ordering(data.result));
   } else if (data.status === "answer" && data.pyramid) {
     bubble.appendChild(renderPyramid(data.pyramid));
@@ -1264,7 +1276,7 @@ const quickSearchBtn = document.getElementById("quickSearchBtn");
 const searchResults = document.getElementById("searchResults");
 
 // 搜索框下资料分类：all 全部 / spec 规格书 / manual 说明书 / software 软件 / video 视频 / firmware 固件
-const CAT_LABEL = { all: "全部", spec: "规格书", manual: "说明书", software: "软件", video: "视频", firmware: "固件", other: "🔒 内部资料" };
+const CAT_LABEL = { all: "全部", spec: "规格书", manual: "说明书", software: "软件", video: "视频", firmware: "固件", 'module-config': '模组配置文件', other: "🔒 内部资料" };
 const CAT_GROUP_KEYS = { spec: ["spec"], manual: ["manual"], firmware: ["firmware"], other: ["other"], pending: ["pending"] }; // 各分类在产品资料组里保留的 key
 const CAT_PLACEHOLDER = {
   all: "如 R708规格书、6363固件、A5说明书、HDPlayer软件、复位视频",
@@ -1275,6 +1287,7 @@ const CAT_PLACEHOLDER = {
   video: "输入操作 / 故障关键词，如 复位、WiFi、接线",
   firmware: "输入接收卡型号或芯片数字，如 R708、6363",
   other: "搜索目录、文件名…",
+  'module-config': '输入模组型号、芯片或配置文件名…',
   pending: "输入产品型号，查看需要核对的资料",
 };
 // “全部”分类：宽屏每类各给一个例子；窄屏(手机)用短版，避免单行输入框被截断
@@ -1286,6 +1299,8 @@ let activeCat = "all";
 let lastSearch = null; // 最近一次产品搜索 {results, query, data}，切分类时本地重渲染、不重复请求
 const quickCats = document.getElementById("quickCats");
 function setActiveCat(cat) {
+  stopMediaVideos();
+  document.getElementById('catalogExpandAction')?.remove();
   activeCat = CAT_LABEL[cat] ? cat : "all";
   if (quickCats) {
     quickCats.querySelectorAll(".qc-btn").forEach((b) => {
@@ -1343,13 +1358,14 @@ function renderChipFirmwareCard(cf) {
   const fwItems = Array.isArray(cf.firmwareItems) ? cf.firmwareItems : [];
   if (fwItems.length) {
     h += `<details class="chip-fw-dl">`;
-    h += `<summary>📥 下载对应固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 款接收卡）</summary>`;
+    h += `<summary>📥 接收卡固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 份固件）</summary>`;
     h += `<p class="chip-fw-dl-tip">固件必须按手上接收卡的型号刷（看卡上丝印，如 R708），刷错会黑屏/花屏；列表里没有你的卡型、或拿不准，直接把接收卡型号发我。</p>`;
     h += `<div class="search-docs"><div class="doc-group doc-group-firmware">`;
-    fwItems.forEach((it) => {
-      const label = escHtml(it.clean || it.btn || it.name);
-      h += `<a class="doc-link fw-link" href="${escHtml(it.url)}" target="_blank" rel="noreferrer" download="${escHtml(it.name || "")}" title="${escHtml(it.name || it.clean || "")}">${label}</a>`;
-    });
+    for(const it of [...fwItems].sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-Hans-CN'))){
+      const name=String(it.name||''),parts=name.split('_FPGA_'),card=parts[0].replaceAll('_','/'),version=parts[1]?.match(/^V[0-9.]+/)?.[0]||'';
+      const label=card+(version?' · '+version.replace(/\.$/,''):'');
+      h+=`<a class="doc-link fw-link" href="${escHtml(it.url)}" title="${escHtml(name)}" target="_blank" rel="noreferrer" download="${escHtml(name)}">${escHtml(label)}</a>`;
+    }
     h += `</div></div></details>`;
   }
   const others = (cf.hits || []).slice(1);
@@ -1373,11 +1389,22 @@ function productHasCat(r, cat) {
   return productDocGroups(r).groups.some(g => (CAT_GROUP_KEYS[cat] || []).includes(g.key));
 }
 
+function hasRenderableRegistryFirmware(product) {
+  const items=product.firmwareGroup?.items||[];
+  return items.length>0&&items.every(item=>item.category==='接收卡'&&
+    item.associationStatus==='curated-official-firmware-registry'&&/^[a-f0-9]{64}$/.test(item.sha256||'')&&
+    String(item.url||'').startsWith('/v2/curated-firmware/'+item.sha256+'/'));
+}
+
+function hasConcreteProductResult(r) {
+  return !!(r.features?.comparisonFields?.length||r.firmwareGroup?.items?.length||r.specFiles?.length||productDocGroups(r).groups.some(g=>g.items?.length));
+}
+
 function renderSearchResults(results, query, data) {
+  if(!showOtherWikiModels)results=results.filter(r=>isOfficialWikiModel(r.modelId||r.name)||hasRenderableRegistryFirmware(r)||(wikiModelKey(r.modelId||r.name)===wikiModelKey(query)&&hasConcreteProductResult(r)));
   const cf = data && data.chipFirmware;
   const cat = (activeCat === "software" || activeCat === "video") ? "all" : activeCat; // 软件/视频分类走独立渲染，不进本函数
   const showChip = !!cf && (cat === "all" || cat === "firmware"); // 芯片固件速查卡只在“全部/固件”下出现
-  const showParams = cat === "all"; // 分类视图只给资料，不铺参数与特点，干净直接
   const shown = (cat === "all")
     ? results
     : results.filter((r) => productHasCat(r, cat, productDocGroups(r).fwGroup));
@@ -1391,9 +1418,10 @@ function renderSearchResults(results, query, data) {
   }
   let html = showChip ? renderChipFirmwareCard(cf) : "";
   if (shown.length) {
+    if(data?.approximateMatch){const match=data.approximateMatch;html+=`<div class="search-count">已按 ${escHtml(match.selected)} 查询；${match.candidates.length>1?'还有其他匹配型号，请核对型号。':'请核对型号。'}</div>`;if(match.candidates.length>1){html+='<div class="related-chips"><span class="related-label">其他匹配型号：</span>';for(const model of match.candidates.filter(m=>m!==match.selected))html+=`<button type="button" class="related-chip" data-q="${escHtml(model)}">${escHtml(model)}</button>`;html+='</div>';}}
     html += `<div class="search-count">${cat === "all" ? `找到 ${shown.length} 条产品结果` : `${CAT_LABEL[cat]} · ${shown.length} 个产品`}</div>`;
     // 同系列型号快捷词条（点击即换搜）
-    const chips = (data && data.relatedChips) || [];
+    const chips = ((data && data.relatedChips) || []).filter(c=>showOtherWikiModels||isOfficialWikiModel(c.q));
     if (chips.length) {
       html += `<div class="related-chips"><span class="related-label">相关型号：</span>`;
       chips.forEach((c) => {
@@ -1404,7 +1432,7 @@ function renderSearchResults(results, query, data) {
   }
   for (const [productIndex, r] of shown.entries()) {
     html += `<div class="search-item product-quick-card">`;
-    if (window.ProductCard) html += window.ProductCard.render(showParams ? r : { ...r, features: {} });
+    if (window.ProductCard) html += window.ProductCard.render(r);
     else html += `<div class="search-item-name">${escHtml(r.name)}</div>`;
     // 按后端真实类别呈现资料元数据、预览和下载操作。
     const { groups: allGroups } = productDocGroups(r);
@@ -1447,23 +1475,36 @@ function renderSearchResults(results, query, data) {
 }
 
 let quickRequestId = 0;
+let quickSearchController = null;
 async function doSearch() {
   clearTimeout(searchTimer); // Explicit submission replaces the pending automatic search.
   const q = quickSearchInput.value.trim();
+  if (activeCat === 'module-config') { await renderModuleConfigurations(q); return; }
   if (!q) return;
+  window.dispatchEvent(new Event('v2-mascot-reset'));
   updateQuickExamples(); // Preserve the final empty-state presentation previously applied by the timer.
   if (activeCat === "software") { await renderSoftwareCategory(q); return; } // 软件分类走独立端点
   if (activeCat === "video") { await renderVideoCategory(q); return; } // 视频分类走独立端点（按操作主题，与型号无关）
   if (["spec", "manual", "other", "pending"].includes(activeCat)) { await renderDocsCategory(activeCat, q); return; } // 规格书/说明书：分组页内展开命中大类
   const requestId = ++quickRequestId;
+  if(quickSearchController)quickSearchController.abort();
+  const controller=new AbortController();quickSearchController=controller;
   quickSearchBtn.disabled = true;
   quickSearchBtn.textContent = "搜索中…";
   try {
-    const resp = await fetch("/api/search?q=" + encodeURIComponent(q));
+    const resp = await fetch("/api/search?q=" + encodeURIComponent(q),{signal:controller.signal});
     const data = await resp.json();
     if (requestId !== quickRequestId) return;
     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
-    const hwResults = data.results || [];
+    let hwResults = data.results || [];
+    // Only fall back for an incomplete, unambiguous-prefix-shaped model query.
+    // Never replace a registered exact official model with a similar one.
+    const modelQuery=q.trim().toUpperCase().replace(/^HD[-_ ]?/,'').replace(/\s/g,'');
+    const catalogHits=hwResults.filter(r=>isOfficialWikiModel(r.modelId||r.name)||hasRenderableRegistryFirmware(r));
+    if(activeCat==='all'&&!data.chipFirmware&&!catalogHits.length&&!hwResults.some(r=>wikiModelKey(r.modelId||r.name)===modelQuery&&hasConcreteProductResult(r))&&/^[A-Z]{1,5}\d{1,5}$/.test(modelQuery)){
+      const candidates=officialWikiCategories.map(x=>x.model).filter(m=>wikiModelKey(m).startsWith(modelQuery)&&wikiModelKey(m)!==modelQuery).sort((a,b)=>wikiModelKey(a).length-wikiModelKey(b).length||wikiModelKey(a).localeCompare(wikiModelKey(b),'en',{numeric:true}));
+      if(candidates.length){const selected=candidates[0];const fallbackResp=await fetch('/api/search?q='+encodeURIComponent(selected),{signal:controller.signal});const fallback=await fallbackResp.json();if(requestId!==quickRequestId)return;const match=(fallback.results||[]).filter(r=>wikiModelKey(r.modelId||r.name)===wikiModelKey(selected));if(fallbackResp.ok&&match.length){hwResults=match;data.results=match;data.approximateMatch={input:q,selected,candidates};}}
+    }
     if(!hwResults.length&&document.body.dataset.client==='offline')fetch('/v2/offline/suggestions?q='+encodeURIComponent(q.slice(0,240))).then(r=>r.ok?r.json():null).then(result=>{if(result?.suggestion&&requestId===quickRequestId)window.dispatchEvent(new CustomEvent('v2-model-suggestion',{detail:{...result.suggestion,view:'quick'}}));}).catch(()=>{});
     // “全部”分类下硬件无命中、也不是芯片固件速查时，兜底聚合软件与操作视频，避免搜 HDPlayer / 复位 显示空：
     // 明确软件名（isList=false 单软件命中，如 HDPlayer）直达软件卡；操作词（如 复位，软件不匹配）直达视频；都不中才显示硬件空态。
@@ -1489,15 +1530,16 @@ async function doSearch() {
         return;
       }
     }
+    const advice=window.MascotAdvice?.plan({query:q,results:hwResults,models:officialWikiCategories.map(x=>x.model),approximateMatch:data.approximateMatch});
+    if(advice)window.dispatchEvent(new CustomEvent('v2-mascot-advice',{detail:advice}));
     lastSearch = { results: hwResults, query: q, data };
     renderSearchResults(lastSearch.results, q, data);
   } catch (err) {
-    if (requestId !== quickRequestId) return;
+    if (requestId !== quickRequestId || err.name==='AbortError') return;
     searchResults.innerHTML = `<div class="search-empty" style="color:#c00">搜索失败：${escHtml(err.message)}</div>`;
     searchResults.style.display = "block";
   } finally {
-    quickSearchBtn.disabled = false;
-    quickSearchBtn.textContent = "搜索";
+    if(quickSearchController===controller){quickSearchController=null;quickSearchBtn.disabled = false;quickSearchBtn.textContent = "搜索";}
   }
 }
 
@@ -1568,12 +1610,13 @@ async function renderSoftwareCategory(qArg) {
       const purpose = document.createElement("div");
       purpose.className = "sw-list-purpose"; purpose.textContent = s.purpose;
       main.append(title, purpose);
+      if(!window.VideoGroups.softwareVideos(s).length){const note=document.createElement('small');note.className='software-no-video';note.textContent='暂未收录该软件的专用教学视频';main.append(note);}
       const acts = document.createElement("div");
       acts.className = "sw-row-actions";
       let expandedCard=null;
       const toggleDetails=(button)=>{
         if(expandedCard){
-          expandedCard.querySelectorAll('video').forEach(video=>video.pause());
+          expandedCard.querySelectorAll('video').forEach(releaseMediaVideo);
           acts.prepend(button);expandedCard.replaceWith(row);expandedCard=null;
           button.textContent=button.dataset.collapsedLabel;button.setAttribute('aria-expanded','false');
           button.title='查看视频与说明书：'+s.name;button.setAttribute('aria-label',button.title);
@@ -1584,6 +1627,7 @@ async function renderSoftwareCategory(qArg) {
           close.type='button';close.className='sw-btn-detail sw-close-bottom';close.textContent='收起';
           close.addEventListener('click',()=>toggleDetails(button));
           expandedCard.querySelector('.sw-actions').append(close);row.replaceWith(expandedCard);
+          const firstVideo=expandedCard.querySelector('.vid-item');if(firstVideo)firstVideo.open=true;
           button.textContent='收起';button.setAttribute('aria-expanded','true');
           button.title='收起资料：'+s.name;button.setAttribute('aria-label',button.title);
         }
@@ -1635,46 +1679,15 @@ function videoFileName(name) {
 }
 // 单条视频：折叠行（▶ 名称 + 大小），展开后内嵌播放器 + 下载
 function buildVideoItem(v) {
-  const det = document.createElement("details");
-  det.className = "vid-item";
-  const sum = document.createElement("summary");
-  sum.innerHTML = `<span class="vid-ico" aria-hidden="true"></span><span class="vid-name"></span><span class="vid-size"></span>`;
-  sum.querySelector(".vid-name").textContent = v.name;
-  sum.querySelector(".vid-size").textContent = v.sizeText || "";
-  const eye = sum.querySelector('.vid-ico');
-  // The icon describes what clicking will DO, not the current open state.
-  const eyeOpen = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const eyeOff = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a15 15 0 0 1-3.2 3.9"/><path d="M6.4 6.5C3.5 8.3 2 12 2 12s3.5 7 10 7a11.6 11.6 0 0 0 3.8-.6"/><path d="M10 10a3 3 0 0 0 4 4"/></svg>';
-  const updateEye = () => {
-    eye.innerHTML = det.open ? eyeOff : eyeOpen;
-    sum.title = det.open ? '收起视频预览' : '展开视频预览';
-    sum.setAttribute('aria-label', sum.title + '：' + v.name);
-  };
-  updateEye();
-  const body = document.createElement("div");
-  body.className = "vid-body";
-  const video = document.createElement("video");
-  video.controls = true;
-  video.preload = "none"; // 不点播放不加载视频流，省 OSS 流量
-  video.setAttribute("playsinline", "");
-  video.src = v.url;
-  const dl = document.createElement("a");
-  dl.className = "sw-link vid-dl";
-  dl.href = v.url; dl.target = "_blank"; dl.rel = "noopener";
-  dl.setAttribute("download", videoFileName(v.name));
-  dl.textContent = "↓"; dl.title = "下载视频"; dl.setAttribute('aria-label', '下载视频：' + v.name);
-  const close = document.createElement('button');
-  close.type='button';close.className='vid-close';close.textContent='收起';
-  close.addEventListener('click',()=>{
-    video.pause();det.open=false;sum.focus({preventScroll:true});
-    const bounds=sum.getBoundingClientRect();
-    if(bounds.top<0||bounds.bottom>window.innerHeight)sum.scrollIntoView({block:'nearest'});
-  });
-  det.addEventListener('toggle',()=>{if(!det.open)video.pause();updateEye();});
-  const actions=document.createElement('div');actions.className='vid-actions';actions.append(dl,close);
-  body.append(video, actions);
-  det.append(sum, body);
-  return det;
+ const det=document.createElement('details');det.className='vid-item';
+ const sum=document.createElement('summary'),name=document.createElement('span'),size=document.createElement('span'),eye=document.createElement('span');
+ name.className='vid-name';name.textContent=v.name;size.className='vid-size';size.textContent=v.sizeText||'';eye.className='vid-ico';eye.setAttribute('aria-hidden','true');
+ const dl=document.createElement('a');dl.className='sw-link vid-dl';dl.href=v.url+(v.url.includes('?')?'&':'?')+'download=1';dl.download=videoFileName(v.name);dl.setAttribute('aria-label','下载视频：'+v.name);dl.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m-5-5 5 5 5-5M5 17v3h14v-3"/></svg>';dl.onclick=e=>e.stopPropagation();
+ sum.append(name,size,eye,dl);
+ const body=document.createElement('div');body.className='vid-body';const video=document.createElement('video');video.controls=true;video.preload='none';video.playsInline=true;
+ const close=document.createElement('button');close.type='button';close.className='vid-close';close.textContent='收起';close.onclick=()=>{det.open=false;sum.focus({preventScroll:true});};
+ function sync(){eye.innerHTML=det.open?VIDEO_EYE_OFF:VIDEO_EYE;sum.setAttribute('aria-label',(det.open?'关闭视频：':'播放视频：')+v.name);if(det.open)playMediaVideo(video,v.url);else releaseMediaVideo(video);}
+ det.addEventListener('toggle',sync);eye.innerHTML=VIDEO_EYE;sum.setAttribute('aria-label','播放视频：'+v.name);body.append(video,close);det.append(sum,body);return det;
 }
 async function renderVideoCategory(qArg) {
   const requestId = ++quickRequestId;
@@ -1713,8 +1726,14 @@ async function renderVideoCategory(qArg) {
     ? `找到 ${total} 个与"${escHtml(kw)}"相关的操作视频（点标题在线播放，也可下载）`
     : "操作视频 · 共 " + total + " 个 · 可搜索复位、WiFi、U盘等关键词";
   searchResults.appendChild(head);
+  if(vd?.localCurated){
+    renderCuratedVideoWorkspace(groups,kw);
+    searchResults.style.display='block';
+    return;
+  }
   const wrap = document.createElement("div");
-  wrap.className = "vid-catalog";
+  wrap.className = vd?.localCurated ? "vid-catalog official-video-catalog" : "vid-catalog";
+  if(vd?.localCurated&&groups.length===1)wrap.classList.add('single-group');
   // Always retain the product category heading, including a single search category.
   groups.forEach((g) => {
     const grp = document.createElement("details");
@@ -1752,6 +1771,46 @@ async function renderVideoCategory(qArg) {
   // Avoid unexpectedly starting/expanding previews when a search is submitted.
 }
 
+function renderCuratedVideoWorkspace(groups,query){
+ const layout=document.createElement('div');layout.className='video-workspace';
+ const navigation=document.createElement('div');navigation.className='video-workspace-nav';navigation.setAttribute('aria-label','视频分类与列表');
+ const playerPane=document.createElement('section');playerPane.className='video-workspace-player';playerPane.setAttribute('aria-label','视频播放');
+ const hint=document.createElement('p');hint.className='video-workspace-empty';hint.textContent='从左侧选择视频，在这里播放';playerPane.append(hint);
+ let selected=null,currentVideo=null;
+ function mark(button,playing){if(!button)return;button.setAttribute('aria-pressed',String(playing));const eye=button.closest('.video-workspace-card')?.querySelector('.video-card-preview');if(eye){eye.innerHTML=playing?VIDEO_EYE_OFF:VIDEO_EYE;eye.setAttribute('aria-label',(playing?'关闭视频：':'播放视频：')+button.textContent);}}
+ function close(){if(currentVideo)releaseMediaVideo(currentVideo);currentVideo=null;mark(selected,false);selected=null;playerPane.replaceChildren(hint);}
+ function choose(item,button){
+  if(selected===button&&currentVideo){close();return;}
+  close();selected=button;mark(button,true);
+  const title=document.createElement('h3');title.className='video-workspace-title';title.textContent=item.name;
+  const player=document.createElement('video');player.controls=true;player.preload='none';player.playsInline=true;currentVideo=player;
+  const header=document.createElement('div');header.className='video-workspace-header';const actions=document.createElement('div');actions.className='video-workspace-actions';
+  const download=document.createElement('a');download.href=item.url+(item.url.includes('?')?'&':'?')+'download=1';download.download=videoFileName(item.name);download.className='video-workspace-icon';download.setAttribute('aria-label','下载视频：'+item.name);download.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 17v3h14v-3"/></svg>';
+  const stop=document.createElement('button');stop.type='button';stop.className='video-workspace-icon';stop.setAttribute('aria-label','关闭视频');stop.innerHTML=VIDEO_EYE_OFF;stop.onclick=close;
+  actions.append(download,stop);header.append(title,actions);playerPane.replaceChildren(header,player);playMediaVideo(player,item.url);
+  if(window.matchMedia('(max-width:760px)').matches)playerPane.scrollIntoView({block:'nearest',behavior:'smooth'});
+ }
+ layout.addEventListener('toggle',event=>{if(!event.target.open&&selected&&event.target.contains(selected))close();},true);
+ for(const group of groups){
+  const category=document.createElement('details');category.className='video-workspace-category';category.open=!!query;
+  const heading=document.createElement('summary');heading.textContent=group.label+'（'+group.count+'）';category.append(heading);
+  const sections=(group.sections||[]).filter(s=>s.videos&&s.videos.length);
+  function addItem(item,parent){
+   const card=document.createElement('div');card.className='video-workspace-card';
+   const button=document.createElement('button');button.type='button';button.className='video-workspace-item';button.textContent=item.name;button.setAttribute('aria-pressed','false');button.onclick=()=>choose(item,button);
+   const info=document.createElement('div');info.className='video-card-info';info.append(button);if(item.language){const language=document.createElement('small');language.className='video-card-language';language.textContent=item.language;info.append(language);}
+   const eye=document.createElement('button');eye.type='button';eye.className='video-workspace-icon video-card-preview';eye.innerHTML=VIDEO_EYE;eye.setAttribute('aria-label','播放视频：'+item.name);eye.onclick=()=>choose(item,button);
+   const download=document.createElement('a');download.className='video-workspace-icon video-card-download';download.href=item.url+(item.url.includes('?')?'&':'?')+'download=1';download.download=videoFileName(item.name);download.setAttribute('aria-label','下载视频：'+item.name);download.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 17v3h14v-3"/></svg>';
+   card.append(info,eye,download);parent.append(card);
+  }
+  const flat=sections.length===1&&sections[0].label===group.label;
+  if(flat)for(const item of sections[0].videos)addItem(item,category);
+  else for(const section of sections){const sub=document.createElement('details');sub.className='video-workspace-section';sub.open=!!query;const title=document.createElement('summary');title.textContent=section.label+'（'+section.videos.length+'）';sub.append(title);for(const item of section.videos)addItem(item,sub);category.append(sub);}
+  navigation.append(category);
+ }
+ layout.append(navigation,playerPane);searchResults.append(layout);
+}
+
 // 问答区（小灰机）明确要操作视频时的回答：内嵌可播放列表，企微仍走 reply 里的快查站深链
 function renderVideoAnswer(items) {
   const frag = document.createDocumentFragment();
@@ -1769,9 +1828,32 @@ function renderVideoAnswer(items) {
 // 实时搜索（120ms防抖，参照旧项目逻辑）；软件分类下输入走软件端点
 // 「规格书/说明书/固件」分类：空词全量分组浏览（固件按卡型；规格书/说明书按产品大类、组内按型号折叠），走确定性 /api/docs
 // Page-local metadata cache: show the last directory immediately while refreshing.
+// Port counts come from the pinned official selection dataset, for display order only.
+const wikiCascadePorts = {"D10":0,"D30":0,"V10":0,"D15":0,"D16":1,"D35":0,"D36":0,"C10":1,"C10C":1,"C30":1,"C15":1,"C15C":1,"C16":1,"C16C":1,"C35":1,"C36":1,"C36C":1,"C08L":1,"C16L":1,"C16H":1,"A30":4,"A30+":1,"A601":2,"A602":2,"A603":2,"A3":1,"A3L":1,"A4":1,"A4L":1,"A5":2,"A5L":2,"A6":4,"B6":2,"B6L":2,"A6L":4,"H6":6,"A7":8,"H8":8,"B8L":8,"A8":16,"VP210":2,"VP210A":2,"VP210C":2,"VP210S":2,"KV210":2,"VP210H":2,"VP410":4,"VP410A":4,"VP410C":4,"VP410S":4,"KV410":4,"VP410H":4,"VP620":6,"VP620A":6,"VP630":6,"VP630TP":6,"VP820":8,"VP820A":8,"VP830":8,"VP830TP":8,"VP1220":12,"VP1240":12,"VP1220C":12,"VP10":10,"VP1220S":12,"VP12":12,"VP1240A":12,"VP1620":16,"VP1640":16,"VP1620C":16,"VP1620S":16,"VP1620S_{OPTIONAL}":16,"VP1640A":16,"VP1640A_{OPTIONAL}":16,"VP2060":20,"VP2430":24,"VP3060":30,"VP4060":40};
 const docsCache = new Map();
 const docsPending = new Map();
 const docsViews = new Map();
+const officialWikiModels=new Set(["40S","133MC","133TE","352C","723D","S40","S70","S90","S107","S108","SN1","Y1","PS08","MS1000","MS2000","MS4000","MS4000PRO","DCS4000","DCS4000PRO","VS0102","VS0104","VS0108","VS0116","3399F","3576V","3588H","3588V","FT01","FT08","B6L","B8H","B8L","K08","K12","R5S","R5SPLUS","R8S","R500S","R708","R712","R716","R732","R3210","RB6","KV210","KV410","VP6","VP8","VP10","VP12","VP210H","VP210S","VP410H","VP410S","VP620A","VP630","VP820A","VP830","VP1220S","VP1240A","VP1620S","VP1640A","VP2060","VP2430","VP3060","VP4060","VM0404","VM0808","VM1616","VM8000","VP8000M","A4L","A5L","A6L","A7","A8","H6","H8","H16","H20","T08","T08F","T16","T901","T902X1","T902X2","S1C","K524","A3L","H4K","C08L","C16H","C16L","D16","D18","733V","982V","3566MV","3568V","3568VC","40S-BOX","527S-BOX","3288S-BOX","3399F-BOX","3566S-BOX","3568S-BOX","3576V-BOX","3588V-BOX","527S","972S","3288S","3566P","3566S","3568S","3568SC","CT800","E62","E63","E64","HT01","HT02","U6A","U60","U62","W3A","W4A","W60","W62","W63","W64A","W66","WF1","WF2","WF4"]);
+let showOtherWikiModels=false;
+const isOfficialWikiModel=value=>officialWikiModels.has(String(value||'').toUpperCase().replace(/^HD[-_ ]?/,'').replace(/\s/g,''));
+const officialWikiCategories=[{"model":"HD-40S","category":"1080P数字标牌主板"},{"model":"HD-133MC","category":"1080P数字标牌主板"},{"model":"HD-133TE","category":"1080P数字标牌主板"},{"model":"HD-352C","category":"1080P数字标牌主板"},{"model":"HD-723D","category":"1080P数字标牌主板"},{"model":"HD-S40","category":"传感器"},{"model":"HD-S70","category":"传感器"},{"model":"HD-S90","category":"传感器"},{"model":"HD-S107","category":"传感器"},{"model":"HD-S108","category":"传感器"},{"model":"HD-SN1","category":"传感器"},{"model":"HD-Y1","category":"多功能卡"},{"model":"HD-PS08","category":"多功能时序电源"},{"model":"HD-MS1000","category":"多媒体服务器"},{"model":"HD-MS2000","category":"多媒体服务器"},{"model":"HD-MS4000","category":"多媒体服务器"},{"model":"HD-MS4000PRO","category":"多媒体服务器"},{"model":"HD-DCS4000","category":"分布式系统"},{"model":"HD-DCS4000PRO","category":"分布式系统"},{"model":"HD-VS0102","category":"分配器"},{"model":"HD-VS0104","category":"分配器"},{"model":"HD-VS0108","category":"分配器"},{"model":"HD-VS0116","category":"分配器"},{"model":"HD-3399F","category":"高性能终端主板"},{"model":"HD-3576V","category":"高性能终端主板"},{"model":"HD-3588H","category":"高性能终端主板"},{"model":"HD-3588V","category":"高性能终端主板"},{"model":"HD-FT01","category":"光纤收发器"},{"model":"HD-FT08","category":"光纤收发器"},{"model":"HD-B6L","category":"海报拼接屏控制卡"},{"model":"HD-B8H","category":"海报拼接屏控制卡"},{"model":"HD-B8L","category":"海报拼接屏控制卡"},{"model":"HD-K08","category":"接收卡"},{"model":"HD-K12","category":"接收卡"},{"model":"HD-R5S","category":"接收卡"},{"model":"HD-R5SPLUS","category":"接收卡"},{"model":"HD-R8S","category":"接收卡"},{"model":"HD-R500S","category":"接收卡"},{"model":"HD-R708","category":"接收卡"},{"model":"HD-R712","category":"接收卡"},{"model":"HD-R716","category":"接收卡"},{"model":"HD-R732","category":"接收卡"},{"model":"HD-R3210","category":"接收卡"},{"model":"HD-RB6","category":"接收卡"},{"model":"HD-KV210","category":"视频处理器"},{"model":"HD-KV410","category":"视频处理器"},{"model":"HD-VP6","category":"视频处理器"},{"model":"HD-VP8","category":"视频处理器"},{"model":"HD-VP10","category":"视频处理器"},{"model":"HD-VP12","category":"视频处理器"},{"model":"HD-VP210H","category":"视频处理器"},{"model":"HD-VP210S","category":"视频处理器"},{"model":"HD-VP410H","category":"视频处理器"},{"model":"HD-VP410S","category":"视频处理器"},{"model":"HD-VP620A","category":"视频处理器"},{"model":"HD-VP630","category":"视频处理器"},{"model":"HD-VP820A","category":"视频处理器"},{"model":"HD-VP830","category":"视频处理器"},{"model":"HD-VP1220S","category":"视频处理器"},{"model":"HD-VP1240A","category":"视频处理器"},{"model":"HD-VP1620S","category":"视频处理器"},{"model":"HD-VP1640A","category":"视频处理器"},{"model":"HD-VP2060","category":"视频处理器"},{"model":"HD-VP2430","category":"视频处理器"},{"model":"HD-VP3060","category":"视频处理器"},{"model":"HD-VP4060","category":"视频处理器"},{"model":"HD-VM0404","category":"视频矩阵"},{"model":"HD-VM0808","category":"视频矩阵"},{"model":"HD-VM1616","category":"视频矩阵"},{"model":"HD-VM8000","category":"视频矩阵"},{"model":"HD-VP8000M","category":"视频拼接处理器"},{"model":"HD-A4L","category":"双模多媒体播放器"},{"model":"HD-A5L","category":"双模多媒体播放器"},{"model":"HD-A6L","category":"双模多媒体播放器"},{"model":"HD-A7","category":"双模多媒体播放器"},{"model":"HD-A8","category":"双模多媒体播放器"},{"model":"HD-H6","category":"双模多媒体播放器"},{"model":"HD-H8","category":"双模多媒体播放器"},{"model":"HD-H16","category":"双模多媒体播放器"},{"model":"HD-H20","category":"双模多媒体播放器"},{"model":"HD-T08","category":"同步控制系统"},{"model":"HD-T08F","category":"同步控制系统"},{"model":"HD-T16","category":"同步控制系统"},{"model":"HD-T901","category":"同步控制系统"},{"model":"HD-T902X1","category":"同步控制系统"},{"model":"HD-T902X2","category":"同步控制系统"},{"model":"HD-S1C","category":"小灰云星空"},{"model":"HD-K524","category":"异步继电器"},{"model":"HD-A3L","category":"异步全彩播放盒"},{"model":"HD-H4K","category":"异步全彩播放盒"},{"model":"HD-C08L","category":"异步全彩控制卡"},{"model":"HD-C16H","category":"异步全彩控制卡"},{"model":"HD-C16L","category":"异步全彩控制卡"},{"model":"HD-D16","category":"异步全彩控制卡"},{"model":"HD-D18","category":"异步全彩控制卡"},{"model":"HD-733V","category":"真4K终端主板"},{"model":"HD-982V","category":"真4K终端主板"},{"model":"HD-3566MV","category":"真4K终端主板"},{"model":"HD-3568V","category":"真4K终端主板"},{"model":"HD-3568VC","category":"真4K终端主板"},{"model":"HD-40S-BOX","category":"智慧终端播放盒"},{"model":"HD-527S-BOX","category":"智慧终端播放盒"},{"model":"HD-3288S-BOX","category":"智慧终端播放盒"},{"model":"HD-3399F-BOX","category":"智慧终端播放盒"},{"model":"HD-3566S-BOX","category":"智慧终端播放盒"},{"model":"HD-3568S-BOX","category":"智慧终端播放盒"},{"model":"HD-3576V-BOX","category":"智慧终端播放盒"},{"model":"HD-3588V-BOX","category":"智慧终端播放盒"},{"model":"HD-527S","category":"智慧终端主板"},{"model":"HD-972S","category":"智慧终端主板"},{"model":"HD-3288S","category":"智慧终端主板"},{"model":"HD-3566P","category":"智慧终端主板"},{"model":"HD-3566S","category":"智慧终端主板"},{"model":"HD-3568S","category":"智慧终端主板"},{"model":"HD-3568SC","category":"智慧终端主板"},{"model":"HD-CT800","category":"智能中控"},{"model":"HD-E62","category":"E系列"},{"model":"HD-E63","category":"E系列"},{"model":"HD-E64","category":"E系列"},{"model":"HD-HT01","category":"HDMI传输器"},{"model":"HD-HT02","category":"HDMI传输器"},{"model":"HD-U6A","category":"U系列"},{"model":"HD-U60","category":"U系列"},{"model":"HD-U62","category":"U系列"},{"model":"HD-W3A","category":"W系列"},{"model":"HD-W4A","category":"W系列"},{"model":"HD-W60","category":"W系列"},{"model":"HD-W62","category":"W系列"},{"model":"HD-W63","category":"W系列"},{"model":"HD-W64A","category":"W系列"},{"model":"HD-W66","category":"W系列"},{"model":"HD-WF1","category":"W系列"},{"model":"HD-WF2","category":"W系列"},{"model":"HD-WF4","category":"W系列"}];
+const receiverOrder=['R712','R716','R732','R708','RB6','R516T','R320T','R516','R320','R512T','R508T','R512S','R512','R508','R507T','R500S','R612','K08','K12','R5S','R3210','R5SPLUS'];
+const wikiModelKey=s=>String(s||'').replace(/^HD[-_ ]?/i,'').replace(/\s+/g,'').toUpperCase();
+function wikiModelCompare(a,b,category){
+ const x=wikiModelKey(a),y=wikiModelKey(b),numeric=(u,v)=>u.localeCompare(v,'zh-Hans-CN',{numeric:true});
+ if(category==='receiver') {const rank=m=>{const i=receiverOrder.indexOf(m);return i<0?receiverOrder.length:i;};return rank(x)-rank(y)||numeric(x,y);}
+ if(category==='player')return numeric(x,y);
+ const xp=wikiCascadePorts[x],yp=wikiCascadePorts[y];
+ if(Number.isInteger(xp)&&Number.isInteger(yp))return xp-yp||numeric(x,y);
+ if(Number.isInteger(xp)!==Number.isInteger(yp))return Number.isInteger(xp)?-1:1;
+ return numeric(x,y);
+}
+function orderWikiCatalog(docs,cat){
+ if(!['spec','manual','firmware'].includes(cat))return docs;
+ for(const group of docs.groups||[])if(group.products)group.products.sort((a,b)=>wikiModelCompare(a.model,b.model,group.key));
+ for(const group of docs.firmwareCategories||[])group.models.sort((a,b)=>wikiModelCompare(a,b,group.key));
+ return docs;
+}
 async function fetchDocs(cat, history = "current", query = "") {
   if(cat==='other')return fetchDirectoryPage({query});
   const cacheKey = cat + ":" + history;
@@ -1782,7 +1864,7 @@ async function fetchDocs(cat, history = "current", query = "") {
     const resp = await fetch("/api/docs?cat=" + encodeURIComponent(cat) + "&list=1&history=" + encodeURIComponent(history));
     const data = await resp.json();
     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
-    const docs = data.docs || null;
+    const docs = data.docs ? orderWikiCatalog(data.docs,cat) : null;
     if (!docs) throw new Error("资料目录响应不完整");
     const signature = JSON.stringify(docs);
     const previous = docsCache.get(cacheKey);
@@ -1798,10 +1880,10 @@ async function fetchDocs(cat, history = "current", query = "") {
 function docPillEl(it, isFw) {
   const available = it.available !== false && typeof it.url === "string" && /^(https?:\/\/|\/[^/])/i.test(it.url);
   const preview = window.ProductResources.previewTarget(it);
-  const a = document.createElement(available ? (preview.url ? 'a' : 'button') : 'span');
+  const a = document.createElement(isFw ? 'span' : available ? (preview.url ? 'a' : 'button') : 'span');
   a.className = "doc-link" + (isFw ? " fw-link" : "") + (available ? "" : " doc-link-nourl");
-  if (available && preview.url) a.href = preview.url;
-  if (available && !preview.url) { a.type = 'button'; a.onclick = () => window.alert(preview.reason); }
+  if (!isFw && available && preview.url) a.href = preview.url;
+  if (!isFw && available && !preview.url) { a.type = 'button'; a.onclick = () => window.alert(preview.reason); }
   a.target = "_blank";
   a.rel = "noopener noreferrer";
   a.textContent = it.clean || it.name || "下载";
@@ -1814,12 +1896,14 @@ function docPillEl(it, isFw) {
     a.appendChild(note);
   }
   if (!available) a.setAttribute("aria-disabled", "true");
-  if (available) {
+  if (available && !isFw) {
     a.title = preview.url ? '在线预览：' + (it.name || it.clean || '文件') : preview.reason;
     a.setAttribute('aria-label', preview.url ? '在线预览 ' + (it.name || it.clean || '文件') : '预览 ' + (it.name || it.clean || '文件') + '：' + preview.reason);
   }
   const label = document.createElement('span'); label.className = 'doc-link-label';
   label.append(...a.childNodes); a.appendChild(label);
+  if(isFw){const info=window.FirmwareLabels?.describe(it.name||it.file||'');if(info){const badge=document.createElement('small');badge.className='fw-series-badge';badge.textContent=info.label;label.prepend(badge);a.dataset.firmwareSeries=info.series;}}
+  if(it.documentEdition==='neutral'||it.brand==='中性版'){const tag=document.createElement('small');tag.className='doc-neutral-tag';tag.textContent='中性版';label.appendChild(tag);}
   return a;
 }
 function docFileActions(item, isFw = false) {
@@ -1833,6 +1917,7 @@ function docFileActions(item, isFw = false) {
   actions.appendChild(preview);
   const url = window.ProductResources.downloadTarget(item);
   if (url) {
+    if(isFw)actions.appendChild(window.ProductResources.copyButton(item));
     const download = document.createElement('a'); download.className = 'doc-download'; download.href = url;
     download.download = item.originalName || item.name || ''; download.textContent = '下载';
     download.title = '下载原文件：' + (item.originalName || item.name || '文件');
@@ -1841,6 +1926,18 @@ function docFileActions(item, isFw = false) {
   }
   return actions;
 }
+const catalogPreviewHint=document.createElement('small');
+catalogPreviewHint.className='catalog-preview-hint';catalogPreviewHint.id='catalogPreviewHint';catalogPreviewHint.textContent='停留预览，点击固定';catalogPreviewHint.hidden=true;
+document.getElementById('quickCats').after(catalogPreviewHint);
+let catalogHintFrame=0;
+function updateCatalogPreviewHint(){
+ cancelAnimationFrame(catalogHintFrame);
+ catalogHintFrame=requestAnimationFrame(()=>{
+  catalogPreviewHint.hidden=!Array.from(searchResults.querySelectorAll('.spec-workspace,.firmware-browser')).some(node=>{for(let parent=node.parentElement;parent&&parent!==searchResults;parent=parent.parentElement)if(parent.tagName==='DETAILS'&&!parent.open)return false;return node.getClientRects().length>0;});
+ });
+}
+searchResults.addEventListener('toggle',updateCatalogPreviewHint,true);
+new MutationObserver(updateCatalogPreviewHint).observe(searchResults,{childList:true});
 function docCatSummary(text, sizeText) {
   const det = document.createElement("details");
   det.className = "vid-item doc-cat-item";
@@ -1852,6 +1949,14 @@ function docCatSummary(text, sizeText) {
   const body = document.createElement("div");
   body.className = "vid-body doc-cat-body";
   det.append(sum, body);
+  sum.addEventListener('click',()=>{
+   const opening=!det.open,viewport=document.getElementById('searchResults'),before=viewport.scrollTop;
+   requestAnimationFrame(()=>{
+    if(!det.isConnected)return;
+    if(opening){const offset=sum.getBoundingClientRect().top-viewport.getBoundingClientRect().top;viewport.scrollTo({top:Math.max(0,viewport.scrollTop+offset),behavior:'instant'});}
+    else viewport.scrollTop=before;
+   });
+  });
   return { det, body };
 }
 // 型号后直接显示文件链接，只有产品大类保留折叠。
@@ -1872,15 +1977,18 @@ function docFlatRow(model, items, cat, deviceName) {
   const fileButton = item => docFileActions({...item, deviceName: item.deviceName || deviceName});
   const present = documents.filter(item => item.available !== false);
   const missing = documents.filter(item => item.available === false);
-  const lines = window.ProductResources.documentRows(present);
-  for (const pair of lines) {
-    const line = document.createElement('span'); line.className = 'doc-document-pair';
-    for (const language of ['zh', 'other']) {
-      const cell = document.createElement('span'); cell.className = 'doc-pair-cell'; cell.dataset.language = language;
-      if (pair[language]) cell.appendChild(fileButton(pair[language])); line.appendChild(cell);
-    }
-    links.appendChild(line);
+  const line = document.createElement('span'); line.className = 'doc-document-pair doc-three-columns';
+  const buckets={zh:[],en:[],neutral:[]};
+  for(const item of present){const language=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':language==='en'||language.includes('英文')||/specification|manual|instruction/i.test(item.name||'')&&!/[\u4e00-\u9fff]/.test(item.name||'')?'en':'zh';buckets[key].push(item);}
+  for(const [key,title] of [['neutral','中性版'],['zh','中文'],['en','英文']]){
+    if(!buckets[key].length)continue;
+    const cell=document.createElement('span');cell.className='doc-pair-cell';cell.dataset.language=key;
+    const heading=document.createElement('small');heading.className='doc-column-title';heading.textContent=title;cell.appendChild(heading);
+    for(const item of buckets[key])cell.appendChild(fileButton(item));
+    if(!buckets[key].length){const empty=document.createElement('span');empty.className='doc-column-empty';empty.textContent='—';cell.appendChild(empty);}
+    line.appendChild(cell);
   }
+  links.appendChild(line);
   if (missing.length) {
     const records = document.createElement('details'); records.className = 'doc-missing-records';
     const summary = document.createElement('summary'); summary.textContent = '原件缺失记录（' + missing.length + '）'; records.appendChild(summary);
@@ -1954,37 +2062,136 @@ function renderSourceDirectory(docs,query=''){
  window.SourceDirectoryBrowser.mount({container:searchResults,docs,fileActions:docFileActions,load:async options=>(await fetchDirectoryPage(options)).directoryPage,onLocate:item=>{quickSearchInput.value=item.name;renderDocsCategory('other',item.name);}});
 }
 
+// A focused view of the two existing registered directories, using the same
+// authorized directory and download endpoints as the internal Wiki browser.
+const moduleConfigurationFolders = ['模组配置文件', '2026年新调试  LED模组配置文件'];
+const moduleConfigurationNodes=new Map();
+const moduleConfigurationViews=new Map();
+async function mergedConfigurationEntries(sources,{manufacturerLevel=false,year2026=[]}={}) {
+ const pages=await Promise.all(sources.map(async source=>{const entries=[];let offset=0;do{const page=(await fetchDirectoryPage({directory:source.id,offset})).directoryPage;entries.push(...page.entries.map(entry=>({...entry,configuration2026:source.is2026||entry.folders?.[0]===moduleConfigurationFolders[1]})));offset=page.pagination.nextOffset;}while(offset!==null);return entries;}));
+ const folders=new Map(),files=new Map();
+ for(const entry of pages.flat()){
+  if(entry.type==='directory'){const newFolder=manufacturerLevel&&entry.label.endsWith('新调试配置文件');const label=newFolder?entry.label.replace(/新调试配置文件$/,''):entry.label;if(!folders.has(label))folders.set(label,{...entry,label,sources:[],year2026:[],count:0});const group=folders.get(label);(manufacturerLevel&&(entry.configuration2026||newFolder)?group.year2026:group.sources).push({id:entry.id,is2026:!!entry.configuration2026,count:entry.count});group.count+=entry.count;}
+  else {const key=entry.sha256||entry.resourceVersionId||entry.locationId;if(!files.has(key))files.set(key,entry);else if(entry.configuration2026)files.get(key).configuration2026=true;}
+ }
+ if(year2026.length){folders.set('2026年新调试',{type:'directory',label:'2026年新调试',sources:year2026,year2026:[],count:year2026.reduce((n,s)=>n+s.count,0)});}
+ const directories=[...folders.values()].map(group=>{const id='merged:'+[...group.sources,...group.year2026].map(s=>s.id).sort().join(',');moduleConfigurationNodes.set(id,{sources:group.sources,year2026:group.year2026});return {...group,id};});
+ return [...directories.sort((a,b)=>a.label.localeCompare(b.label,'zh-Hans-CN')),...[...files.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hans-CN',{numeric:true}))];
+}
+const modulePageCache=window.DirectoryPageCache.create({load:async options=>{
+ const params=new URLSearchParams({q:options.query||'',directory:options.directory||'root',offset:String(options.offset||0),sort:options.sort||'name'});
+ const response=await fetch('/v2/configuration-search?'+params);
+ if(!response.ok)throw Error('配置文件检索暂不可用');
+ return (await response.json()).directoryPage;
+}});
+const moduleConfigurationPage=options=>modulePageCache.get(options);
+let modulePrefetchGeneration=0;
+async function prefetchModuleDirectories(page){
+ const generation=++modulePrefetchGeneration,queue=[...page.entries.filter(e=>e.type==='directory').map(e=>({directory:e.id})),...(page.pagination.nextOffset!==null?[{directory:'root',offset:page.pagination.nextOffset}]:[])];
+ let budget=120;
+ while(queue.length&&budget>0&&generation===modulePrefetchGeneration&&activeCat==='module-config'){
+  const batch=queue.splice(0,2);budget-=batch.length;
+  const loaded=await Promise.all(batch.map(options=>moduleConfigurationPage(options).catch(()=>null)));
+  for(let i=0;i<loaded.length;i++){const next=loaded[i];if(!next)continue;queue.push(...next.entries.filter(e=>e.type==='directory').map(e=>({directory:e.id})));if(next.pagination.nextOffset!==null)queue.push({...batch[i],offset:next.pagination.nextOffset});}
+  await new Promise(resolve=>setTimeout(resolve,50));
+ }
+}
+
+async function renderModuleConfigurations(query='') {
+ const requestId=++quickRequestId;searchResults.style.display='block';searchResults.textContent='正在读取模组配置文件…';
+ try {
+  const page=await moduleConfigurationPage({query});if(requestId!==quickRequestId)return;
+  window.SourceDirectoryBrowser.mount({container:searchResults,title:'模组配置文件',treeLabel:'模组配置文件目录',countLabel:'份配置文件',docs:{total:page.sourceTotal,directoryPage:page},load:moduleConfigurationPage,fileActions:docFileActions});
+  if(!query.trim())setTimeout(()=>prefetchModuleDirectories(page),150);
+ }catch(error){if(requestId===quickRequestId)searchResults.textContent='模组配置目录读取失败：'+error.message;}
+}
+
+const officialSpecHierarchy=[
+ ['R、K系列接收卡',['接收卡']],
+ ['A、B、C、D、H系列异步卡',['双模多媒体播放器','异步全彩播放盒','异步全彩控制卡','海报拼接屏控制卡']],
+ ['视频处理',['同步控制系统','视频处理器','视频拼接处理器','多媒体服务器','分布式系统','智能中控','视频矩阵']],
+ ['单色控制卡',['W系列','E系列','U系列']],
+ ['LCD控制系统',['高性能终端主板','真4K终端主板','智慧终端主板','1080P数字标牌主板','智慧终端播放盒','小灰云星空']],
+ ['配件产品',['光纤收发器','HDMI传输器','分配器','多功能时序电源','传感器','多功能卡','异步继电器']]
+];
+const officialSpecFallback={T902X1:'https://www.huidu.cn/CnProduct/index61.html',T902X2:'https://www.huidu.cn/CnProduct/index61.html',VM0404:'https://www.huidu.cn/CnProduct/index89.html',VM0808:'https://www.huidu.cn/CnProduct/index89.html',VM1616:'https://www.huidu.cn/CnProduct/index89.html',VS0102:'https://www.huidu.cn/CnProduct/index124.html',VS0104:'https://www.huidu.cn/CnProduct/index124.html',VS0108:'https://www.huidu.cn/CnProduct/index124.html',VS0116:'https://www.huidu.cn/CnProduct/index124.html',PS08:'https://www.huidu.cn/CnProduct/index121.html',HT01:'https://www.huidu.cn/CnProduct/index122.html',HT02:'https://www.huidu.cn/CnProduct/index122.html',K524:'https://www.huidu.cn/CnProduct/index82.html'};
+const officialCategoryNames={'海报拼接屏控制卡':'海报拼接屏专用控制卡','视频矩阵':'视频矩阵系列','1080P数字标牌主板':'1080P高清数字标牌主板','异步继电器':'异步全彩继电器'};
+function specificationWorkspace(models,byModel,cat='spec'){
+ const kindLabel=cat==='manual'?'说明书':'规格书';
+ const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
+ const layout=el('div','firmware-browser spec-workspace'),navigation=el('div','firmware-models spec-models'),panel=el('section','firmware-panel spec-panel');
+ navigation.setAttribute('aria-label',kindLabel+'型号');
+ const header=el('div','firmware-panel-header'),title=el('strong',null,'请选择左侧型号'),close=el('button','firmware-panel-close','×'),files=el('div','spec-files');
+ title.setAttribute('aria-live','polite');close.type='button';close.setAttribute('aria-label','关闭'+kindLabel+'详情');close.hidden=true;files.setAttribute('aria-label',kindLabel+'文件列表');
+ let active=null,pinned=false,timer;
+ const cancel=()=>clearTimeout(timer);
+ function choose(button,model,pin=false){
+  cancel();if(pinned&&!pin)return;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=button;pinned=pin;button.setAttribute('aria-pressed',String(pin));if(!pin)button.dataset.preview='true';
+  const product=byModel.get(wikiModelKey(model.model)),items=(product?.items||[]).filter(i=>i.available!==false);
+  title.textContent=wikiModelKey(model.model)+' · '+items.length+' 份'+kindLabel;close.hidden=false;files.replaceChildren();files.scrollTop=0;
+  const buckets={neutral:[],zh:[],en:[]};
+  for(const item of items){const lang=String(item.documentLanguage||'').toLowerCase();const key=item.documentEdition==='neutral'||item.brand==='中性版'?'neutral':lang==='en'||lang.includes('英文')?'en':'zh';buckets[key].push(item);}
+  for(const [key,label] of [['neutral','中性版'],['zh','中文'],['en','英文']]){if(!buckets[key].length)continue;const group=el('div','spec-language-group');group.dataset.language=key;group.append(el('small','doc-column-title',label));for(const item of buckets[key])group.append(docFileActions(item));files.append(group);}
+  if(!items.length)files.append(el('p','spec-empty','当前资料目录尚未关联该型号'+kindLabel+'。'));
+ }
+ close.onclick=()=>{cancel();const previous=active;if(active){active.setAttribute('aria-pressed','false');delete active.dataset.preview;}active=null;pinned=false;title.textContent='请选择左侧型号';files.replaceChildren();close.hidden=true;previous?.focus({preventScroll:true});};
+ panel.onpointerenter=cancel;panel.onkeydown=event=>{if(event.key==='Escape')close.click();};header.append(title,close);panel.append(header,files);
+ let first;
+ for(const model of models){const button=el('button','firmware-model spec-model',wikiModelKey(model.model));button.type='button';button.setAttribute('aria-pressed','false');button.onclick=()=>choose(button,model,true);button.onpointerenter=event=>{cancel();if(event.pointerType==='mouse'&&!pinned)timer=setTimeout(()=>choose(button,model),200);};button.onpointerleave=cancel;navigation.append(button);first??={button,model};}
+ layout.append(navigation,panel);if(first)choose(first.button,first.model,false);return layout;
+}
+function placeCatalogExpand(button,owner){
+ document.getElementById('catalogExpandAction')?.remove();
+ button.id='catalogExpandAction';button.classList.add('catalog-expand-action');button.style.marginLeft='';
+ quickCats.append(button);
+ const observer=new MutationObserver(()=>{if(!owner.isConnected){button.remove();observer.disconnect();}});
+ observer.observe(searchResults,{childList:true,subtree:false});
+}
+function renderOfficialSpecifications(docs,query,states,cat='spec'){
+ const byModel=new Map();for(const group of docs.groups||[])for(const product of group.products||[]){const key=wikiModelKey(product.model);if(!byModel.has(key))byModel.set(key,{...product,items:[...(product.items||[])]});else byModel.get(key).items.push(...product.items||[]);}
+ const term=String(query||'').trim().toUpperCase(),matches=x=>!term||String(x.model).toUpperCase().includes(term)||(byModel.get(wikiModelKey(x.model))?.items||[]).some(i=>String(i.name||'').toUpperCase().includes(term));
+ const rows=officialWikiCategories.filter(x=>matches(x)&&(cat==='spec'||byModel.has(wikiModelKey(x.model)))),counts={models:rows.length,linked:rows.filter(x=>byModel.has(wikiModelKey(x.model))).length};
+ searchResults.replaceChildren();searchResults.style.display='block';const head=document.createElement('div');head.className='search-count';const expand=document.createElement('button');expand.type='button';expand.className='sw-btn-detail';expand.textContent='全部展开';head.append(expand);searchResults.append(head);
+ const wrap=document.createElement('div');wrap.className='vid-catalog official-spec-hierarchy';searchResults.append(wrap);
+ let shown=0;
+ for(const [groupName,children] of officialSpecHierarchy){const main=cat==='manual'&&groupName==='A、B、C、D、H系列异步卡'?'异步全彩':groupName;const subset=rows.filter(r=>children.includes(r.category));if(!subset.length)continue;const mainNode=docCatSummary(main,subset.length+' 款');mainNode.det.className='doc-cat-group official-main';mainNode.body.className='doc-cat-group-body';mainNode.det.dataset.docState='official-main:'+main;mainNode.det.open=states.get(mainNode.det.dataset.docState)??(!!term||cat==='spec'&&main===officialSpecHierarchy[0][0]);
+  for(const child of (main==='A、B、C、D、H系列异步卡'?['async-all']:children)){const models=child==='async-all'?subset:subset.filter(r=>r.category===child);if(!models.length)continue;const sub=(child==='接收卡'||main==='A、B、C、D、H系列异步卡')?mainNode:docCatSummary(officialCategoryNames[child]||child,models.length+' 款');if(sub!==mainNode){sub.det.className='doc-cat-group official-sub';sub.body.className='doc-cat-group-body';sub.det.dataset.docState='official-sub:'+child;sub.det.open=states.get(sub.det.dataset.docState)??!!term;}
+   const sorted=models.slice().sort((a,b)=>wikiModelCompare(a.model,b.model,child==='接收卡'?'receiver':child==='async-all'||child.includes('播放')?'player':''));
+   shown+=sorted.length;sub.body.append(specificationWorkspace(sorted,byModel,cat));
+   // Native details opens only on click, touch, or keyboard activation.
+   if(sub.det!==mainNode.det)mainNode.body.append(sub.det);
+  }
+  wrap.append(mainNode.det);
+ }
+ if(!shown){const empty=document.createElement('p');empty.textContent='没有找到对应的官网型号或规格书。';wrap.append(empty);}
+ expand.onclick=()=>{const all=[...wrap.querySelectorAll('details')],open=all.some(x=>!x.open);for(const el of all)el.open=open;expand.textContent=open?'全部收起':'全部展开';};
+ placeCatalogExpand(expand,wrap);head.remove();
+}
 function renderDocsView(cat, qArg, docs, states = new Map()) {
   if(docs?.directoryGrouping==='lazy-source-directories'){renderSourceDirectory(docs,qArg);return;}
+  if(cat==='spec'||cat==='manual'&&docs?.localCurated){renderOfficialSpecifications(docs,qArg,states,cat);return;}
   const catLabel = CAT_LABEL[cat] || '资料';
   const groups = (docs && Array.isArray(docs.groups)) ? docs.groups : [];
   if (!groups.length) {
     searchResults.innerHTML = '<div class="search-empty">暂无' + catLabel + '，可在上方输入产品型号（如 R708、C16）查询</div>';
     searchResults.style.display = "block";
+    if(cat==='firmware')window.ChipBrowser?.mount(searchResults,qArg||'');
     return;
   }
   searchResults.innerHTML = "";
   const head = document.createElement("div");
   head.className = "search-count";
+  const firmwareListing=cat==="firmware"&&docs?.officialFirmware===true;
+  // Firmware follows the HDPlayer/HDSet library, not the Wiki product list: the
+  // catalogue is rendered exactly as registered, without a Wiki-model gate.
+  const visibleProducts=groups.flatMap(g=>g.products||[g]).filter(p=>p.model&&(firmwareListing||showOtherWikiModels||isOfficialWikiModel(p.model)));
+  const modelCount=new Set(visibleProducts.map(p=>p.model)).size,fileCount=visibleProducts.reduce((n,p)=>n+(p.items||[]).length,0);
   if (cat === "firmware") {
-    head.textContent = "固件 · 共 " + (docs.modelCount || groups.length) + " 款卡；下载前核对设备型号、硬件版本和文件适用条件。";
+    head.textContent = "固件 · 共 " + modelCount + " 款型号、" + fileCount + " 份正式固件；下载前核对设备型号、硬件版本和文件适用条件。";
   } else if (cat === "spec") {
-    head.textContent = "规格书 · 按产品大类分类（共 " + docs.modelCount + " 款产品、" + docs.total + " 份，点链接直接打开或下载；也可在上方直接搜型号）";
+    head.textContent = "规格书 · 按产品大类分类（共 " + modelCount + " 款产品、" + fileCount + " 条资料关联，点链接直接打开或下载；也可在上方直接搜型号）";
   } else {
-    head.textContent = "使用说明书 · 按产品大类分类（共 " + docs.modelCount + " 款产品、" + docs.total + " 份，点链接直接打开或下载；也可在上方直接搜型号）";
-  }
-  if (cat === "firmware" && document.body.dataset.audience !== 'public') {
-    const toggle = document.createElement('button');toggle.type = 'button';toggle.className = 'pr-history-toggle';toggle.dataset.firmwareHistory = 'toggle';
-    toggle.textContent = docs.historyOnly ? '返回当前固件' : '历史旧版固件';
-    toggle.setAttribute('aria-pressed', String(!!docs.historyOnly));
-    toggle.onclick = async () => {
-      toggle.disabled = true;
-      try {const next = await fetchDocs('firmware', docs.historyOnly ? 'current' : 'only');if (toggle.isConnected) renderDocsView(cat, qArg, next, states);}
-      catch (error) {toggle.textContent = '读取失败，点击重试';toggle.title = error.message;}
-      finally {toggle.disabled = false;}
-    };
-    head.append(' ', toggle);
-    if (docs.historyOnly) head.prepend('历史旧版 · ');
+    head.textContent = "使用说明书 · 按产品大类分类（共 " + modelCount + " 款产品、" + fileCount + " 条资料关联，点链接直接打开或下载；也可在上方直接搜型号）";
   }
   searchResults.appendChild(head);
   const wrap = document.createElement("div");
@@ -1993,7 +2200,8 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
     const categories=docs.firmwareCategories||[{key:'other',label:'其他',models:groups.map(g=>g.model)}];
     const byModel=new Map(groups.map(g=>[g.model,g]));
     categories.forEach(category=>{
-      const products=category.models.map(model=>byModel.get(model)).filter(Boolean);
+      if(category.key==='lcd')return;
+      const products=category.models.map(model=>byModel.get(model)).filter(p=>p&&(firmwareListing||showOtherWikiModels||isOfficialWikiModel(p.model)));
       const term=String(qArg||'').trim().toUpperCase(),matches=products.filter(p=>!term||p.model.toUpperCase().includes(term)||p.items.some(i=>i.name.toUpperCase().includes(term)));if(!matches.length)return;
       const pack=docCatSummary(category.label,matches.length+' 款型号');pack.det.className='doc-cat-group firmware-category';
       pack.det.dataset.docState='firmware:group:'+category.key;pack.det.open=states.get(pack.det.dataset.docState)??!!term;
@@ -2013,17 +2221,17 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
       panel.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection(true);});
       header.append(title,close);panel.append(header,files);
       matches.forEach(product=>{
-        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.title='查看 '+product.model+' 固件';button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-pressed','false');
+        const button=document.createElement('button');button.type='button';button.className='firmware-model';button.textContent=product.model;button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-pressed','false');
         button.addEventListener('pointerenter',event=>{
           cancelPreview();if(event.pointerType==='mouse'&&!pinned)hoverTimer=setTimeout(()=>showFiles(button,product),200);
         });
         button.addEventListener('pointerleave',cancelPreview);
         button.onclick=()=>showFiles(button,product,true);
-        button.title='停留预览；点击固定 '+product.model+' 固件';
         models.append(button);
       });
       pack.body.append(models,panel);wrap.append(pack.det);
     });
+    window.ChipBrowser?.mount(wrap,qArg||'');
   } else {
     const kwFlat = (qArg == null ? quickSearchInput.value.trim() : String(qArg).trim());
     const kwUp = kwFlat.toUpperCase();
@@ -2034,7 +2242,8 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
     };
     let shownModels = 0;
     groups.forEach((g) => {
-      const prods = (g.products || []).filter(modelHit);
+      const prods = (g.products || []).filter(p=>(showOtherWikiModels||isOfficialWikiModel(p.model))&&modelHit(p));
+      if(!prods.length)return;
       if (kwUp && !prods.length) return; // 搜索时未命中的大类直接隐藏
       shownModels += prods.length;
       const det = document.createElement("details");
@@ -2049,7 +2258,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
         ? '（'+prods.reduce((n,p)=>n+p.items.length,0)+' 份）'
         : kwUp
         ? "（" + prods.length + " / " + g.count + " 项命中）"
-        : "（" + g.count + " 项 / " + g.fileCount + " 条关联）";
+        : "（" + prods.length + " 项 / " + prods.reduce((n,p)=>n+(p.items||[]).length,0) + " 条关联）";
       const body = document.createElement("div");
       body.className = "doc-cat-group-body";
       let built = false, position = 0;
@@ -2086,7 +2295,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
     }
     head.textContent = docs.materialGrouping
       ? catLabel+' · 按资料性质分类 · '+docs.total+' 个独立原件'+(kwUp?' · 已筛选':' · 可搜索名称、型号或来源')
-      : catLabel + " · " + docs.modelCount + " 个产品/资料主题 · " + (docs.uniqueFileCount ?? docs.total) + " 份资料"
+      : catLabel + " · " + modelCount + " 个产品/资料主题 · " + fileCount + " 条资料关联"
       + (kwUp ? " · 匹配 " + shownModels + " 款" : " · 可输入型号筛选");
     if (groups.length === 1) wrap.classList.add("doc-catalog-flat");
   }
@@ -2100,7 +2309,7 @@ function renderDocsView(cat, qArg, docs, states = new Map()) {
     toggleAll.setAttribute('aria-expanded', String(allOpen));
   };
   toggleAll.onclick = () => { const rows = categories(), open = !rows.every(node => node.open); for (const node of rows) node.open = open; updateToggle(); };
-  wrap.addEventListener('toggle', updateToggle, true); updateToggle(); head.appendChild(toggleAll);
+  wrap.addEventListener('toggle', updateToggle, true); updateToggle(); placeCatalogExpand(toggleAll,wrap);
   searchResults.appendChild(wrap);
   searchResults.style.display = "block";
 }
@@ -2109,8 +2318,11 @@ let searchTimer = null;
 function scheduleSearch() {
   ++quickRequestId;
   clearTimeout(searchTimer);
+  if(quickSearchController){quickSearchController.abort();quickSearchController=null;quickSearchBtn.disabled=false;quickSearchBtn.textContent='搜索';}
   searchTimer = setTimeout(() => {
     const q = quickSearchInput.value.trim();
+    if(activeCat==='module-config'){renderModuleConfigurations(q);return;}
+    if(q.length===1&&['all','firmware'].includes(activeCat)){lastSearch=null;searchResults.replaceChildren();searchResults.style.display='none';return;}
     if (!q) {
       if (activeCat === "video") { renderVideoCategory(""); return; } // 视频分类空词=浏览全部分组
       if (activeCat === "software") { renderSoftwareCategory(""); return; } // 软件分类空词=软件全家桶
@@ -2126,7 +2338,7 @@ function scheduleSearch() {
     else if (activeCat === "video") renderVideoCategory(q);
     else if (["spec", "manual", "other", "pending"].includes(activeCat)) renderDocsCategory(activeCat, q);
     else doSearch();
-  }, 120);
+  }, 350);
 }
 
 // 点分类：软件走独立端点；规格书/说明书/固件对当前产品结果本地过滤；空词先提示输入型号
@@ -2136,6 +2348,7 @@ function onPickCategory(cat) {
   setActiveCat(cat);
   updateQuickExamples();
   const q = quickSearchInput.value.trim();
+  if(cat==='module-config'){renderModuleConfigurations(q);return;}
   if (cat === "software") { renderSoftwareCategory(q); return; }
   if (cat === "video") { renderVideoCategory(q); return; } // 视频与型号无关，空词也直接浏览全部分组
   if (["spec", "manual", "other", "pending"].includes(cat)) { renderDocsCategory(cat, q); return; } // 规格书/说明书：分组折叠页，带词则展开命中大类
@@ -2243,6 +2456,17 @@ if (quickCats) {
       ev.stopPropagation(); bubble.classList.remove("show");
     });
     document.body.appendChild(el);
+    let adviceTimer=null;
+    window.addEventListener('v2-mascot-reset',()=>{clearTimeout(adviceTimer);bubble.classList.remove('show');});
+    window.addEventListener('v2-mascot-advice',event=>{
+      if(d.view!=='quick'||document.body.dataset.view!=='quick')return;
+      const advice=event.detail;if(!advice?.message)return;
+      clearTimeout(adviceTimer);
+      const text=el.querySelector('.xm-bubble-text');text.textContent=advice.message;
+      for(const model of advice.models||[]){const button=document.createElement('button');button.type='button';button.textContent='查 '+model;button.addEventListener('click',ev=>{ev.stopPropagation();quickSearchInput.value=model;bubble.classList.remove('show');doSearch();});text.append(document.createTextNode(' '),button);}
+      bubble.classList.add('show');
+      adviceTimer=setTimeout(()=>bubble.classList.remove('show'),advice.kind==='model'?16000:10000);
+    });
     window.addEventListener('v2-model-suggestion',event=>{
       const suggestion=event.detail,key=suggestion?.input+'|'+suggestion?.model;
       if(suggestion?.view!==d.view||shownSuggestions.has(key)||document.body.dataset.view!==d.view)return;
@@ -2374,6 +2598,7 @@ Object.assign(FrontendApp, {
 });
 
 window.FrontendApp = FrontendApp;
+if(document.body.dataset.audience!=='public')document.querySelector('#quickCats [data-cat="module-config"]').hidden=false;
 })();
 
 // Public catalogue has no authorized customer model boundary yet. Keep internal
@@ -2383,3 +2608,6 @@ if(document.body.dataset.audience==='public'){
  document.querySelectorAll('#quickCats [data-cat=other],#quickCats [data-cat=pending]').forEach(button=>button.hidden=true);
  const hint=document.querySelector('.ai-hint');if(hint)hint.textContent='根据已批准公开的资料回答；内部资料与全文检索不对公网开放。';
 }
+
+
+
