@@ -1,0 +1,120 @@
+diff --git a/v2/adapters/http/server.cjs b/v2/adapters/http/server.cjs
+index d34708f..249cd94 100644
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -22,7 +22,7 @@ function assembleFirmwareSearch(body,query,registry){
+  if(!found)results.push(fill({features:{},specFiles:[],specLinks:[]}));
+  return {...body,results,count:results.length,productCount:results.length};
+ }
+-function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,graydeskReceiver=null,curatedLocalVideos=null,curatedLocalDocuments=null,curatedLocalFirmware=null,firmwareScope=null,curatedResources=null,assistantUpdates=null,graydeskUpdates=null,gatewayTrust=null,serveFrontend=true}={}){
++function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null,accessGuard=null,publicCatalog=null,publicChat=null,developmentMonitor=null,graydeskReceiver=null,curatedLocalVideos=null,curatedLocalDocuments=null,curatedLocalFirmware=null,firmwareScope=null,curatedResources=null,sectionSearch=null,assistantUpdates=null,graydeskUpdates=null,gatewayTrust=null,serveFrontend=true}={}){
+  // Customer HTTP routes always use the activation-gated pipeline. Raw domain remains for audits.
+  app={...app,dialogue:app.customerDialogue||app.dialogue};
+  const publicQuick=createQuickService(publicCatalog?.scopeApp?publicCatalog.scopeApp(app):app);
+@@ -91,7 +91,7 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+   }
+   if(offlineKnowledge?.health?.().catalog?.status==='approved-sql'&&(route.startsWith('/official-files/')||route.startsWith('/v2/curated-docx/')||route.startsWith('/v2/source-pdf/'))){send(404,{error:'resource-not-found'});return;}
+   if(route.startsWith('/v2/curated-docx/')||route.startsWith('/v2/source-pdf/')||route.startsWith('/v2/curated-firmware/')){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}await curatedSearch().original(req,res);return;}
+-  if(route==='/v2/curated-search/status'){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}try{curatedSearch();send(200,{enabled:true,scope:['spec','manual','video','firmware','module-config']});}catch{send(200,{enabled:false});}return;}
++  if(route==='/v2/curated-search/status'){if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}try{if(!sectionSearch)curatedSearch();send(200,{enabled:true,backend:sectionSearch?'sections-sql-bm25-vector':'curated',scope:['spec','manual','video','firmware','module-config']});}catch{send(200,{enabled:false});}return;}
+   if(route==='/v2/configuration-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'||!offlineKnowledge?.configurationFiles){send(403,{error:'local-only'});return;}
+    const params=new URL(req.url,'http://localhost').searchParams,q=(params.get('q')||'').trim(),directory=params.get('directory')||'root',offset=Number(params.get('offset')||0),sort=params.get('sort')||'name';
+@@ -104,9 +104,13 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+   if(route==='/v2/curated-search'){
+    if(req.v2Public||!loopback||req.method!=='GET'){send(403,{error:'local-only'});return;}
+    const q=(new URL(req.url,'http://localhost').searchParams.get('q')||'').trim();if(!q||q.length>240){send(400,{error:'invalid-query'});return;}
+-   try{const result=await curatedSearch().search(q,{request:req});
++   try{const result=sectionSearch?await sectionSearch.search(q):await curatedSearch().search(q,{request:req});
+     send(200,result);}catch{send(503,{error:'检索暂不可用，请重试'});}return;
+   }
++  if(route.startsWith('/v2/fulltext-file/')){
++   if(req.v2Public||!loopback||req.method!=='GET'||!sectionSearch){send(403,{error:'local-only'});return;}
++   try{await sectionSearch.serve(req,res,route.split('/').at(-1));}catch{if(!res.headersSent)send(503,{error:'resource-unavailable'});else res.destroy();}return;
++  }
+   if(await wikiAdmin(req,res))return;
+   if(route.startsWith('/api/graydesk/updates/')){
+    if(graydeskUpdates&&await graydeskUpdates.handle(req,res))return;
+diff --git a/v2/resource-index/server.py b/v2/resource-index/server.py
+index 15d18a8..91efd6d 100644
+--- a/v2/resource-index/server.py
++++ b/v2/resource-index/server.py
+@@ -36,6 +36,18 @@ def create_server(work, port=0):
+     token=os.environ.get('XHJ_INTERNAL_TOKEN','')
+     config_root=Path('G:/公网发布资料/模组配置文件').resolve()
+     config_file=work/'module-configs.db'
++    section_config=work/'section-search.json'
++    section_index=None
++    section_lock=__import__('threading').Lock()
++    def get_section_index():
++        nonlocal section_index
++        if section_index is None:
++            with section_lock:
++                if section_index is None:
++                    config=json.loads(section_config.read_text(encoding='utf-8'))
++                    from section_search import SectionIndex
++                    section_index=SectionIndex(config['index'],config['model'])
++        return section_index
+     def configuration_rows():
+         if not token or not config_file.is_file():return []
+         db=sqlite3.connect(config_file.resolve().as_uri()+'?mode=ro',uri=True);db.row_factory=sqlite3.Row
+@@ -65,6 +77,18 @@ def create_server(work, port=0):
+                 if u.path.startswith('/internal/'):
+                     if not token or not secrets.compare_digest(self.headers.get('X-Internal-Token',''),token):return self.send(403,{'error':'forbidden'})
+                     purpose=self.headers.get('X-Internal-Purpose','')
++                    if purpose=='fulltext' and u.path=='/internal/fulltext':
++                        if not section_config.is_file():return self.send(503,{'error':'section-index-not-configured'})
++                        return self.send(200,get_section_index().search(first('q')))
++                    if purpose=='fulltext' and u.path=='/internal/fulltext-file':
++                        if not section_config.is_file():return self.send(404,{'error':'not-found'})
++                        index=get_section_index();row=index.files.get(first('id'))
++                        if not row or row['kind']!='module-config' or not index.available(row):return self.send(404,{'error':'not-found'})
++                        file=Path(row['path']).resolve()
++                        if not file.is_relative_to(config_root) or engine.digest(file)!=row['sha256']:return self.send(409,{'error':'resource-changed'})
++                        payload=file.read_bytes();self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(payload)))
++                        from urllib.parse import quote
++                        self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+quote(file.name));self.end_headers();self.wfile.write(payload);return
+                     if u.path=='/internal/parameters' and purpose=='parameter-cards':
+                         db=engine.connect(work,True)
+                         try:cards={r['model']:json.loads(r['payload']) for r in db.execute('SELECT * FROM parameter_cards')}
+@@ -164,6 +188,7 @@ def create_server(work, port=0):
+             except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):return
+             except OSError:return self.send(503,{'error':'resource-unavailable'})
+             except Exception:return self.send(500,{'error':'query-failed'})
++    if section_config.is_file():get_section_index()
+     return ThreadingHTTPServer(('127.0.0.1',port),Handler)
+ 
+ 
+diff --git a/v2/tools/start-offline.cjs b/v2/tools/start-offline.cjs
+index efe70a6..8826a53 100644
+--- a/v2/tools/start-offline.cjs
++++ b/v2/tools/start-offline.cjs
+@@ -31,7 +31,10 @@ async function startOffline(options={}){
+  for(const protectedDir of ['backend','frontend','data','v2/data'].map(p=>path.join(root,p)))if(dataDirectory===protectedDir||dataDirectory.startsWith(protectedDir+path.sep))throw Error('V2 runtime data must not use V1 or knowledge directories');
+  const logs=require('../external-services/feishu-logs.cjs').createFeishuLogs({directory:path.join(dataDirectory,'logs'),configFile:options['feishu-config']||path.join(dataDirectory,'feishu.env')});
+  const images=require('../external-services/local-images.cjs').createLocalImages(path.join(dataDirectory,'images'));
+- const child=spawn(options.python||process.env.XHJ_PYTHON||'python',[path.join(root,'v2/resource-index/server.py'),'--port',String(resourcePort),'--work',index],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,XHJ_INTERNAL_TOKEN:internalToken,XHJ_CONFIG_LEGACY_DB:approvedOnly?path.join(root,'tmp/resource-index-stage1-20261016/resources.db'):''}});
++ const sectionRuntime=fs.existsSync(path.join(index,'section-search.json'))?JSON.parse(fs.readFileSync(path.join(index,'section-search.json'),'utf8')):null;
++ const sectionDependencies=sectionRuntime?.dependencies;
++ const indexEnvironment={...process.env,...(sectionDependencies?{PYTHONPATH:[sectionDependencies,process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)}:{}),XHJ_INTERNAL_TOKEN:internalToken,XHJ_CONFIG_LEGACY_DB:approvedOnly?path.join(root,'tmp/resource-index-stage1-20261016/resources.db'):''};
++ const child=spawn(options.python||process.env.XHJ_PYTHON||'python',[path.join(root,'v2/resource-index/server.py'),'--port',String(resourcePort),'--work',index],{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe'],env:indexEnvironment});
+  let childError;child.on('error',e=>{childError=e;});child.stderr.on('data',d=>process.stderr.write(d));
+  let ready=false;
+  for(let i=0;i<300;i++){
+@@ -59,6 +62,7 @@ async function startOffline(options={}){
+  if(curatedLocalFirmware?.problems?.length)console.log(JSON.stringify({event:'firmware-verification-problem',problems:curatedLocalFirmware.problems}));
+  const firmwareScope=require('../domain/knowledge/firmware-scope.cjs').createFirmwareScope({manifestFile:firmwareManifestFile});
+  let curatedResources=null;
++ const sectionSearch=fs.existsSync(path.join(index,'section-search.json'))?require('../adapters/http/section-search.cjs').createSectionSearch({resourceBase,internalToken}):null;
+  const expertMaterialsFile=options['expert-materials']||path.join(root,'tmp/expert-structured-20261028/materials.private.json');
+  const expertMaterials=fs.existsSync(expertMaterialsFile)?require('../domain/knowledge/expert-materials.cjs').createExpertMaterials(expertMaterialsFile):null;
+  const expertRagConnection=path.join(root,'tmp/ragflow-comparison-20261025/connection.private.json'),expertRagState=path.join(root,'tmp/expert-structured-20261028/rag-import.private.json');
+@@ -89,7 +93,7 @@ async function startOffline(options={}){
+  }
+  const assistantUpdates=require('../external-services/assistant-updates.cjs').createAssistantUpdates({configFile:process.env.XHJ_ASSISTANT_UPDATE_CONFIG||path.join(root,'.private/assistant-updates/config.json')});
+  const graydeskUpdates=require('../external-services/graydesk-updates.cjs').createGraydeskUpdates({configFile:path.join(root,'.private/graydesk-updates/config.json')});
+- const server=createServer({...app,health:()=>({...app.health(),graydesk:{configured:graydeskReceiver.configured},assistantUpdates:{protocol:1},graydeskUpdates:{protocol:1},feishu:logs.status(),trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'expert-opt-in',ragflowConfigured:!!ragflowConfigFile,driveCatalogConfigured:!!driveInventoryFile,knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid,architecture:apiPort?'separated-web-api':'combined',...(apiPort?{apiPort}:{}),codeProtection:options.codeProtection||null}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor,graydeskReceiver,curatedLocalVideos,curatedLocalDocuments,curatedLocalFirmware,firmwareScope,curatedResources,assistantUpdates,graydeskUpdates,gatewayTrust:apiPort?require('../adapters/http/request-peer.cjs').createGatewayTrust({key:gatewayKey}):null,serveFrontend:!apiPort});
++ const server=createServer({...app,health:()=>({...app.health(),graydesk:{configured:graydeskReceiver.configured},assistantUpdates:{protocol:1},graydeskUpdates:{protocol:1},feishu:logs.status(),fulltext:sectionSearch?{backend:'sections-sql-bm25-vector'}:null,trial:{instance:'v2-offline',host,port,resourcePort,modelMode:'expert-opt-in',ragflowConfigured:!!ragflowConfigFile,driveCatalogConfigured:!!driveInventoryFile,knowledgeMode:manifestFile,pid:process.pid,indexPid:child.pid,architecture:apiPort?'separated-web-api':'combined',...(apiPort?{apiPort}:{}),codeProtection:options.codeProtection||null}})},{offlineKnowledge,accessGuard,publicCatalog,publicChat,developmentMonitor,graydeskReceiver,curatedLocalVideos,curatedLocalDocuments,curatedLocalFirmware,firmwareScope,curatedResources,sectionSearch,assistantUpdates,graydeskUpdates,gatewayTrust:apiPort?require('../adapters/http/request-peer.cjs').createGatewayTrust({key:gatewayKey}):null,serveFrontend:!apiPort});
+  const preparationStarted=Date.now();
+  let webServer=null;
+  try{
