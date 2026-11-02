@@ -1497,15 +1497,17 @@ async function doSearch() {
     if (requestId !== quickRequestId) return;
     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
     let hwResults = data.results || [];
-    // Only fall back for an incomplete, unambiguous-prefix-shaped model query.
-    // Never replace a registered exact official model with a similar one.
-    const modelQuery=q.trim().toUpperCase().replace(/^HD[-_ ]?/,'').replace(/\s/g,'');
-    const catalogHits=hwResults.filter(r=>isOfficialWikiModel(r.modelId||r.name)||hasRenderableRegistryFirmware(r));
-    if(activeCat==='all'&&!data.chipFirmware&&!catalogHits.length&&!hwResults.some(r=>wikiModelKey(r.modelId||r.name)===modelQuery&&hasConcreteProductResult(r))&&/^[A-Z]{1,5}\d{1,5}$/.test(modelQuery)){
-      const candidates=officialWikiCategories.map(x=>x.model).filter(m=>wikiModelKey(m).startsWith(modelQuery)&&wikiModelKey(m)!==modelQuery).sort((a,b)=>wikiModelKey(a).length-wikiModelKey(b).length||wikiModelKey(a).localeCompare(wikiModelKey(b),'en',{numeric:true}));
-      if(candidates.length){const selected=candidates[0];const fallbackResp=await fetch('/api/search?q='+encodeURIComponent(selected),{signal:controller.signal});const fallback=await fallbackResp.json();if(requestId!==quickRequestId)return;const match=(fallback.results||[]).filter(r=>wikiModelKey(r.modelId||r.name)===wikiModelKey(selected));if(fallbackResp.ok&&match.length){hwResults=match;data.results=match;data.approximateMatch={input:q,selected,candidates};}}
+    // One catalogue-based resolver handles incomplete, mistyped and ambiguous identifiers.
+    // Actual exact results remain authoritative; tied candidates require customer selection.
+    const knownModels=officialWikiCategories.map(x=>x.model);
+    const usableProducts=hwResults.filter(r=>isOfficialWikiModel(r.modelId||r.name)||hasConcreteProductResult(r));
+    const resolution=window.MascotAdvice?.resolve(q,knownModels,{resultModels:usableProducts.map(r=>r.modelId||r.name)});
+    if(activeCat==='all'&&!data.chipFirmware&&resolution?.autoSelect){
+      const selected=resolution.autoSelect,fallbackResp=await fetch('/api/search?q='+encodeURIComponent(selected),{signal:controller.signal});
+      const fallback=await fallbackResp.json();if(requestId!==quickRequestId)return;
+      const match=(fallback.results||[]).filter(r=>wikiModelKey(r.modelId||r.name)===wikiModelKey(selected));
+      if(fallbackResp.ok&&match.length){hwResults=match;data.results=match;data.approximateMatch={input:q,selected,candidates:resolution.candidates};}
     }
-    if(!hwResults.length&&document.body.dataset.client==='offline')fetch('/v2/offline/suggestions?q='+encodeURIComponent(q.slice(0,240))).then(r=>r.ok?r.json():null).then(result=>{if(result?.suggestion&&requestId===quickRequestId)window.dispatchEvent(new CustomEvent('v2-model-suggestion',{detail:{...result.suggestion,view:'quick'}}));}).catch(()=>{});
     // “全部”分类下硬件无命中、也不是芯片固件速查时，兜底聚合软件与操作视频，避免搜 HDPlayer / 复位 显示空：
     // 明确软件名（isList=false 单软件命中，如 HDPlayer）直达软件卡；操作词（如 复位，软件不匹配）直达视频；都不中才显示硬件空态。
     if (activeCat === "all" && !hwResults.length && !data.chipFirmware) {
@@ -1530,7 +1532,7 @@ async function doSearch() {
         return;
       }
     }
-    const advice=window.MascotAdvice?.plan({query:q,results:hwResults,models:officialWikiCategories.map(x=>x.model),approximateMatch:data.approximateMatch});
+    const advice=window.MascotAdvice?.plan({query:q,results:hwResults.filter(r=>isOfficialWikiModel(r.modelId||r.name)||hasConcreteProductResult(r)),models:knownModels,approximateMatch:data.approximateMatch});
     if(advice)window.dispatchEvent(new CustomEvent('v2-mascot-advice',{detail:advice}));
     lastSearch = { results: hwResults, query: q, data };
     renderSearchResults(lastSearch.results, q, data);
