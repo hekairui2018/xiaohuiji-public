@@ -97,64 +97,53 @@
   table.append(body);wrap.append(table);box.append(wrap);parent.append(box);
  }
  function conversation(parent,record,rounds,opened){
-  const requests=new Map(rounds.map(r=>[r.request.sequence,r])),responses=new Map(rounds.filter(r=>r.response).map(r=>[r.response.sequence,r.index]));
-  const timeline=el('div',undefined,'timeline');parent.append(timeline);
+  const names={search_evidence:'查找资料',read_document:'读取原文',calculate_ordering:'配单计算',quick_answer:'快速问答／参数／文件'};
+  const kinds={cases:'售后案例',faq:'常见问题',tender:'控标资料',products:'产品参数',resources:'文件目录',files:'文件目录',firmware:'固件',text:'技术原文'};
+  const actions={search:'查找资料',read:'读取原文',calculate:'交给配单算法计算',quick:'调用快速问答工具',deliver:'交付已找到的文件',answer:'给出回答',clarify:'补问关键条件',analyze:'继续分析'};
+  const requests=new Map(rounds.map(r=>[r.request.sequence,r])),responses=new Map(rounds.filter(r=>r.response).map(r=>[r.response.sequence,r]));
+  const heads=el('div',undefined,'lane-heads');heads.append(el('strong','大模型 · 理解与决策'),el('strong','小灰机 · 资料与工具'));parent.append(heads);
+  const timeline=el('div',undefined,'timeline twin-timeline');parent.append(timeline);
+  const bubble=(actor,title,event,cls='')=>{const row=el('div',undefined,'exchange-row '+actor),box=el('article',undefined,'conversation-card '+cls);box.dataset.actor=actor;box.append(el('span',actor==='model'?'大模型':'小灰机','actor-label'),el('h3',title),el('small','第 '+event.sequence+' 步 · 开始后 '+seconds(event.elapsedMs)));row.append(box);timeline.append(row);return box;};
+  const args=(box,d,key)=>{const fields={query:'查什么',kind:'去哪里查',userQuotes:'交给工具的客户原话',models:'设备型号',chips:'芯片线索',version:'版本条件',problemDomain:'问题侧重',goals:'查找目标',concepts:'现象与关键词',blockId:'原文位置',offset:'继续读取的位置',reason:'模型给出的理由'};for(const [field,label]of Object.entries(fields))if(Object.hasOwn(d,field)){let value=d[field];if(field==='kind')value=kinds[value]||value;if(field==='problemDomain')value={display:'显示问题：芯片、模组优先',equipment:'设备问题：设备优先',unspecified:'尚未区分，平衡查找'}[value]||value;content(box,label,Array.isArray(value)?value.join('；'):value,key+'-'+field,opened);} };
   for(const event of record.events){const d=event.data,key='conversation-'+event.sequence;
    if(event.type==='customer.input'){
-    const box=card(timeline,'客户说了什么',event,'customer');content(box,'客户原始问题',d.originalQuestion??record.question,key,opened);
-    if(d.message!==undefined&&d.message!==d.originalQuestion)content(box,'传入专家的实际 message',d.message,key+'-input',opened);
+    const box=bubble('app','收到客户问题',event,'customer');content(box,'客户原话',d.originalQuestion??record.question,key,opened);
    }else if(requests.has(event.sequence)){
-    const round=requests.get(event.sequence),p=d.payload||{},box=card(timeline,'第 '+round.index+' 轮 · 小灰机实际发给 Bonsai',event,'outgoing');
-    const usage=round.response?.data.body?.usage;
-    box.append(el('p','模型：'+(p.model??'未记录')+' · '+(p.messages?.length??0)+' 条消息','muted'));
-    box.append(el('p','本轮服务端 Token：输入 '+(numeric(usage?.prompt_tokens)?usage.prompt_tokens:'未返回')+' · 输出 '+(numeric(usage?.completion_tokens)?usage.completion_tokens:'未返回')+' · 模型耗时 '+seconds(round.response?.data.elapsedMs)+' · 工具执行 '+round.tools.length+' 次','muted'));
-    box.id='sent-round-'+round.index;
-    const transcript=(p.messages||[]).map((msg,i)=>'【消息 '+(i+1)+' · '+msg.role+'】\n'+textOf(msg.content)).join('\n\n');
-    content(box,'这一轮完整发送的消息 · 点击展开全文',transcript,key+'-sent-full',opened,{fold:true});
-    content(box,'这一轮完整请求 JSON · 包含全部消息和参数',p,key+'-request-full',opened,{fold:true,raw:true});
-    for(const [i,msg]of(p.messages||[]).entries())message(box,msg,(i+1)+'. ',key+'-message-'+i,opened);
-    content(box,'本轮工具定义、动作协议及请求参数（实际字段）',Object.fromEntries(Object.entries(p).filter(([k])=>k!=='messages')),key+'-parameters',opened,{fold:true});
-   }else if(responses.has(event.sequence)){
-    const box=card(timeline,'第 '+responses.get(event.sequence)+' 轮 · Bonsai 实际回复',event,'incoming');
-    for(const [i,choice]of(d.body?.choices||[]).entries()){
-     const msg=choice.message,action=parse(msg?.content);
-     if(msg&&Object.hasOwn(msg,'content'))content(box,'回复完整原文'+(i?' · '+i:''),msg.content,key+'-reply-'+i,opened,{fold:!!action?.action});
-     if(action&&typeof action==='object'&&action.action){
-      const name={search:'Bonsai 要求查找资料',read:'Bonsai 要求读取原文',answer:'Bonsai 提交的答案',clarify:'Bonsai 提出的追问',calculate:'Bonsai 要求执行计算',analyze:'Bonsai 要求分析'}[action.action]||'Bonsai JSON 动作';
-      box.append(el('h4',name+' · '+action.action));
-      for(const field of ['query','goals','reason','blockId','offset'])if(Object.hasOwn(action,field))content(box,{query:'实际检索词',goals:'实际检索目标',reason:'Bonsai 写出的理由',blockId:'实际读取位置 · blockId',offset:'实际读取偏移 · offset'}[field],action[field],key+'-action-'+i+'-'+field,opened);
-      if(Array.isArray(action.claims))for(const[j,claim]of action.claims.entries()){
-       content(box,'答案原文 '+(j+1),claim.text,key+'-claim-'+i+'-'+j,opened);
-       content(box,'该条答案的实际引用及其他字段',Object.fromEntries(Object.entries(claim).filter(([k])=>k!=='text')),key+'-claim-source-'+i+'-'+j,opened,{fold:true});
-      }
-      if(Object.hasOwn(action,'generalAdvice'))content(box,'Bonsai 返回的建议原文',action.generalAdvice,key+'-advice-'+i,opened);
-      if(Object.hasOwn(action,'question'))content(box,'Bonsai 返回的追问原文',action.question,key+'-question-'+i,opened);
-      content(box,'完整 JSON 动作请求（同一回复，未另行执行）',action,key+'-action-'+i,opened,{fold:true});
-     }
-     if(msg?.tool_calls)content(box,'Bonsai 返回的工具调用',msg.tool_calls,key+'-calls-'+i,opened);
-     const extra=Object.fromEntries(Object.entries(msg||{}).filter(([k])=>!['role','content','tool_calls'].includes(k)));if(Object.keys(extra).length)content(box,'其他实际回复字段',extra,key+'-extra-'+i,opened);
+    const round=requests.get(event.sequence),p=d.payload||{},box=bubble('app','第 '+round.index+' 轮 · 把任务交给大模型 ←',event,'outgoing');box.id='sent-round-'+round.index;
+    const systems=(p.messages||[]).filter(m=>['system','developer'].includes(m.role));
+    content(box,'本轮完整提示词 · '+systems.length+' 段',systems.map(m=>textOf(m.content)).join('\n\n'),key+'-prompt',opened,{fold:true});
+    for(const msg of p.messages||[]){if(msg.role!=='user')continue;const input=parse(msg.content);if(!input){content(box,'发送的消息',msg.content,key+'-message',opened);continue;}
+     if(input.message)content(box,'交给模型的客户问题',input.message,key+'-customer',opened);
+     if(input.history?.length)content(box,'带入的历史对话 · '+input.history.length+' 条',input.history,key+'-history',opened,{fold:true});
+     if(input.preparedEvidence?.evidence?.length){const rows=input.preparedEvidence.evidence;content(box,'交给模型的资料 · '+rows.length+' 条',rows.map((e,i)=>(i+1)+'. '+(e.name||'未命名资料')).join('\n'),key+'-sources',opened);content(box,'查看实际发送的资料全文与条件',input.preparedEvidence,key+'-evidence',opened,{fold:true});}
+     if(input.lastToolResult)content(box,'上一项工具的返回内容',input.lastToolResult,key+'-last-tool',opened,{fold:true});
     }
-    if(!d.body?.choices?.length)content(box,'实际响应内容',d.body,key+'-body',opened);
+    box.append(el('p',(p.chat_template_kwargs?.enable_thinking===true?'思考已开启':'思考开关以完整请求为准')+' · 本轮生成上限 '+(p.max_tokens??'未返回')+' tokens','muted'));
+    content(box,'完整发送记录 · 提示词、客户条件、工具结果',(p.messages||[]).map(m=>'【'+m.role+'】\n'+textOf(m.content)).join('\n\n'),key+'-sent-full',opened,{fold:true});
+    content(box,'原始请求参数',p,key+'-request',opened,{fold:true,raw:true});
+   }else if(responses.has(event.sequence)){
+    const round=responses.get(event.sequence),box=bubble('model','第 '+round.index+' 轮 · 大模型的决定 →',event,'incoming'),u=d.body?.usage;box.append(el('p','模型用时 '+seconds(d.elapsedMs)+' · 输入 '+(u?.prompt_tokens??'未返回')+' tokens · 思考 '+(u?.completion_tokens_details?.reasoning_tokens??'未返回')+' tokens','muted'));
+    for(const [i,choice]of(d.body?.choices||[]).entries()){const msg=choice.message||{},action=parse(msg.content);if(action?.action){box.append(el('h4',actions[action.action]||action.action));args(box,action,key+'-action-'+i);if(action.claims?.length)content(box,'模型写出的答案',action.claims.map(c=>c.text).join('\n\n'),key+'-answer-'+i,opened);if(action.generalAdvice?.length)content(box,'补充分析',action.generalAdvice.join('\n'),key+'-advice-'+i,opened);if(action.question)content(box,'需要补问',action.question,key+'-question-'+i,opened);if(action.action==='deliver')content(box,'模型选择的文件编号',action.evidenceIds,key+'-files-'+i,opened);content(box,'查看模型原始回复',msg.content,key+'-raw-'+i,opened,{fold:true,raw:true});}else if(msg.content)content(box,'实际回复',msg.content,key+'-text-'+i,opened);
+     if(choice.finish_reason==='length')box.append(el('p','本轮到达生成上限，未正常完成。','warning'));
+     if(!msg.content)box.append(el('p','服务未返回答案正文；不能由 token 数推测模型内部在想什么。','muted'));
+    }
    }else if(event.type==='tool.start'){
-    const box=card(timeline,'小灰机实际执行工具 · '+d.name,event,'tool');content(box,'实际执行参数',d.arguments,key,opened);
+    const box=bubble('app','执行工具：'+(names[d.name]||d.name),event,'tool');args(box,d.arguments||{},key);content(box,'完整工具参数',d.arguments,key+'-raw',opened,{fold:true,raw:true});
    }else if(event.type==='tool.result'){
-    const box=card(timeline,'小灰机取得工具结果 · '+d.name,event,'tool');box.append(el('p','执行耗时 '+seconds(d.elapsedMs)+'。以下是执行器返回值；发给 Bonsai 的实际版本见下一轮“实际发送的工具结果”。','muted'));const r=d.result;
-    if(Array.isArray(r?.evidence)){
-     for(const [i,evidence]of r.evidence.entries()){
-      content(box,'资料 '+(i+1)+' · '+(evidence.name??evidence.evidenceId??'未提供名称'),evidence.text,key+'-evidence-'+i,opened);
-      content(box,'资料 '+(i+1)+' 的来源及实际字段',Object.fromEntries(Object.entries(evidence).filter(([k])=>k!=='text')),key+'-metadata-'+i,opened,{fold:true});
-     }
-     content(box,'工具返回状态及其他字段',Object.fromEntries(Object.entries(r).filter(([k])=>k!=='evidence')),key+'-notice',opened);
-     if(!r.evidence.length)box.append(el('p','此工具返回的 evidence 数组为空。','muted'));
-     content(box,'完整工具结果 JSON',r,key+'-full',opened,{fold:true});
-    }else content(box,'完整工具结果',r,key,opened);
+    const box=bubble('app','工具返回：'+(names[d.name]||d.name),event,'tool'),r=d.result||{},state=r.calculationResult?.status||r.directAnswer?.status||r.notice?.status;
+    box.append(el('p','用时 '+seconds(d.elapsedMs)+(state?' · '+({ready:'计算完成并通过校验',answer:'已找到可交付结果',needs_input:'需要补充条件',unsupported:'当前工具不支持'}[state]||state):''),'muted'));
+    if(r.calculationReply||r.directAnswer?.reply)content(box,'工具给出的结果',r.calculationReply||r.directAnswer.reply,key+'-reply',opened);
+    const result=r.calculationResult;if(result?.plan){const plan=result.plan;content(box,'配单结果','整屏 '+plan.screen.pixelWidth+' × '+plan.screen.pixelHeight+' 像素'+(plan.controller?.model?'；主控 '+plan.controller.model:'')+'；'+(result.validation?.passed?'校验通过':'校验状态见详情'),key+'-plan',opened);}
+    if(r.evidence?.length)content(box,'找回 '+r.evidence.length+' 条资料',r.evidence.map((e,i)=>(i+1)+'. '+(e.name||e.evidenceId||'未命名资料')).join('\n'),key+'-list',opened);
+    if(r.notice?.missing_parameters?.length)content(box,'缺少哪些条件',r.notice.missing_parameters.map(x=>x.reason||x.path).join('\n'),key+'-missing',opened);
+    content(box,'展开完整工具结果 · 原文、条件、图片及参数',r,key+'-full',opened,{fold:true,raw:true});
    }else if(event.type==='assistant.final'){
-    const box=card(timeline,'小灰机最终交付给客户',event,d.status==='answer'?'final':'failure');box.append(el('p',(states[d.status]||d.status)+(d.error?' · '+d.error:''),'muted'));content(box,Object.hasOwn(d,'reply')?'最终原文':'实际交付对象（无 reply 字段）',d.reply??d,key,opened);
+    const box=bubble('app','交付给客户',event,d.status==='answer'?'final':'failure');box.append(el('p',states[d.status]||d.status,'muted'));content(box,'客户实际收到的内容',d.reply??d,key,opened);if(d.error)content(box,'未完成的原因',d.error,key+'-error',opened);
    }else if(['tool.error','request.error','model.transport-error','model.response-error'].includes(event.type)){
-    if(d.path&&d.path!=='/v1/chat/completions')continue;const box=card(timeline,labels[event.type],event,'failure');content(box,'实际错误记录',d,key,opened);
+    if(d.path&&d.path!=='/v1/chat/completions')continue;const box=bubble(event.type.startsWith('model.')?'model':'app',labels[event.type],event,'failure');content(box,'实际错误',d.message||d,key,opened);
    }
   }
-  if(!record.events.some(e=>e.type==='assistant.final'))timeline.append(el('p',record.status==='running'?'尚未记录最终交付。':'未记录最终交付；不补造内容。','muted'));
+  if(!record.events.some(e=>e.type==='assistant.final'))timeline.append(el('p',record.status==='running'?'仍在处理，页面会自动更新。':'尚未采集到最终交付。','muted'));
  }
  function developer(parent,record,opened){
   parent.append(el('p','原始 JSON、诊断事件及 /v1/models、/props、/tokenize 等辅助通信均保留在这里。内容为已脱敏的采集记录。','muted'));
@@ -165,9 +154,9 @@
   const opened=new Set([...detail.querySelectorAll('details[open]')].map(d=>d.dataset.event)),rounds=roundsFor(record.events),tools=record.events.filter(e=>e.type==='tool.start'),final=record.events.findLast(e=>e.type==='assistant.final')?.data;
   detail.replaceChildren();const top=el('div',undefined,'request-summary');top.append(el('h2','本次客户问题'));
   const exportButton=el('button','导出完整诊断'),exportFeedback=el('small');exportButton.type='button';exportFeedback.setAttribute('role','status');exportButton.onclick=()=>downloadDiagnostic(record.id,exportButton,exportFeedback);top.append(exportButton,exportFeedback);
-  content(top,'客户原话',record.question,'summary-question',opened);
+  top.append(el('p',record.question,'customer-question'));
   const facts=el('div',undefined,'facts');for(const t of ['模型请求 '+rounds.length+' 次','实际工具执行 '+tools.length+' 次','状态：'+(states[record.status]||record.status),'全程 '+seconds(record.elapsedMs)])facts.append(el('span',t));top.append(facts,el('small','请求 '+record.id+' · 匿名会话 '+(record.session||'未提供')));
-  if(final){top.append(el('h3',final.status==='answer'?'最终答案 · 小灰机实际交付':'最终交付 · '+(states[final.status]||final.status)));content(top,final.error?'原文 · '+final.error:'原文',final.reply??final,'summary-final',opened);}else top.append(el('p','最终答案：'+(record.status==='running'?'尚未交付':'未记录'),'muted'));
+  if(final){top.append(el('h3',final.status==='answer'?'最终答案 · 小灰机实际交付':'最终交付 · '+(states[final.status]||final.status)));content(top,final.error?'查看错误详情 · '+final.error:'展开客户实际收到的答案',final.reply??final,'summary-final',opened,{fold:true});}else top.append(el('p','最终答案：'+(record.status==='running'?'尚未交付':'未记录'),'muted'));
   if(record.omitted)top.append(el('p','有 '+record.omitted+' 个事件因容量限制未保留。此记录不完整，缺失内容不作补造。','warning'));
   top.append(el('p','下方只呈现实际采集内容及字段标签；凭据和常见客户隐私沿用已有脱敏。没有记录的内容不会补写。','muted'));detail.append(top);statistics(detail,rounds,record);detail.querySelector('.statistics').open=opened.has('statistics');
   const tabs=el('div',undefined,'view-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','监控展示方式');const conv=el('div'),dev=el('div');conv.id='conversation-view';dev.id='developer-view';let built=false;
