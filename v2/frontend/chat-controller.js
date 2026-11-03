@@ -12,7 +12,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   return window.ChatController.readResponse(response,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})),summary=>window.dispatchEvent(new CustomEvent('v2-answer-summary',{detail:{sessionId:body.sessionId,summary}})));
  });
  let sending = false;
- let composing = false;
+ let composing = false,sendVersion=0,activeQuery=null;
  ui.messages.addEventListener('v2-ordering-select',async event=>{
   const root=event.target,optionId=event.detail?.optionId;
   if(!Number.isSafeInteger(optionId)||optionId<1||sending||!root.matches?.('.v2-ordering-result'))return;
@@ -41,17 +41,17 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
  function busy(value) {
   sending = value;
   ui.input.disabled = false;
-  ui.sendButton.disabled = value;
+  ui.sendButton.disabled = value && !channel.interrupt;
   channel.setBusy?.(value);
  }
  function payload(text, sessionId, imageId) {
   return {message:text, sessionId, ...(legacy ? {history:ui.state.history.slice(-8),source:ui.isSelftestEnv()?'web-selftest':'quick-site'} : {}), ...(imageId ? {images:[imageId]} : {})};
  }
- async function query(text, sessionId, imageId) {
+ async function query(text, sessionId, imageId, ticket=sendVersion) {
   const started=performance.now();
   const response = await request(payload(text, sessionId, imageId));
   response.clientElapsedMs=performance.now()-started;
-  if (ui.getSessionId() !== sessionId) return false;
+  if (ui.getSessionId() !== sessionId || ticket!==sendVersion) return false;
   ui.removeLoading();ui.addAssistantMessage(response);
   appendDetails(response);
   ui.state.history.push({role:'user',content:text},{role:'assistant',content:legacy?ui.assistantTextOf(response):response.reply||''});
@@ -107,20 +107,22 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
  async function send(value, display) {
   let text = typeof value==='string'?value:ui.input.value;
   if (legacy) text=text.trim();
-  if (!text.trim() || sending || ui.sendButton.disabled) return;
+  if (!text.trim() || sending&&!channel.interrupt || ui.sendButton.disabled) return;
   if (legacy && !ui.prepareLegacyMessage(text,value)) return;
   if (channel.validate?.(text)===false) return;
-  channel.beforeSend?.();const sessionId=ui.getSessionId();
+  const ticket=++sendVersion,sessionId=ui.getSessionId();
+  if(sending&&channel.interrupt){try{await channel.interrupt(sessionId);await activeQuery?.catch(()=>{});}catch(error){if(ticket===sendVersion)ui.addAssistantMessage({model:'v2-offline-search',reply:'前一条仍在停止，请稍后重发。'});return;}if(ticket!==sendVersion)return;ui.removeLoading();clearInterval(clock);}
+  channel.beforeSend?.();
   const displayText=legacy?(display!==undefined?display:text.replace(/\[[A-Z_]+\]/g,'')).trim():display||text;
   ui.input.value='';ui.resizeInput?.();busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());startClock();const started=performance.now();
-  try {await query(text,sessionId);}
+  try {activeQuery=query(text,sessionId,undefined,ticket);await activeQuery;}
   catch(error) {
-   if (ui.getSessionId()!==sessionId) return;
+   if (ui.getSessionId()!==sessionId||ticket!==sendVersion) return;
    ui.removeLoading();
    if(!ui.input.value.trim())ui.input.value=text;ui.resizeInput?.();
    if (!legacy) {ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});appendDetails({clientElapsedMs:performance.now()-started});}
    else {const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.style.color='#c00';bubble.textContent='请求失败：'+error.message;row.append(bubble);ui.messages.append(row);}
-  } finally {clearInterval(clock);busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}
+  } finally {if(ticket===sendVersion){clearInterval(clock);busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}}
  }
  async function sendImage(dataUrl) {
   if(channel.allowImages?.()===false)return;

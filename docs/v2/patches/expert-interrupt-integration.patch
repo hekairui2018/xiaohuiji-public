@@ -1,0 +1,44 @@
+diff --git a/v2/adapters/http/offline-knowledge.cjs b/v2/adapters/http/offline-knowledge.cjs
+index 355c62c..2ffb057 100644
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -268,0 +269,8 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
++   if(p==='/v2/offline/session/interrupt'&&req.method==='POST'){
++    let input;try{let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>12000)return send(413,{error:'body-too-large'});}input=JSON.parse(raw);}catch{return send(400,{error:'invalid-json'});}
++    if(typeof input.sessionId!=='string'||!input.sessionId||input.sessionId.length>200)return send(400,{error:'invalid-session'});
++    modelRequests.get(input.sessionId)?.abort(new DOMException('Customer updated the request','AbortError'));
++    const deadline=Date.now()+5000;while(inFlight.has(input.sessionId)&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
++    if(!inFlight.has(input.sessionId)&&typeof input.pendingMessage==='string'&&input.pendingMessage.trim()&&input.pendingMessage.length<=8000){try{const state=sessions.get(input.sessionId),last=state.messages.filter(m=>m.role==='user').at(-1);if(last?.content!==input.pendingMessage)sessions.update(input.sessionId,{message:input.pendingMessage});}catch{return send(400,{error:'invalid-session'});}}
++    return send(inFlight.has(input.sessionId)?409:200,{interrupted:true,ready:!inFlight.has(input.sessionId)});
++   }
+@@ -377 +385 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+-    state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
++    if(output.error!=='expert-cancelled')state=sessions.recordAnswer(state.id,output);try{logs?.activity({sessionId:state.id,...require('./access-entry.cjs').accessEntry(req),mode:'expert',message:input.message,intent:route.intent,status:output.status,error:output.error||null,modelCalls:output.modelCalls||[],toolTrace:output.toolTrace||[],modelCallCount:output.modelCallCount||0,toolCallCount:output.toolCallCount||0,toolRequestCount:output.toolRequestCount||0,elapsedMs:output.elapsedMs});}catch{}if(res.destroyed)return true;return send(output.status==='unavailable'?503:output.status==='busy'?429:200,{...output,requestedMode,routing:route,sessionState:state});
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 717e316..27a6e03 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -96,2 +96,2 @@
+-  <script src="chat-controller.js?v=20261103-edit-while-running-05"></script>
+-  <script src="offline-client.js?v=20261029-expert-protection"></script>
++  <script src="chat-controller.js?v=20261103-interrupt-07"></script>
++  <script src="offline-client.js?v=20261103-interrupt-06"></script>
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index f85d155..9f0e5a0 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -634,0 +635 @@ window.OfflineClient = Object.freeze({
++    let activeRequest = null, activeMessage = null;
+@@ -635,0 +637,3 @@ window.OfflineClient = Object.freeze({
++      const requestController = new AbortController();
++      activeRequest = requestController;
++      activeMessage = body.message;
+@@ -636,0 +641 @@ window.OfflineClient = Object.freeze({
++      requestController.signal.throwIfAborted();
+@@ -718,0 +724 @@ window.OfflineClient = Object.freeze({
++            signal: requestController.signal,
+@@ -1144,0 +1151,4 @@ window.OfflineClient = Object.freeze({
++      async interrupt(sessionId) {
++        activeRequest?.abort();
++        return json('/v2/offline/session/interrupt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, pendingMessage: activeMessage }) });
++      },
