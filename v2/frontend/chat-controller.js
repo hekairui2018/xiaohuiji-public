@@ -40,7 +40,8 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
  });
  function busy(value) {
   sending = value;
-  ui.input.disabled = ui.sendButton.disabled = value;
+  ui.input.disabled = false;
+  ui.sendButton.disabled = value;
   channel.setBusy?.(value);
  }
  function payload(text, sessionId, imageId) {
@@ -116,7 +117,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   catch(error) {
    if (ui.getSessionId()!==sessionId) return;
    ui.removeLoading();
-   ui.input.value=text;ui.resizeInput?.();
+   if(!ui.input.value.trim())ui.input.value=text;ui.resizeInput?.();
    if (!legacy) {ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});appendDetails({clientElapsedMs:performance.now()-started});}
    else {const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.style.color='#c00';bubble.textContent='请求失败：'+error.message;row.append(bubble);ui.messages.append(row);}
   } finally {clearInterval(clock);busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}

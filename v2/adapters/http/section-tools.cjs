@@ -1,6 +1,6 @@
 'use strict';
 const {sharedQuickEvidence}=require('./shared-quick-evidence.cjs');
-function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tenderMaterials,expertSources,customerMessage='',calculateOrdering,onProgress=()=>{},signal=()=>undefined}){
+function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tenderMaterials,expertSources,customerMessage='',modelCatalog=async()=>[],calculateOrdering,onProgress=()=>{},signal=()=>undefined}){
  const authorized=new Map();let nextId=1;
  function register(records){return records.map(record=>{let entry=[...authorized.values()].find(e=>e.evidenceId===record.evidenceId);if(!entry){entry={...record,blockId:nextId++,readPerformed:true,readAvailable:true};authorized.set(entry.blockId,entry);}return entry;});}
  async function execute(name,args){
@@ -29,6 +29,13 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
   if(name==='search_evidence'&&expertMaterials&&['products','text'].includes(args.kind)){
    const records=expertMaterials.evidence(args.query,{models:args.models||[],targetedOnly:true});
    if(records.length)return {evidence:register(records),notice:{scope:'expert-structured-original-tables',compatibilityConfirmed:false}};
+  }
+  const numericInputs=[...new Set([...(args.models||[]).filter(m=>/^\d{3,5}$/.test(m)),...(String(args.query).match(/(?<![A-Za-z0-9.])\d{3,5}(?![A-Za-z0-9.]|\s*(?:像素|点|mm|米|Hz))/g)||[])])];
+  if(['resources','files'].includes(args.kind)||name==='quick_answer'){
+   if(numericInputs.length){const catalog=await modelCatalog(),registered=[...new Set(catalog.flatMap(r=>[...r.models||r.modelIds||[],...r.documentMetadata?.coverModels||[],...(r.modelId?[r.modelId]:[])]).map(m=>'HD-'+String(m).toUpperCase().replace(/^HD[- ]?/,'')))],candidates=registered.filter(m=>numericInputs.some(n=>String(m).match(/\d+/g)?.includes(n)));
+    if(candidates.length&&resourceAnswer){const parts=await Promise.all(candidates.slice(0,6).map(m=>resourceAnswer(m+' '+(/固件|firmware/i.test(args.query)?'固件':/说明书|操作手册/i.test(args.query)&&!/规格书/i.test(args.query)?'说明书':'规格书'),{signal:signal()})));const matches=parts.filter(Boolean).flatMap(p=>p.results||[]).filter(r=>r.resourceOnly&&(r.models||r.modelIds||[]).some(m=>candidates.includes(m))&&(r.download||r.downloadUrl));const records=register(sharedQuickEvidence({results:matches}).map(e=>({...e,candidateIdentity:{input:numericInputs.join('、'),model:e.modelIds?.[0]||candidates[0],confirmed:false}})));return {evidence:records,notice:{status:'model-candidates',requestedModels:numericInputs,candidateModels:candidates,identityConfirmed:false,meaning:'客户使用数字简称。这些是登记库中数字段相同的候选，不是已确认型号。结合客户原话与登记资料选最相近的一个，回复先说“您说的是〈候选型号〉吧？如果不对请补充。”随后直接给该候选的已有资料，不等待确认，不继续搜索无关型号，不只让客户补完整型号。多个型号仍保留英文前后缀，其他候选供客户选择。'}};}
+    return {evidence:[],notice:{status:'unresolved-model',requestedModels:numericInputs,meaning:'数字型号线索未匹配到登记资料，不可用其他数字产品文件代替。'}};
+   }
   }
   const queries=args.models?.length?args.models.map(model=>model+' '+args.query):[args.query];
   if(name==='search_evidence'&&['resources','files'].includes(args.kind)&&expertMaterials&&!args.models?.length){

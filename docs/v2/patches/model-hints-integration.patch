@@ -1,0 +1,35 @@
+diff --git a/v2/adapters/http/offline-knowledge.cjs b/v2/adapters/http/offline-knowledge.cjs
+index 41929f4..355c62c 100644
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -358 +358 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+-     const sectionTools=require('./section-tools.cjs').createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tenderMaterials,expertSources,customerMessage:[input.message,...route.models||[],...taskQuery.chips||[]].join(' '),calculateOrdering,onProgress,signal:()=>controller.signal});
++     const sectionTools=require('./section-tools.cjs').createSectionTools({modelCatalog:localCatalog,resourceSearch,resourceAnswer,expertMaterials,tenderMaterials,expertSources,customerMessage:[input.message,...route.models||[],...taskQuery.chips||[]].join(' '),calculateOrdering,onProgress,signal:()=>controller.signal});
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 4bae7e6..717e316 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -96 +96 @@
+-  <script src="chat-controller.js?v=20261103-loading-04"></script>
++  <script src="chat-controller.js?v=20261103-edit-while-running-05"></script>
+@@ -106 +106 @@
+-  <script src="app.js?v=20261102-competitive-mascot"></script>
++  <script src="app.js?v=20261103-model-correction-04"></script>
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index 068a8cc..1e3c08f 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -314 +314 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-     if(require('./answer-integrity.cjs').quickDelivery(tool.directAnswer,{models:route?.models||[]}).allowed)return {...tool.directAnswer,actualMode:'expert',delegatedTo:'model-selected-tool',model:identity.model,modelStatus:'available',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
++     if(require('./answer-integrity.cjs').quickDelivery(tool.directAnswer,{models:[...route?.models||[],...output.models||[]]}).allowed)return {...tool.directAnswer,actualMode:'expert',delegatedTo:'model-selected-tool',model:identity.model,modelStatus:'available',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
+@@ -323 +323 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-     return {status:'answer',actualMode:'expert',intent:'resources',model:identity.model,modelStatus:'available',reply:'找到以下文件，请核对型号和适用条件：\n'+selected.map(e=>e.name).join('\n'),results:selected,delegatedTo:'file-delivery',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
++     return {status:'answer',actualMode:'expert',intent:'resources',model:identity.model,modelStatus:'available',reply:(selected[0].candidateIdentity?.confirmed===false?'您说的是 '+String(selected[0].candidateIdentity.model).replace(/^HD-/i,'')+' 吧？如果不对请补充。\n以下是这个候选型号的资料：\n':'找到以下文件，请核对型号和适用条件：\n')+selected.map(e=>e.name).join('\n'),results:selected,delegatedTo:'file-delivery',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 7ad29f7..0b6a7e6 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -2528 +2528,2 @@ if (quickCats) {
+-      const button=document.createElement('button');button.type='button';button.textContent='填入型号';button.onclick=ev=>{ev.stopPropagation();const input=document.getElementById(d.view==='ai'?'aiInput':'quickSearchInput');if(input&&!input.disabled){input.value=suggestion.model;input.focus();bubble.classList.remove('show');}};text.append(button);bubble.classList.add('show');
++      const candidates=suggestion.candidates?.length?suggestion.candidates:[suggestion.model];
++      for(const model of candidates){const button=document.createElement('button');button.type='button';button.textContent=model;button.onclick=ev=>{ev.stopPropagation();const input=document.getElementById(d.view==='ai'?'aiInput':'quickSearchInput');if(input&&!input.disabled){const original=suggestion.query||'';input.value=d.view==='ai'?('上面说的 '+suggestion.input+' 改成 '+model+'，继续查刚才的资料。'):model;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();bubble.classList.remove('show');}};text.append(button);}bubble.classList.add('show');
