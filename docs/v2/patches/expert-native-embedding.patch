@@ -1,0 +1,10 @@
+--- a/v2/resource-index/server.py
++++ b/v2/resource-index/server.py
+@@ -91,2 +91,7 @@
+                     purpose=self.headers.get('X-Internal-Purpose','')
++                    if purpose=='expert-source-embedding' and u.path=='/internal/expert-source-embedding':
++                        from expert_embedding import query_embedding
++                        config=json.loads(section_config.read_text(encoding='utf-8'))
++                        return self.send(200,query_embedding(get_section_index(),config['model'],first('q')))
++
+                     if purpose=='quick-knowledge' and u.path=='/internal/quick-sections':
