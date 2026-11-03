@@ -13,6 +13,11 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
  });
  let sending = false;
  let composing = false,sendVersion=0,activeQuery=null;
+ const waitingMessages=[],queuePanel=document.createElement('section');queuePanel.className='v2-message-queue';queuePanel.hidden=true;queuePanel.setAttribute('aria-label','候补消息');ui.input.parentElement.before(queuePanel);
+ function renderQueue(){queuePanel.replaceChildren();const rows=waitingMessages.filter(q=>q.session===ui.getSessionId());queuePanel.hidden=!rows.length;if(!rows.length)return;const title=document.createElement('strong');title.textContent='候补消息 '+rows.length+' 条 · 当前处理结束后依次发送';queuePanel.append(title);for(const q of rows){const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');text.textContent=q.text;remove.type='button';remove.textContent='移除';remove.onclick=()=>{waitingMessages.splice(waitingMessages.indexOf(q),1);renderQueue();};row.append(text,remove);queuePanel.append(row);}}
+ function enqueue(){const text=ui.input.value.trim();if(!text)return;if(channel.validate?.(text)===false)return;if(!sending){send();return;}waitingMessages.push({session:ui.getSessionId(),text});ui.input.value='';ui.resizeInput?.();renderQueue();}
+ function drainQueue(){if(sending)return;const index=waitingMessages.findIndex(q=>q.session===ui.getSessionId());if(index<0)return;const next=waitingMessages.splice(index,1)[0];renderQueue();const draft=ui.input.value;send(next.text);if(draft){ui.input.value=draft;ui.resizeInput?.();}}
+
  ui.messages.addEventListener('v2-ordering-select',async event=>{
   const root=event.target,optionId=event.detail?.optionId;
   if(!Number.isSafeInteger(optionId)||optionId<1||sending||!root.matches?.('.v2-ordering-result'))return;
@@ -36,13 +41,14 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
  ui.input.addEventListener('compositionend',()=>{composing=false;});
  ui.input.addEventListener('keydown',event=>{
   if(event.key!=='Enter'||event.shiftKey||event.isComposing||composing||event.keyCode===229)return;
-  event.preventDefault();if(!event.repeat)send();
+  event.preventDefault();if(event.repeat)return;if(event.ctrlKey||event.metaKey)enqueue();else send();
  });
  function busy(value) {
   sending = value;
   ui.input.disabled = false;
   ui.sendButton.disabled = value && !channel.interrupt;
   channel.setBusy?.(value);
+  if(!value)queueMicrotask(drainQueue);
  }
  function payload(text, sessionId, imageId) {
   return {message:text, sessionId, ...(legacy ? {history:ui.state.history.slice(-8),source:ui.isSelftestEnv()?'web-selftest':'quick-site'} : {}), ...(imageId ? {images:[imageId]} : {})};
@@ -73,10 +79,10 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
    const list=document.createElement('ol');for(const step of summary.steps.slice(0,8)){if(typeof step.label!=='string'||typeof step.detail!=='string')continue;const item=document.createElement('li');const label=document.createElement('strong');label.textContent=step.label+'：';item.append(label,document.createTextNode(step.detail));list.append(item);}details.append(list);bubble.append(details);
   }
   const elapsed=Number.isFinite(data.clientElapsedMs)?data.clientElapsedMs:data.elapsedMs;
-  if(Number.isFinite(elapsed)&&elapsed>=0){const time=document.createElement('div');time.className='v2-answer-time';time.textContent='耗时 '+(elapsed/1000).toFixed(1)+' s';const speed=data.generationSpeed;if(speed&&Number.isFinite(speed.tokensPerSecond)&&speed.tokensPerSecond>0){time.textContent+=' · 平均输入 '+(Number.isFinite(speed.inputTokensPerSecond)?speed.inputTokensPerSecond.toFixed(1)+' tokens/s':'未返回')+' · 平均输出 '+speed.tokensPerSecond.toFixed(1)+' tokens/s'+(speed.includesThinking?'（含思考）':'');}bubble.append(time);}
+  if(Number.isFinite(elapsed)&&elapsed>=0){const time=document.createElement('div');time.className='v2-answer-time';time.textContent='耗时 '+(elapsed/1000).toFixed(1)+' s';const speed=data.generationSpeed;if(speed&&Number.isFinite(speed.tokensPerSecond)&&speed.tokensPerSecond>0){time.textContent+=' · 累计输出 '+speed.tokens.toLocaleString()+' tokens · 平均输入 '+(Number.isFinite(speed.inputTokensPerSecond)?speed.inputTokensPerSecond.toFixed(1)+' tokens/s':'未返回')+' · 平均输出 '+speed.tokensPerSecond.toFixed(1)+' tokens/s'+(speed.includesThinking?'（含思考）':'');}bubble.append(time);}
  }
  let clock,clockStarted=0,clockSession;
- function showExecution(loading,label){let line=loading.querySelector('.v2-execution-line');if(!line){line=document.createElement('div');line.className='v2-execution-line';line.setAttribute('role','status');loading.append(line);}line.textContent='› '+label;line.title=label;}
+ function showExecution(loading,label){let line=loading.querySelector('.v2-execution-line');if(!line){line=document.createElement('div');line.className='v2-execution-line';line.setAttribute('role','status');loading.append(line);}line.textContent='› '+label;line.title=label;line.setAttribute('tabindex','0');line.setAttribute('role','button');const expand=()=>{const details=loading.querySelector('.v2-live-summary')||loading.querySelector('.v2-loading-process');if(details){details.open=!details.open;line.setAttribute('aria-expanded',String(details.open));}};line.onclick=expand;line.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();expand();}};}
  function recordProgress(label){
   if(!sending||clockSession!==ui.getSessionId()||typeof label!=='string')return;
   const loading=document.getElementById('aiLoading');if(!loading)return;
@@ -91,10 +97,11 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   if(!sending||event.detail?.sessionId!==clockSession||ui.getSessionId()!==clockSession)return;
   const summary=event.detail.summary,loading=document.getElementById('aiLoading');if(!loading||summary?.version!==1||!Array.isArray(summary.steps))return;
   const sourceStep=summary.steps.find(s=>s.label==='引用资料'&&s.detail!=='尚未取得可引用资料'),modelStep=summary.steps.find(s=>s.label==='模型处理');
-  showExecution(loading,sourceStep?'已取得资料 · '+sourceStep.detail:modelStep&&modelStep.detail!=='尚未调用'?'正在调用大模型 · '+modelStep.detail:'正在理解问题与选择工具');
+  const phase=summary.liveGeneration?.phase;showExecution(loading,phase==='reasoning'?'模型思考中 · 正在分析本轮条件':phase==='answer'?'正在生成并校验回答':sourceStep?'已取得资料，等待模型处理':modelStep&&modelStep.detail!=='尚未调用'?'正在调用模型':'正在理解问题与选择工具');
+  const bubble=loading.querySelector('.ai-msg-bubble');if(bubble&&loading.dataset.streaming!=='true'&&phase)bubble.textContent=phase==='reasoning'?'模型思考中…':phase==='answer'?'正在生成并校验回答…':'正在读取输入…';
   let details=loading.querySelector('.v2-live-summary');if(!details){details=document.createElement('details');details.className='v2-answer-process v2-live-summary';details.open=false;const title=document.createElement('summary');title.textContent='查看处理过程';details.append(title,document.createElement('ol'));loading.append(details);}
   const list=details.querySelector('ol');list.replaceChildren();for(const step of summary.steps.slice(0,8)){if(typeof step.label!=='string'||typeof step.detail!=='string')continue;const row=document.createElement('li'),label=document.createElement('strong');label.textContent=step.label+'：';row.append(label,document.createTextNode(step.detail));list.append(row);}
-  if(summary.liveGeneration){let speed=loading.querySelector('.v2-loading-speed');if(!speed){speed=document.createElement('div');speed.className='v2-loading-speed';speed.setAttribute('role','status');loading.append(speed);}const live=summary.liveGeneration,rate=n=>Number.isFinite(n)?n.toFixed(1)+' tokens/s':'等待处理';speed.textContent='实时输入 '+rate(live.inputTokensPerSecond)+' · 实时输出 '+rate(live.outputTokensPerSecond)+(live.includesThinking?'（含思考）':'');}
+  if(summary.liveGeneration){let speed=loading.querySelector('.v2-loading-speed');if(!speed){speed=document.createElement('div');speed.className='v2-loading-speed';speed.setAttribute('role','status');loading.append(speed);}const live=summary.liveGeneration;if(Number.isSafeInteger(live.generatedTokens))loading.dataset.generatedTokens=String(live.generatedTokens);const rate=n=>Number.isFinite(n)?n.toFixed(1)+' tokens/s':'等待处理';speed.textContent='实时输入 '+rate(live.inputTokensPerSecond)+' · 实时输出 '+rate(live.outputTokensPerSecond)+(live.includesThinking?'（含思考）':'');}
   const stages=loading.querySelector('.v2-loading-process');if(stages)stages.hidden=true;
  });
  window.addEventListener('v2-answer-text',event=>{
@@ -103,7 +110,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   loading.dataset.streaming='true';bubble.textContent=event.detail.text;bubble.style.whiteSpace='pre-wrap';
   recordProgress('正在生成回答');ui.followChatUpdates?.();
  });
- function startClock(){clearInterval(clock);clockStarted=performance.now();clockSession=ui.getSessionId();const loading=document.getElementById('aiLoading');if(loading&&!loading.querySelector('.v2-loading-speed')){const speed=document.createElement('div');speed.className='v2-loading-speed';speed.setAttribute('role','status');speed.textContent='实时输入：等待模型计数 · 实时输出：等待生成';loading.append(speed);}const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}timer.textContent='已用时 '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';};update();recordProgress('请求已发送');clock=setInterval(update,100);}
+ function startClock(){clearInterval(clock);clockStarted=performance.now();clockSession=ui.getSessionId();const loading=document.getElementById('aiLoading');if(loading&&!loading.querySelector('.v2-loading-speed')){const speed=document.createElement('div');speed.className='v2-loading-speed';speed.setAttribute('role','status');speed.textContent='实时输入：等待模型计数 · 实时输出：等待生成';loading.append(speed);}const update=()=>{const loading=document.getElementById('aiLoading');if(!loading)return;let timer=loading.querySelector('.v2-loading-time');if(!timer){timer=document.createElement('div');timer.className='v2-loading-time';loading.append(timer);}const tokens=loading.dataset.generatedTokens;timer.textContent=(tokens!==undefined?'已生成 '+Number(tokens).toLocaleString()+' tokens（含思考） · ':'等待模型计数 · ')+'已用时 '+((performance.now()-clockStarted)/1000).toFixed(1)+' s';};update();recordProgress('请求已发送');let hint=loading?.querySelector('.v2-wait-tip');if(loading&&!hint){hint=document.createElement('div');hint.className='v2-wait-tip';loading.append(hint);}const hints=['还能继续补充，我接得住。','型号说错也没关系，直接发一句更正。','点开处理详情，看看我查了哪些资料。','Ctrl＋回车可加入候补，不打断当前处理。'];const initial=performance.now();const tick=()=>{update();if(hint)hint.textContent=hints[Math.floor((performance.now()-initial)/7000)%hints.length];};tick();clock=setInterval(tick,100);}
  async function send(value, display) {
   let text = typeof value==='string'?value:ui.input.value;
   if (legacy) text=text.trim();

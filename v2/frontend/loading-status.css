@@ -12,3 +12,10 @@
 @keyframes xhj-status-turn{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){#aiLoading:not([data-streaming=true])>.ai-msg-bubble{animation:none;color:#828991;background:none!important}#aiLoading>.ai-msg-bubble::before{animation:none}}
 #aiLoading>.v2-execution-line{order:2;max-width:100%;margin:1px 0 1px 21px;color:#989da4;font-size:12px;line-height:1.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit}#aiLoading>.v2-loading-speed{order:3}#aiLoading>.v2-answer-process{order:4}
+/* Compact expandable processing card; tips are UI guidance, never model reasoning. */
+#aiLoading{background:#fff;border:1px solid #edf0f2;border-radius:10px;padding:14px 16px;max-width:100%;width:min(100%,760px);gap:6px}
+#aiLoading>.ai-msg-bubble{order:0;font-weight:500}#aiLoading>.v2-loading-time{order:1;margin:1px 0 0 21px;color:#90969e}
+#aiLoading>.v2-execution-line{order:2;cursor:pointer;padding-right:16px;color:#808894}#aiLoading>.v2-execution-line:hover{color:#4a5968}#aiLoading>.v2-execution-line:focus-visible{outline:2px solid #8bbbc9;outline-offset:2px}
+#aiLoading>.v2-loading-speed{order:3}#aiLoading>.v2-wait-tip{order:4;margin:3px 0 0 21px;font-size:12px;color:#9ba1a8;line-height:1.6}#aiLoading>.v2-answer-process{order:5}
+@media(max-width:600px){#aiLoading{padding:12px}#aiLoading>.v2-loading-time,#aiLoading>.v2-loading-speed{font-size:11px}}
+.v2-message-queue{margin:8px 0;padding:10px 12px;border:1px solid #dce6eb;border-radius:9px;background:#f6fafc;font-size:12px;color:#586d7c}.v2-message-queue[hidden]{display:none}.v2-message-queue>strong{display:block;font-size:12px;font-weight:500}.v2-message-queue>div{display:flex;align-items:center;gap:12px;margin-top:7px}.v2-message-queue span{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}.v2-message-queue button{font:inherit;color:#647d8c;background:#fff;border:1px solid #dce6eb;border-radius:5px;padding:3px 7px;cursor:pointer}

@@ -1,0 +1,31 @@
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 27a6e03..ff03285 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -16 +16 @@
+-  <link rel="stylesheet" href="loading-status.css?v=20261103-04">
++  <link rel="stylesheet" href="loading-status.css?v=20261103-thinking-card-09">
+@@ -96,2 +96,2 @@
+-  <script src="chat-controller.js?v=20261103-interrupt-07"></script>
+-  <script src="offline-client.js?v=20261103-interrupt-06"></script>
++  <script src="chat-controller.js?v=20261103-thinking-card-09"></script>
++  <script src="offline-client.js?v=20261103-thinking-card-09"></script>
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index 9f0e5a0..2b82093 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -208 +208 @@ window.OfflineClient = Object.freeze({
+-          choice.append(make('span', '原件 ' + (index + 1)));
++          const label=make('span',variant.name||r.name);const folders=(variant.folders||[]).filter(x=>typeof x==='string'&&!/^[A-Za-z]:|[\\]/.test(x)).slice(-2);if(folders.length)label.append(make('small',folders.join(' / ')));else if(variant.sizeBytes)label.append(make('small',(variant.sizeBytes/1024).toFixed(0)+' KB'));choice.append(label);
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index 1e3c08f..8a35ae3 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -254 +254 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-    const streaming=typeof onAnswerDelta==='function'&&(!canUseTools||identity.engine==='ninfer')&&!caseReviewPending;let visible='';
++    const streaming=typeof onAnswerDelta==='function'&&(!canUseTools||identity.engine==='ninfer');let visible='';
+@@ -266,2 +266,2 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-    let metricAt=0,outputSample=null,inputSample=null,liveInput=null,liveOutput=null;
+-    const reportMetrics=({timings})=>{if(!timings)return;const now=Date.now();const sample=(n,ms,previous)=>Number.isFinite(n)&&Number.isFinite(ms)&&ms>0?{n,ms,rate:previous&&ms>previous.ms&&n>=previous.n?(n-previous.n)*1000/(ms-previous.ms):n*1000/ms}:null;const inp=sample(timings.prompt_n,timings.prompt_ms,inputSample),out=sample(timings.predicted_n,timings.predicted_ms,outputSample);if(now-metricAt<300&&metricAt)return;if(inp&&inp.n>0){liveInput=inp.rate;inputSample=inp;}if(out&&out.n>0){liveOutput=out.rate;outputSample=out;}if(liveInput!==null||liveOutput!==null){metricAt=now;onProgress('composing',{modelCallCount:i+1,liveGeneration:{inputTokensPerSecond:liveInput,outputTokensPerSecond:liveOutput,includesThinking:thinkEnabled}});}};
++    let metricAt=0,outputSample=null,inputSample=null,liveInput=null,liveOutput=null,livePhase=thinkEnabled?'reasoning':'answer';
++    const reportMetrics=({timings,thinking,answering})=>{if(thinking)livePhase='reasoning';if(answering)livePhase='answer';if(!timings)return;const now=Date.now();const sample=(n,ms,previous)=>Number.isFinite(n)&&Number.isFinite(ms)&&ms>0?{n,ms,rate:previous&&ms>previous.ms&&n>=previous.n?(n-previous.n)*1000/(ms-previous.ms):n*1000/ms}:null;const inp=sample(timings.prompt_n,timings.prompt_ms,inputSample),out=sample(timings.predicted_n,timings.predicted_ms,outputSample);if(now-metricAt<300&&metricAt)return;if(inp&&inp.n>0){liveInput=inp.rate;inputSample=inp;}if(out&&out.n>0){liveOutput=out.rate;outputSample=out;}if(liveInput!==null||liveOutput!==null){metricAt=now;onProgress('composing',{modelCallCount:i+1,liveGeneration:{phase:timings.predicted_n>0?livePhase:'input',generatedTokens:modelCalls.reduce((n,c)=>n+(c.usage?.completion_tokens||0),0)+(Number.isFinite(timings.predicted_n)?timings.predicted_n:0),inputTokensPerSecond:liveInput,outputTokensPerSecond:liveOutput,includesThinking:thinkEnabled}});}};

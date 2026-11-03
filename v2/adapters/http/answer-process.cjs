@@ -11,6 +11,6 @@ function answerProcess({models=[],results=[],modelCallCount=0,status,queuePositi
  if(Number.isInteger(queuePosition)&&queuePosition>0)steps.push({label:'排队等候',detail:'前面还有 '+(queuePosition-1)+' 个等待请求，空出名额后自动开始'});
  steps.push({label:'处理结果',detail:status==='answer'?'已生成回答':status==='clarify'?'需要补充条件':status==='generating'?'正在生成正文':running?'正在处理':'本次未完成'});
  const rate=n=>Number.isFinite(n)&&n>=0?n:null;
- return {version:1,steps,...(liveGeneration?{liveGeneration:{inputTokensPerSecond:rate(liveGeneration.inputTokensPerSecond),outputTokensPerSecond:rate(liveGeneration.outputTokensPerSecond),includesThinking:liveGeneration.includesThinking===true}}:{})};
+ return {version:1,steps,...(liveGeneration?{liveGeneration:{phase:['input','reasoning','answer'].includes(liveGeneration.phase)?liveGeneration.phase:null,generatedTokens:Number.isSafeInteger(liveGeneration.generatedTokens)&&liveGeneration.generatedTokens>=0?liveGeneration.generatedTokens:null,inputTokensPerSecond:rate(liveGeneration.inputTokensPerSecond),outputTokensPerSecond:rate(liveGeneration.outputTokensPerSecond),includesThinking:liveGeneration.includesThinking===true}}:{})};
 }
 module.exports={answerProcess};
