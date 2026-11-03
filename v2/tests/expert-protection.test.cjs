@@ -8,7 +8,7 @@ test('temperature-only policy ignores low GPU and host memory',async()=>{
 
 test('authorized local test lease expires and cannot override GPU protection',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'xhj-lease-')),stateFile=path.join(dir,'state.json');let clock=at('22:00:00'),temperature=40;
- const guard=createExpertProtection({stateFile,now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature,freeMiB:1500}]});
+ const guard=createExpertProtection({scheduleEnabled:true,stateFile,now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature,freeMiB:1500}]});
  const lease={purpose:'authorized-local-test',startedAt:new Date(clock).toISOString(),expiresAt:new Date(clock+3600000).toISOString()};
  fs.writeFileSync(stateFile+'.test-window',JSON.stringify(lease));await guard.refresh();assert.equal(guard.access().available,true);
  clock+=3600000;assert.equal(guard.access().reason,'closed');
@@ -17,7 +17,7 @@ test('authorized local test lease expires and cannot override GPU protection',as
  guard.dispose();fs.rmSync(dir,{recursive:true});
 });
 test('daily service window has exact boundaries and does not contact model outside hours',async()=>{
- let clock=at('08:29:59'),calls=0;const guard=createExpertProtection({now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1300}]});await guard.refresh();
+ let clock=at('08:29:59'),calls=0;const guard=createExpertProtection({scheduleEnabled:true,now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1300}]});await guard.refresh();
  const expert=guard.wrap({status:async()=>{calls++;return {available:true};},answer:async()=>{calls++;return {status:'answer'};}});
  assert.equal((await expert.status()).available,false);assert.equal((await expert.answer({})).modelCallCount,0);assert.equal(calls,0);
  clock=at('08:30:00');await guard.refresh();assert.equal((await expert.status()).available,true);
@@ -46,7 +46,7 @@ test('host memory and CUDA errors do not create a GPU protection latch',async()=
  const cuda=createExpertProtection(settings);await cuda.refresh();await cuda.transport(async()=>({ok:false,status:400,json:async()=>({error:'CUDA out of memory'})}))('http://localhost',{method:'POST'});assert.equal(cuda.access().reason,null);cuda.dispose();
 });
 test('closing window cancels queued and active requests before model reuse',async()=>{
- let clock=at('17:59:59'),aborted=false;const guard=createExpertProtection({now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1200}]});await guard.refresh();const pending=guard.wrap({answer:({signal})=>new Promise(resolve=>signal.addEventListener('abort',()=>{aborted=true;resolve({status:'unavailable'});}))}).answer({});clock=at('18:00:00');await guard.refresh();assert.equal((await pending).error,'expert-protected');assert.equal(aborted,true);guard.dispose();
+ let clock=at('17:59:59'),aborted=false;const guard=createExpertProtection({scheduleEnabled:true,now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1200}]});await guard.refresh();const pending=guard.wrap({answer:({signal})=>new Promise(resolve=>signal.addEventListener('abort',()=>{aborted=true;resolve({status:'unavailable'});}))}).answer({});clock=at('18:00:00');await guard.refresh();assert.equal((await pending).error,'expert-protected');assert.equal(aborted,true);guard.dispose();
 });
 
 test('offline health probe after intentional shutdown does not prevent the next scheduled start',async()=>{
@@ -56,3 +56,7 @@ test('offline health probe after intentional shutdown does not prevent the next 
 });
 
 test('legacy non-temperature faults are retained as diagnostics instead of blocking the expert',async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'xhj-temp-only-')),stateFile=path.join(dir,'state.json');try{for(const reason of ['gpu-unavailable','gpu-memory','host-memory','model-fault']){fs.writeFileSync(stateFile,JSON.stringify({fault:{reason,at:new Date(at('09:00:00')).toISOString()}}));const guard=createExpertProtection({stateFile,now:()=>at('10:00:00'),intervalMs:0,probe:async()=>[{temperature:40}]});await guard.refresh();assert.equal(guard.access().available,true);assert.equal(guard.access().protection.ignoredLegacyFault.reason,reason);guard.dispose();}}finally{fs.rmSync(dir,{recursive:true});}});
+
+test('disabled schedule permits midnight, early morning and evening; temperature protection remains active',async()=>{
+ for(const time of ['00:00:00','08:29:59','18:00:00','23:59:59']){let temperature=40;const guard=createExpertProtection({now:()=>at(time),intervalMs:0,probe:async()=>[{temperature}]});await guard.refresh();assert.equal(guard.access().available,true);assert.equal(guard.access().schedule.enabled,false);assert.equal(guard.access().schedule.closes,null);const expert=guard.wrap({answer:async()=>({status:'answer',modelCallCount:1})});assert.equal((await expert.answer({})).status,'answer');temperature=85;await guard.refresh();assert.equal(guard.access().reason,'gpu-hot');guard.dispose();}
+});

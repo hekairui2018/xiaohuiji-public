@@ -18,9 +18,8 @@ try{
  function Probe-Http([string]$url){try{$r=Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 3;return $r.StatusCode -eq 200}catch{return $false}}
  function Cooling($stamp){return $stamp -and ([DateTime]::UtcNow-[DateTime]::Parse($stamp).ToUniversalTime()).TotalSeconds -lt 300}
  # Retrieval and embedding run in the native section-index process.
- $local=[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([DateTimeOffset]::UtcNow,'China Standard Time');$minute=$local.Hour*60+$local.Minute
  $temperatureLatched=$false;if(Test-Path -LiteralPath $cfg.ProtectionState){try{$temperatureLatched=(Get-Content -LiteralPath $cfg.ProtectionState -Raw|ConvertFrom-Json).fault.reason -eq 'gpu-hot'}catch{}}
- $allowed=$minute -ge 510 -and $minute -lt 1080 -and !$temperatureLatched
+ $allowed=!$temperatureLatched
  $ready=Probe-Http 'http://127.0.0.1:8080/v1/models'
  $state.model=Get-DependencyAction $ready $false (Cooling $state.lastModelStart) $allowed
  if($state.model -eq 'start-existing'){
