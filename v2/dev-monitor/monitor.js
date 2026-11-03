@@ -101,9 +101,10 @@
   const kinds={cases:'售后案例',faq:'常见问题',tender:'控标资料',products:'产品参数',resources:'文件目录',files:'文件目录',firmware:'固件',text:'技术原文'};
   const actions={search:'查找资料',read:'读取原文',calculate:'交给配单算法计算',quick:'调用快速问答工具',deliver:'交付已找到的文件',answer:'给出回答',clarify:'补问关键条件',analyze:'继续分析'};
   const requests=new Map(rounds.map(r=>[r.request.sequence,r])),responses=new Map(rounds.filter(r=>r.response).map(r=>[r.response.sequence,r]));
-  const heads=el('div',undefined,'lane-heads');heads.append(el('strong','大模型 · 理解与决策'),el('strong','小灰机 · 资料与工具'));parent.append(heads);
-  const timeline=el('div',undefined,'timeline twin-timeline');parent.append(timeline);
-  const bubble=(actor,title,event,cls='')=>{const row=el('div',undefined,'exchange-row '+actor),box=el('article',undefined,'conversation-card '+cls);box.dataset.actor=actor;box.append(el('span',actor==='model'?'大模型':'小灰机','actor-label'),el('h3',title),el('small','第 '+event.sequence+' 步 · 开始后 '+seconds(event.elapsedMs)));row.append(box);timeline.append(row);return box;};
+  const frame=el('section',undefined,'chat-frame'),heads=el('div',undefined,'lane-heads');heads.append(el('strong','大模型'),el('span','真实通信 · 按时间顺序'),el('strong','小灰机'));frame.append(heads);parent.append(frame);
+  const timeline=el('div',undefined,'timeline twin-timeline chat-scroll');timeline.setAttribute('role','log');timeline.setAttribute('aria-label','小灰机和大模型的聊天记录');timeline.dataset.recordId=record.id;frame.append(timeline);
+  let lastActor=null,lastBubble=null;
+  const bubble=(actor,title,event,cls='')=>{if(actor!==lastActor){const row=el('div',undefined,'exchange-row '+actor),box=el('article',undefined,'conversation-card '+cls),avatar=el('span',actor==='model'?'模':'灰','chat-avatar');avatar.setAttribute('aria-hidden','true');box.dataset.actor=actor;box.append(el('span',actor==='model'?'大模型':'小灰机','actor-label'));row.append(avatar,box);timeline.append(row);lastActor=actor;lastBubble=box;}const part=el('section',undefined,'event-part');part.append(el('h3',title),el('small','第 '+event.sequence+' 步 · 开始后 '+seconds(event.elapsedMs)));lastBubble.append(part);return part;};
   const args=(box,d,key)=>{const fields={query:'查什么',kind:'去哪里查',userQuotes:'交给工具的客户原话',models:'设备型号',chips:'芯片线索',version:'版本条件',problemDomain:'问题侧重',goals:'查找目标',concepts:'现象与关键词',blockId:'原文位置',offset:'继续读取的位置',reason:'模型给出的理由'};for(const [field,label]of Object.entries(fields))if(Object.hasOwn(d,field)){let value=d[field];if(field==='kind')value=kinds[value]||value;if(field==='problemDomain')value={display:'显示问题：芯片、模组优先',equipment:'设备问题：设备优先',unspecified:'尚未区分，平衡查找'}[value]||value;content(box,label,Array.isArray(value)?value.join('；'):value,key+'-'+field,opened);} };
   for(const event of record.events){const d=event.data,key='conversation-'+event.sequence;
    if(event.type==='customer.input'){
@@ -113,7 +114,7 @@
     const systems=(p.messages||[]).filter(m=>['system','developer'].includes(m.role));
     content(box,'本轮完整提示词 · '+systems.length+' 段',systems.map(m=>textOf(m.content)).join('\n\n'),key+'-prompt',opened,{fold:true});
     for(const msg of p.messages||[]){if(msg.role!=='user')continue;const input=parse(msg.content);if(!input){content(box,'发送的消息',msg.content,key+'-message',opened);continue;}
-     if(input.message)content(box,'交给模型的客户问题',input.message,key+'-customer',opened);
+     if(input.message&&round.index>1)content(box,'沿用的客户问题',input.message,key+'-customer',opened,{fold:true});
      if(input.history?.length)content(box,'带入的历史对话 · '+input.history.length+' 条',input.history,key+'-history',opened,{fold:true});
      if(input.preparedEvidence?.evidence?.length){const rows=input.preparedEvidence.evidence;content(box,'交给模型的资料 · '+rows.length+' 条',rows.map((e,i)=>(i+1)+'. '+(e.name||'未命名资料')).join('\n'),key+'-sources',opened);content(box,'查看实际发送的资料全文与条件',input.preparedEvidence,key+'-evidence',opened,{fold:true});}
      if(input.lastToolResult)content(box,'上一项工具的返回内容',input.lastToolResult,key+'-last-tool',opened,{fold:true});
@@ -151,6 +152,7 @@
   for(const e of record.events)content(parent,e.sequence+'. '+(labels[e.type]||e.type)+(e.data?.path?' · '+e.data.path:'')+' · 开始后 '+seconds(e.elapsedMs),e,'developer-'+e.sequence,opened,{fold:true,raw:true});
  }
  function render(record){
+  const previousChat=detail.querySelector('.chat-scroll'),chatPosition=previousChat?.dataset.recordId===record.id?{top:previousChat.scrollTop,bottom:previousChat.scrollHeight-previousChat.scrollTop-previousChat.clientHeight<30}:null;
   const opened=new Set([...detail.querySelectorAll('details[open]')].map(d=>d.dataset.event)),rounds=roundsFor(record.events),tools=record.events.filter(e=>e.type==='tool.start'),final=record.events.findLast(e=>e.type==='assistant.final')?.data;
   detail.replaceChildren();const top=el('div',undefined,'request-summary');top.append(el('h2','本次客户问题'));
   const exportButton=el('button','导出完整诊断'),exportFeedback=el('small');exportButton.type='button';exportFeedback.setAttribute('role','status');exportButton.onclick=()=>downloadDiagnostic(record.id,exportButton,exportFeedback);top.append(exportButton,exportFeedback);
@@ -163,7 +165,7 @@
   const choices=[['conversation','对话视图',conv],['developer','开发详情',dev]];
   const switchView=view=>{activeView=view;for(const[name,,panel]of choices){panel.hidden=name!==view;document.getElementById('tab-'+name)?.setAttribute('aria-selected',String(name===view));}if(view==='developer'&&!built){developer(dev,record,opened);built=true;}};
   for(const[name,label,panel]of choices){const b=el('button',label);b.type='button';b.id='tab-'+name;b.setAttribute('role','tab');b.setAttribute('aria-controls',panel.id);panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',b.id);b.onclick=()=>switchView(name);tabs.append(b);}
-  detail.append(tabs,conv,dev);conversation(conv,record,rounds,opened);switchView(activeView);
+  detail.append(tabs,conv,dev);conversation(conv,record,rounds,opened);switchView(activeView);if(chatPosition){const chat=conv.querySelector('.chat-scroll');chat.scrollTop=chatPosition.bottom?chat.scrollHeight:chatPosition.top;}
   const shortcuts=el('div',undefined,'send-shortcuts');shortcuts.append(el('strong','查看实际发送内容：'));
   for(const round of rounds){const b=el('button','第 '+round.index+' 轮');b.type='button';b.onclick=()=>{switchView('conversation');const box=document.getElementById('sent-round-'+round.index);box.querySelector('[data-event$="-sent-full"]').open=true;box.scrollIntoView({block:'start'});};shortcuts.append(b);}
   top.append(shortcuts);
