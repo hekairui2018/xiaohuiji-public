@@ -1,0 +1,160 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index dea41ff..d70cf3b 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -2515,7 +2515,7 @@ if (quickCats) {
+       // Customer controls dismissal. A useful result must not vanish while they read the product card.
+     }
+     window.addEventListener('resize',fitBubble);
+-    window.addEventListener('v2-mascot-reset',()=>{clearTimeout(adviceTimer);lastAdvice=null;bubble.classList.remove('show');});
++    window.addEventListener('v2-mascot-reset',()=>{clearTimeout(adviceTimer);lastAdvice=null;if(d.view==='ai')shownSuggestions.clear();bubble.classList.remove('show');});
+     window.addEventListener('v2-mascot-advice',event=>{
+       if((event.detail?.view||'quick')!==d.view||document.body.dataset.view!==d.view)return;
+       showAdvice(event.detail);
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 7fc62a4..c053941 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -13,7 +13,7 @@
+   <meta property="og:description" content="速查LED显示屏控制设备的参数规格书、固件与软件，附操作视频、故障排查案例，支持按屏体尺寸智能配单选型。">
+   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23174f9e'/><path d='M37 6L17 36H29L25 58L47 26H34Z' fill='%23ffffff'/></svg>">
+   <link rel="stylesheet" href="styles.css?v=20261029-ordering-cards">
+-  <link rel="stylesheet" href="loading-status.css?v=20261104-waiting-polish-01">
++  <link rel="stylesheet" href="loading-status.css?v=20261104-chat-files-03">
+ </head>
+ <body data-client="rules" data-view="quick">
+   <header class="site-header">
+@@ -93,17 +93,17 @@
+   <script src="product-resources.js?v=20261027-curated-word-preview"></script>
+   <script src="product-card.js?v=20261027-source-label"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261104-waiting-polish-02"></script>
+-  <script src="offline-client.js?v=20261104-waiting-polish-01"></script>
++  <script src="chat-controller.js?v=20261104-chat-files-03"></script>
++  <script src="offline-client.js?v=20261104-chat-files-03"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+-  <script src="conversation-client.js?v=20261021-chat-composer"></script>
++  <script src="conversation-client.js?v=20261104-chat-files-03"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+   <script src="source-directory-browser.js?v=20261022-lazy-final"></script>
+   <script src="directory-page-cache.js?v=20261102"></script>
+   <script src="firmware-labels.js?v=20261102"></script>
+   <script src="chip-browser.js?v=20261028"></script>
+   <script src="mascot-advice.js?v=20261102"></script>
+-  <script src="app.js?v=20261104-waiting-polish-01"></script>
++  <script src="app.js?v=20261104-chat-files-03"></script>
+   <script src="public-client.js?v=20261026-live-process"></script>
+   <script src="site-compat.js?v=20261022-public-chat"></script>
+ </body>
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index 59889ae..0ee3691 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -99,8 +99,16 @@ window.OfflineClient = Object.freeze({
+     }
+     const fileRecord = (r) =>
+       r.resourceOnly === true ||
++      (r.sourceKind === 'registered-resource-metadata' && safeUrl(r.download)) ||
+       ['firmware', 'module-config', 'software', 'video'].includes(r.kind) ||
+       r.locator?.section === '文件登记信息';
++    function displayFiles(selected,evidence=[]){
++      const names=new Set(selected.filter(fileRecord).map(r=>r.name)),items=[...selected];
++      for(const entry of evidence)if(entry.sourceKind==='registered-resource-metadata'&&names.has(entry.name)&&safeUrl(entry.download)&&!items.some(r=>r.download===entry.download||r.variants?.some(v=>v.download===entry.download)))items.push(entry);
++      const rows=[],groups=new Map();
++      for(const entry of items){const item=entry.sourceKind==='registered-resource-metadata'?{...entry,resourceOnly:true,kind:entry.kind||(/规格书|specification/i.test(entry.name)?'spec':/说明|manual/i.test(entry.name)?'manual':'document'),sha256:entry.sha256||entry.download?.match(/\/v2\/curated-documents\/([a-f0-9]{64})\//i)?.[1]}:entry;if(item.variants?.length||!fileRecord(item)){rows.push(item);continue;}const key=JSON.stringify([item.name,item.kind]);let group=groups.get(key);if(!group){group={...item,variants:[]};groups.set(key,group);rows.push(group);}if(!group.variants.some(v=>v.download&&v.download===item.download))group.variants.push(item);}
++      return rows.map(group=>{if(!group.variants||group.groupNotice)return group;if(group.variants.length===1)return group.variants[0];const hashes=group.variants.map(v=>v.sha256).filter(Boolean);return {...group,groupNotice:hashes.length===group.variants.length&&new Set(hashes).size>1?'同名文件有不同内容，请预览核对；未自动选定其中一份。':'同名文件有多个原件，请核对来源；未自动选定其中一份。'};});
++    }
+     function fileCard(r) {
+       const box = make('article');
+       box.className = 'v2-record v2-chat-file';
+@@ -135,6 +143,10 @@ window.OfflineClient = Object.freeze({
+       const locator = [place(r.locator), (r.versions || []).join('、')].filter(Boolean).join(' · ');
+       if (locator) info.append(make('small', locator));
+       if (r.resourceScope) info.append(make('small', r.resourceScope));
++      const folders=(r.folders||[]).filter(x=>typeof x==='string'&&!/^[A-Za-z]:|[\\]/.test(x)).slice(-2);
++      const origin=[folders.join(' / '),Number.isFinite(r.sizeBytes)?(r.sizeBytes/1024).toFixed(0)+' KB':''].filter(Boolean).join(' · ');
++      if(origin)info.append(make('small',origin));
++      if(r.groupNotice)info.append(make('small',r.groupNotice));
+       if (r.pdfGenerated) info.append(make('small', '由 DOCX 生成的 PDF 预览副本'));
+       if (safeUrl(r.readUrl)) {
+         const button = make('button', '阅读上下文');
+@@ -199,15 +211,14 @@ window.OfflineClient = Object.freeze({
+     }
+     function card(r, isCase = false) {
+       if (!isCase && r.variants?.length) {
+-        const box = make('article');
+-        box.className = 'v2-record v2-chat-file-group';
+-        box.append(make('strong', r.name), make('p', r.groupNotice));
++        const box = make('div');
++        box.className = 'v2-chat-file-group';
+         r.variants.forEach((variant, index) => {
+-          const choice = make('div');
+-          choice.className = 'v2-source-title';
+-          const label=make('span',variant.name||r.name);const folders=(variant.folders||[]).filter(x=>typeof x==='string'&&!/^[A-Za-z]:|[\\]/.test(x)).slice(-2);if(folders.length)label.append(make('small',folders.join(' / ')));else if(variant.sizeBytes)label.append(make('small',(variant.sizeBytes/1024).toFixed(0)+' KB'));choice.append(label);
+-          const actions = sourceHeader(variant).querySelector('.pr-actions');
+-          if (actions) choice.append(actions);
++          const choice=fileCard({...variant,name:variant.name||r.name,kind:variant.kind||r.kind,groupNotice:r.groupNotice});
++          const folders=(variant.folders||[]).filter(x=>typeof x==='string'&&!/^[A-Za-z]:|[\\]/.test(x)).slice(-2);
++          const qualifier=[folders.join(' / '),Number.isFinite(variant.sizeBytes)?(variant.sizeBytes/1024).toFixed(0)+' KB':''].filter(Boolean).join(' · ')||'同名文件 '+(index+1);
++          const title=choice.querySelector('.v2-chat-file-name');title.append(make('small',qualifier));
++          if(index===0){const notice=make('small',(/不同内容|异内容/.test(r.groupNotice||'')?'同名异内容':'同名文件')+' · '+r.variants.length+'份');notice.className='v2-file-conflict';choice.querySelector('.v2-chat-file-info>summary').append(notice);}
+           box.append(choice);
+         });
+         return box;
+@@ -654,11 +665,13 @@ window.OfflineClient = Object.freeze({
+               : [],
+           continueQuery: continuation.checked,
+         };
++      let modelSuggestion=null;
+       if (!ordering)
+-        fetchOriginal('/v2/offline/suggestions?q=' + encodeURIComponent(body.message.slice(0, 240)))
++        fetchOriginal('/v2/offline/suggestions?q=' + encodeURIComponent(body.message.slice(0, 240)),{signal:requestController.signal})
+           .then((r) => (r.ok ? r.json() : null))
+           .then((data) => {
+-            if (data?.suggestion && getSid() === body.sessionId)
++            modelSuggestion=data?.suggestion||null;
++            if (data?.suggestion && !requestController.signal.aborted && getSid() === body.sessionId)
+               window.dispatchEvent(
+                 new CustomEvent('v2-model-suggestion', { detail: { ...data.suggestion, view: 'ai' } }),
+               );
+@@ -704,7 +717,7 @@ window.OfflineClient = Object.freeze({
+       };
+       if (!ordering) poll();
+       try {
+-        return await json(
++        const response=await json(
+           ordering && responseMode !== 'expert' ? '/v2/ordering/chat' : '/api/ai/chat',
+           {
+             signal: requestController.signal,
+@@ -719,6 +732,8 @@ window.OfflineClient = Object.freeze({
+           (summary) =>
+             window.dispatchEvent(new CustomEvent('v2-answer-summary', { detail: { sessionId, summary } })),
+         );
++        if(modelSuggestion)response.modelSuggestion=modelSuggestion;
++        return response;
+       } catch (error) {
+         if (body.mode === 'expert' && ['expert-model-offline', 'expert-not-configured', 'expert-gpu-hot', 'expert-protected', 'expert-closed'].includes(error.code)) {
+           done = true;
+@@ -743,9 +758,10 @@ window.OfflineClient = Object.freeze({
+       row.className = 'ai-msg ai-msg-assistant';
+       const bubble = make('div');
+       bubble.className = 'ai-msg-bubble';
+-      const results = data.fileGroups || data.results || [],
++      const results = displayFiles(data.fileGroups?.length ? data.fileGroups : data.results || [],data.evidence||[]),
+         filesOnly = data.kind !== 'cases' && results.length && results.every(fileRecord),
+         fileNames = new Set(results.flatMap((r) => [r.name, r.groupNotice].filter(Boolean)));
++      if(filesOnly)data.fileGroups=results;
+       // Only remove standalone names already rendered as file controls. Keep all explanatory text.
+       const reply = filesOnly
+         ? String(data.reply || '')
+@@ -788,6 +804,10 @@ window.OfflineClient = Object.freeze({
+         bubble.append(make('h4', '相关原始资料（不等于已核验案例）'));
+         for (const r of data.rawEvidence) bubble.append(card(r));
+       }
++      if(data.modelSuggestion?.candidates?.length>1){
++        const choices=make('div');choices.className='v2-answer-model-choices';choices.append(make('small','其他同数字型号：'));
++        for(const model of data.modelSuggestion.candidates){const button=make('button',model);button.type='button';button.onclick=()=>{const input=document.getElementById('aiInput');input.value='上面说的 '+data.modelSuggestion.input+' 改成 '+model+'，继续查刚才的资料。';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();};choices.append(button);}bubble.append(choices);
++      }
+       row.append(bubble);
+       const messages = document.getElementById('aiMessages');
+       ui.appendChatMessage(row);

@@ -19,6 +19,18 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
   const controls=make('div');controls.className='v2-conversation-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','对话保存方式');controls.append(normalButton,guestButton);
   toolbar.append(controls);
   const liveNodes=new Map();let storageError=false,normalRecord=current,replayAt;
+  // Store file controls as data, never HTML, credentials or complete tool responses.
+  function fileSnapshot(data){
+   const list=data.fileGroups?.length?data.fileGroups:data.results;if(!Array.isArray(list)||!list.length||data.kind==='cases')return null;
+   const fields=['name','kind','sha256','resourceOnly','previewUrl','downloadUrl','download','readUrl','versions','resourceScope','pdfGenerated','folders','sizeBytes','groupNotice'];
+   const file=r=>r&&typeof r==='object'&&(r.resourceOnly===true||r.variants?.length||['firmware','module-config','software','video'].includes(r.kind)||r.locator?.section==='文件登记信息');
+   if(!list.every(file)||list.length>40)return null;
+   const pick=r=>{const out={resourceOnly:true};for(const key of fields){const value=r[key];if(typeof value==='string')out[key]=value.slice(0,4000);else if(typeof value==='boolean'||Number.isFinite(value))out[key]=value;else if(Array.isArray(value))out[key]=value.filter(x=>typeof x==='string').slice(0,20).map(x=>x.slice(0,1000));}if(Array.isArray(r.variants))out.variants=r.variants.slice(0,20).map(v=>pick({...v,kind:v.kind||r.kind}));return out;};
+   const hint=data.modelSuggestion;
+   const modelSuggestion=hint&&typeof hint.input==='string'&&Array.isArray(hint.candidates)?{input:hint.input.slice(0,80),candidates:hint.candidates.filter(x=>typeof x==='string').slice(0,12).map(x=>x.slice(0,80))}:undefined;
+   const snapshot={model:'v2-offline-search',actualMode:data.actualMode,status:data.status,kind:data.kind,reply:String(data.reply||'').slice(0,8000),results:list.map(pick),...(modelSuggestion?{modelSuggestion}:{})};
+   return JSON.stringify(snapshot).length<=120000?snapshot:null;
+  }
   function messageTime(){
    const at=restoring?replayAt:new Date().toISOString(),date=new Date(at||'');
    if(!Number.isFinite(date.getTime()))return null;
@@ -47,12 +59,12 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
    state.history=[];state.triage=null;state.numeric=null;window.__v2LastReply=null;clearOcrImage();input.value=record.draft||'';mode.value=['all','cases','ordering'].includes(record.mode)?record.mode:'all';modeChangeDisplay();
    fields().forEach((e,i)=>{const v=record.fields?.[fieldKey(e,i)];if(e.type==='checkbox')e.checked=!!v;else e.value=typeof v==='string'?v:'';});
    const nodes=liveNodes.get(record.id);messages.replaceChildren(...(nodes||[]));
-   if(!nodes){for(const turn of record.turns){replayAt=turn.at;if(turn.role==='user')ui.addUserMessage(turn.text);else ui.addAssistantMessage({model:'v2-offline-search',reply:turn.text});}replayAt=undefined;}
+   if(!nodes){for(const turn of record.turns){replayAt=turn.at;if(turn.role==='user')ui.addUserMessage(turn.text);else ui.addAssistantMessage(turn.files||{model:'v2-offline-search',reply:turn.text});}replayAt=undefined;}
    state.history=record.turns.map(t=>({role:t.role,content:t.text}));document.querySelector('.v2-feedback').textContent='';ui.resizeInput?.();ui.scrollChatToBottom?.();restoring=false;notice();input.focus({preventScroll:true});
   }
   function modeChangeDisplay(){channel.setMode();}
   events.addEventListener('user-message',event=>{const at=messageTime();if(!restoring){const text=event.detail.text;current.turns.push({role:'user',text:typeof text==='string'&&text?text:'图片消息（图片不保存在前端历史）',at});later();}});
-  events.addEventListener('assistant-message',event=>{const at=messageTime();if(!restoring){const data=event.detail;current.turns.push({role:'assistant',text:String(data.reply||data.clarifyQuestion||'结果已返回，详细资料或工程方案请重新查询。').slice(0,8000),at});current.turns=current.turns.slice(-80);later();}});
+  events.addEventListener('assistant-message',event=>{const at=messageTime();if(!restoring){const data=event.detail,files=fileSnapshot(data);current.turns.push({role:'assistant',text:String(data.reply||data.clarifyQuestion||'结果已返回，详细资料或工程方案请重新查询。').slice(0,8000),at,...(files?{files}:{})});current.turns=current.turns.slice(-80);later();}});
   events.addEventListener('session-change',()=>{if(restoring)return;remember();current=items.find(x=>x.id===ui.getSessionId())||{id:ui.getSessionId(),turns:[],fields:{},draft:'',mode:mode.value};normalId=current.id;normalRecord=current;temporary=false;notice();});
   window.v2Conversations={startTemporary(){if(send.disabled)return;remember();if(temporary)liveNodes.delete(current.id);else{normalId=current.id;normalRecord=current;}show({id:id(),turns:[],fields:{},draft:'',mode:mode.value},true);}};
   guestButton.onclick=()=>{if(!temporary)window.v2Conversations.startTemporary();};
