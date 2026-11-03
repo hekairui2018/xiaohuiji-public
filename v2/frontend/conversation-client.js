@@ -22,7 +22,7 @@ window.ConversationClient = Object.freeze({create(ui,channel) {
   // Store file controls as data, never HTML, credentials or complete tool responses.
   function fileSnapshot(data){
    const list=data.fileGroups?.length?data.fileGroups:data.results;if(!Array.isArray(list)||!list.length||data.kind==='cases')return null;
-   const fields=['name','kind','sha256','resourceOnly','previewUrl','downloadUrl','download','readUrl','versions','resourceScope','pdfGenerated','folders','sizeBytes','groupNotice'];
+   const fields=['name','kind','sha256','resourceOnly','previewUrl','downloadUrl','download','readUrl','versions','resourceScope','pdfGenerated','folders','sizeBytes','groupNotice','brand','documentEdition','documentLanguage','documentVersion','documentDate','versionNote','versionBasis'];
    const file=r=>r&&typeof r==='object'&&(r.resourceOnly===true||r.variants?.length||['firmware','module-config','software','video'].includes(r.kind)||r.locator?.section==='文件登记信息');
    if(!list.every(file)||list.length>40)return null;
    const pick=r=>{const out={resourceOnly:true};for(const key of fields){const value=r[key];if(typeof value==='string')out[key]=value.slice(0,4000);else if(typeof value==='boolean'||Number.isFinite(value))out[key]=value;else if(Array.isArray(value))out[key]=value.filter(x=>typeof x==='string').slice(0,20).map(x=>x.slice(0,1000));}if(Array.isArray(r.variants))out.variants=r.variants.slice(0,20).map(v=>pick({...v,kind:v.kind||r.kind}));return out;};

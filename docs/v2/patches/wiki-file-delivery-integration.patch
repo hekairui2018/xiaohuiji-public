@@ -1,0 +1,104 @@
+diff --git a/v2/adapters/http/section-answers.cjs b/v2/adapters/http/section-answers.cjs
+index 26d44bf..e7afa46 100644
+--- a/v2/adapters/http/section-answers.cjs
++++ b/v2/adapters/http/section-answers.cjs
+@@ -31 +31 @@ const procedurePlan = (plan) => ({
+-function createSectionAnswers(sectionSearch, { materials = null, chipLookup = null } = {}) {
++function createSectionAnswers(sectionSearch, { materials = null, chipLookup = null, documentMetadata = row=>row } = {}) {
+@@ -136 +136 @@ function createSectionAnswers(sectionSearch, { materials = null, chipLookup = nu
+-      const fileGroups = groupQuickFiles(rows).slice(0, 3);
++      const fileGroups = groupQuickFiles(rows.map(documentMetadata)).slice(0, 3);
+diff --git a/v2/adapters/http/section-tools.cjs b/v2/adapters/http/section-tools.cjs
+index a879ba5..8b584c5 100644
+--- a/v2/adapters/http/section-tools.cjs
++++ b/v2/adapters/http/section-tools.cjs
+@@ -45 +45 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
+-  if(resourceAnswer&&(name==='quick_answer'||args.kind==='resources')){
++  if(resourceAnswer&&(name==='quick_answer'||['resources','files'].includes(args.kind))){
+diff --git a/v2/adapters/http/shared-quick-evidence.cjs b/v2/adapters/http/shared-quick-evidence.cjs
+index 77a8ffe..f6d088c 100644
+--- a/v2/adapters/http/shared-quick-evidence.cjs
++++ b/v2/adapters/http/shared-quick-evidence.cjs
+@@ -8,0 +9 @@ function sharedQuickEvidence(result){
++  ...(r.resourceOnly?{resourceOnly:true,kind:r.kind,sha256:r.sha256,previewUrl:r.previewUrl,brand:r.brand,documentEdition:r.documentEdition,documentLanguage:r.documentLanguage,documentVersion:r.documentVersion,documentDate:r.documentDate,versionNote:r.versionNote,versionBasis:r.versionBasis,metadataBasis:r.metadataBasis,resourceScope:r.resourceScope,sizeBytes:r.sizeBytes}:{}),
+diff --git a/v2/domain/knowledge/quick-file-groups.cjs b/v2/domain/knowledge/quick-file-groups.cjs
+index 7f2ebf2..1f8d460 100644
+--- a/v2/domain/knowledge/quick-file-groups.cjs
++++ b/v2/domain/knowledge/quick-file-groups.cjs
+@@ -35 +35,3 @@ function groupQuickFiles(rows) {
+-      groupNotice: '同名文件有' + members.length + '份不同内容，请预览核对；未自动选定其中一份。',
++      groupNotice: members.every(r=>r.documentEdition)&&new Set(members.map(r=>r.documentEdition)).size>1
++        ? '同名文件包含不同版别，请按品牌版／中性版选择；原件分别保留，未自动选定。'
++        : '同名文件有' + members.length + '个原件，请核对版别与来源；原件分别保留，未自动选定。',
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index e2c5319..74cf380 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -16 +16 @@
+-  <link rel="stylesheet" href="loading-status.css?v=20261104-chat-files-03">
++  <link rel="stylesheet" href="loading-status.css?v=20261104-wiki-file-delivery-05">
+@@ -97 +97 @@
+-  <script src="offline-client.js?v=20261104-chat-files-03"></script>
++  <script src="offline-client.js?v=20261104-wiki-file-delivery-05"></script>
+@@ -99 +99 @@
+-  <script src="conversation-client.js?v=20261104-chat-files-03"></script>
++  <script src="conversation-client.js?v=20261104-wiki-file-delivery-05"></script>
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index d882dc3..2948c72 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -114,0 +115 @@ window.OfflineClient = Object.freeze({
++      if(r.kind!=='firmware')box.classList.add('v2-document-file');
+@@ -137 +138,10 @@ window.OfflineClient = Object.freeze({
+-      summary.append(badge, title);
++      title.title=name;
++      if(firmware)summary.append(badge,title);
++      else{
++        const meta=make('span');meta.className='v2-document-meta';meta.append(badge);
++        const edition=r.brand||({standard:'品牌版',neutral:'中性版'}[r.documentEdition]);
++        for(const value of [edition,({zh:'中文',en:'英文'}[r.documentLanguage]||r.documentLanguage)])if(value){const tag=make('small',value);tag.className='v2-document-tag';meta.append(tag);}
++        if(r.documentVersion&&!name.toLowerCase().includes(r.documentVersion.toLowerCase()))meta.append(make('small',r.documentVersion));
++        if(r.versionBasis==='filename-cover-version-conflict'){const warning=make('small','版本需核对');warning.className='v2-file-conflict';meta.append(warning);}
++        summary.append(title,meta);
++      }
+@@ -150,0 +161 @@ window.OfflineClient = Object.freeze({
++      for(const value of [r.versionNote,r.documentDate&&'资料日期 '+r.documentDate,r.versionBasis==='filename-cover-version-conflict'&&'文件名与封面版本不一致，请核对原文'])if(value)info.append(make('small',value));
+@@ -221,2 +232,2 @@ window.OfflineClient = Object.freeze({
+-          const title=choice.querySelector('.v2-chat-file-name');title.append(make('small',qualifier));
+-          if(index===0){const notice=make('small',(/不同内容|异内容/.test(r.groupNotice||'')?'同名异内容':'同名文件')+' · '+r.variants.length+'份');notice.className='v2-file-conflict';choice.querySelector('.v2-chat-file-info>summary').append(notice);}
++          const title=choice.querySelector('.v2-chat-file-name');if(!variant.brand&&!variant.documentEdition)title.append(make('small',qualifier));
++          if(index===0&&!r.variants.every(v=>v.brand||v.documentEdition)){const notice=make('small','同名 · '+r.variants.length+'份');notice.className='v2-file-conflict';(choice.querySelector('.v2-document-meta')||choice.querySelector('.v2-chat-file-info>summary')).append(notice);}
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index bdca475..b1171d0 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -114,0 +115,2 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
++   const filePlan=require('../domain/knowledge/resource-query.cjs').planResourceQuery(message);
++   const fileDeliveryRequired=!social&&!filePlan.documentContent&&!/对比|比较|差异|区别|分析|解释|compare|comparison|difference|explain/i.test(message)&&(filePlan.answerNeed==='resource'||route?.simpleResource===true||(route?.hintIntent||route?.intent)==='resources');
+@@ -248,0 +251,2 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
++    // A request for files needs a current tool result, not a textual replay of history.
++    if(fileDeliveryRequired&&(canUseTools||deliverable.length))for(let n=choices.length-1;n>=0;n--){const action=choices[n].properties.action.const;if(['answer','analyze'].includes(action)||(action==='clarify'&&canUseTools&&toolExecutions===0&&!evidence.size))choices.splice(n,1);}
+@@ -261,0 +266 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
++    if(fileDeliveryRequired)messages[0].content+='\n本轮索取文件：用quick或search取得当前文件结果，有downloadAvailable就用deliver交付。历史回答不代替本轮文件工具；版别、语言、版本和已有说明由工具卡片展示，不再重写。';
+@@ -282 +287 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-    if(streaming&&!social&&!canUseTools)messages[0].content+='\n只输出JSON：{"action":"answer","claims":[{"text":"答案正文","evidenceIds":["短编号"]}]}。无证据则输出{"action":"clarify","question":"缺口或问题"}。引用编号只能取preparedEvidence中的evidenceId。';
++    if(streaming&&!social&&!canUseTools&&!(fileDeliveryRequired&&deliverable.length))messages[0].content+='\n只输出JSON：{"action":"answer","claims":[{"text":"答案正文","evidenceIds":["短编号"]}]}。无证据则输出{"action":"clarify","question":"缺口或问题"}。引用编号只能取preparedEvidence中的evidenceId。';
+@@ -284 +289 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-    if(!canUseTools&&!social)messages[0].content+='本轮检索未提供新证据或工具预算已用完：现在只输出answer或clarify，说明已确认部分或资料缺口，不再调用工具。';
++    if(!canUseTools&&!social)messages[0].content+=fileDeliveryRequired&&deliverable.length?'本轮文件已取得，使用deliver交付现有文件卡片，不再检索或复述文件名。':'本轮检索未提供新证据或工具预算已用完：现在只输出answer或clarify，说明已确认部分或资料缺口，不再调用工具。';
+diff --git a/v2/tests/expert-autonomy.test.cjs b/v2/tests/expert-autonomy.test.cjs
+index 1cbf958..e5b4125 100644
+--- a/v2/tests/expert-autonomy.test.cjs
++++ b/v2/tests/expert-autonomy.test.cjs
+@@ -7 +7 @@ test('expert interprets a file question before any retrieval and may request the
+- const api=createOfflineKnowledge({resourceAnswer:async()=>{throw Error('must not directly answer for expert');},resourceSearch:async query=>{searchCalls++;assert.equal(query,'LS1234S 配置文件');return {results:[{name:'LS1234S_64S.ssr',kind:'module-config',resourceOnly:true,download:'/authorized/config'}]};},expert:{answer:async({execute,preparedEvidence})=>{
++ const api=createOfflineKnowledge({resourceSearch:async()=>{throw Error('a file request must use the registry, not body snippets');},resourceAnswer:async query=>{assert.equal(expertCalls,1,'the model must select the tool before registry lookup');searchCalls++;assert.equal(query,'LS1234S 配置文件');return {results:[{name:'LS1234S_64S.ssr',kind:'module-config',resourceOnly:true,download:'/authorized/config'}]};},expert:{answer:async({execute,preparedEvidence})=>{
+diff --git a/v2/tools/start-offline.cjs b/v2/tools/start-offline.cjs
+index dc2a38a..3b2ac43 100644
+--- a/v2/tools/start-offline.cjs
++++ b/v2/tools/start-offline.cjs
+@@ -72 +72,3 @@ async function startOffline(options={}){
+- const resourceAnswers=require('../adapters/http/section-answers.cjs').createSectionAnswers(sectionSearch,{materials:quickMaterials,chipLookup:app.chipLookup});
++ const wikiManifest=path.join(catalogDirectory,'curated-local-documents.json');
++ const documentMetadata=require('../domain/knowledge/wiki-document-metadata.cjs').createWikiDocumentMetadata(fs.existsSync(wikiManifest)?JSON.parse(fs.readFileSync(wikiManifest,'utf8').replace(/^\uFEFF/,'')):null);
++ const resourceAnswers=require('../adapters/http/section-answers.cjs').createSectionAnswers(sectionSearch,{materials:quickMaterials,chipLookup:app.chipLookup,documentMetadata});
