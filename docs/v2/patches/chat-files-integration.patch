@@ -158,3 +158,17 @@ index 59889ae..0ee3691 100644
        row.append(bubble);
        const messages = document.getElementById('aiMessages');
        ui.appendChatMessage(row);
+
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index c053941..e2c5319 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -93,7 +93,7 @@
+   <script src="product-resources.js?v=20261027-curated-word-preview"></script>
+   <script src="product-card.js?v=20261027-source-label"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261104-chat-files-03"></script>
++  <script src="chat-controller.js?v=20261104-details-three-01"></script>
+   <script src="offline-client.js?v=20261104-chat-files-03"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261104-chat-files-03"></script>
