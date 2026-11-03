@@ -20,8 +20,10 @@ function needsCaseActionReview(output,cases=[]){
   !/不要|不能|不应|不建议|禁止|尚未确认/.test(clause)&&/(?:先|再|请|建议|可以|可|尝试|把|将).{0,28}(?:升级|刷写|复位|恢复出厂|断开|拔插|更换|调(?:到|为|整)|设(?:为|置为)|关闭|重新执行)/.test(clause)));
 }
 function boundReviewedCaseAdvice(output,cases=[]){
- if(!needsCaseActionReview(output,cases))return output;
- const advice=(output.generalAdvice||[]).filter(text=>!needsCaseActionReview({generalAdvice:[text]},cases));
+ if(!cases.some(c=>c?.historyOnly&&c.presentSiteCompatibilityConfirmed!==true&&c.operationClasses?.length))return output;
+ const transfers=text=>String(text).split(/[。；;\n]/).some(clause=>!/不要|不能|不应|不建议|禁止|尚未确认/.test(clause)&&/(?:参考|按照|根据|借鉴|对照).{0,30}(?:案例|历史).{0,25}(?:检查|测试|执行|设置|调整)/.test(clause));
+ const advice=(output.generalAdvice||[]).filter(text=>!needsCaseActionReview({generalAdvice:[text]},cases)&&!transfers(text));
+ if(advice.length===(output.generalAdvice||[]).length)return output;
  return {...output,generalAdvice:[...advice,'上述历史处理尚未确认适用于当前现场，不能据此直接执行改参、复位或升级。'].slice(-6)};
 }
 module.exports={caseAdviceContract,caseAdviceInstructions,needsCaseActionReview,boundReviewedCaseAdvice};
