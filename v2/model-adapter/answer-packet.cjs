@@ -8,7 +8,8 @@ function answerPacket(input,evidence){
  // tool status/notice but transmit the original passages once per request.
  if(packed.lastToolResult?.evidence)delete packed.lastToolResult.evidence;
  if(packed.preparedEvidence?.evidence)packed.preparedEvidence.evidence=packed.preparedEvidence.evidence.map(e=>{
-  const row={};for(const key of ['text','name','modelIds','category','locator','readPerformed','readAvailable','blockId','nextOffset','contextComplete','verificationStatus','sourceKind','scope','compatibilityConfirmed','caseSemantics'])if(e[key]!==undefined)row[key]=e[key];
+  const row={};for(const key of ['text','name','modelIds','category','locator','readPerformed','readAvailable','blockId','nextOffset','contextComplete','verificationStatus','sourceKind','scope','compatibilityConfirmed','caseSemantics','entities','entryKind','reviewState','outcomeState','outcomeEvidence'])if(e[key]!==undefined)row[key]=e[key];
+  if(e.match)row.match={objectMatches:e.match.objectMatches,differentObjects:e.match.differentObjects,unconfirmedObjects:e.match.unconfirmedObjects,relation:e.match.relation,rankingFocus:e.match.rankingFocus,allConditionsConfirmed:e.match.allConditionsConfirmed};
   if(row.caseSemantics){row.caseSemantics=structuredClone(row.caseSemantics);delete row.caseSemantics.caseId;}
   row.downloadAvailable=typeof e.download==='string'&&e.download.length>0;
   row.evidenceId=ids.get(e.evidenceId);return row;

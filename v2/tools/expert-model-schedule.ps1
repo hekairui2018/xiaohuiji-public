@@ -11,14 +11,12 @@ $minutes=$localTime.Hour*60+$localTime.Minute
 $open=$minutes -ge 510 -and $minutes -lt 1080
 # A delayed/missed trigger must not start a model at night or stop it next morning.
 if(($Action -eq 'start' -and !$open) -or ($Action -eq 'stop' -and $open)){Write-Output 'Outside trigger window; no model operation';exit 0}
-if($Action -eq 'start' -and (Test-Path -LiteralPath $ProtectionState)){throw 'Expert protection is latched; inspect the fault before starting the model'}
+if($Action -eq 'start' -and (Test-Path -LiteralPath $ProtectionState)){try{$savedProtection=Get-Content -LiteralPath $ProtectionState -Raw|ConvertFrom-Json}catch{$savedProtection=$null};if($savedProtection.fault.reason -eq 'gpu-hot'){throw 'Temperature protection is latched; inspect before starting the model'}}
 foreach($required in @($Python,$Controller)){if(!(Test-Path -LiteralPath $required -PathType Leaf)){throw 'Model controller executable or script missing'}}
 if($ValidateOnly){Write-Output ('Validated '+$Action+'; model unchanged');exit 0}
 if($Action -eq 'start'){
- $gpuRows=& nvidia-smi --query-gpu=temperature.gpu,memory.free --format=csv,noheader,nounits
- if($LASTEXITCODE -ne 0 -or !$gpuRows){throw 'GPU state is unavailable'}
- foreach($row in $gpuRows){$values=$row.Split(',');if($values.Count -ne 2 -or [double]$values[0] -ge 85 -or [double]$values[1] -lt 256){throw 'GPU protection threshold reached'}}
- if((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory -lt 524288){throw 'Host memory protection threshold reached'}
+ try{$gpuRows=& nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>$null;$sampleOk=$LASTEXITCODE -eq 0}catch{$sampleOk=$false}
+ if($sampleOk -and $gpuRows){foreach($row in $gpuRows){$sample=0.0;if([double]::TryParse($row.Trim(),[ref]$sample) -and $sample -ge 85){throw 'Temperature protection threshold reached'}}}
 }
 & $Python -X utf8 $Controller $(if($Action -eq 'start'){'on'}else{'off'})
 if($LASTEXITCODE -ne 0){throw 'Model controller did not complete the requested operation'}

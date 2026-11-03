@@ -19,11 +19,12 @@ try{
  function Cooling($stamp){return $stamp -and ([DateTime]::UtcNow-[DateTime]::Parse($stamp).ToUniversalTime()).TotalSeconds -lt 300}
  # Retrieval and embedding run in the native section-index process.
  $local=[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([DateTimeOffset]::UtcNow,'China Standard Time');$minute=$local.Hour*60+$local.Minute
- $allowed=$minute -ge 510 -and $minute -lt 1080 -and !(Test-Path -LiteralPath $cfg.ProtectionState)
+ $temperatureLatched=$false;if(Test-Path -LiteralPath $cfg.ProtectionState){try{$temperatureLatched=(Get-Content -LiteralPath $cfg.ProtectionState -Raw|ConvertFrom-Json).fault.reason -eq 'gpu-hot'}catch{}}
+ $allowed=$minute -ge 510 -and $minute -lt 1080 -and !$temperatureLatched
  $ready=Probe-Http 'http://127.0.0.1:8080/v1/models'
  $state.model=Get-DependencyAction $ready $false (Cooling $state.lastModelStart) $allowed
  if($state.model -eq 'start-existing'){
-  # Reuse the existing schedule guard (GPU/host limits and protection latch).
+  # Reuse the existing schedule guard (temperature limit and latch).
   $state.lastModelStart=[DateTime]::UtcNow.ToString('o')
   & $cfg.ScheduleScript -Action start -Python $cfg.Python -Controller $cfg.ModelController -ProtectionState $cfg.ProtectionState|Out-Null
  }
