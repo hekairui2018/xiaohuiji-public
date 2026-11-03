@@ -1,5 +1,5 @@
 'use strict';
-function modelStream(onContent){
+function modelStream(onContent,onMetrics){
  let pending='',event=[],content='',finish=null,usage=null,timings=null,done=false;
  function dispatch(){
   if(!event.length)return;const value=event.join('\n');event=[];
@@ -7,6 +7,7 @@ function modelStream(onContent){
   const data=JSON.parse(value);if(data.error)throw Error('expert-model-stream-error');
   if(data.usage)usage=data.usage;
   if(data.timings)timings=data.timings;
+  onMetrics?.({timings:data.timings||null,usage:data.usage||null,thinking:!!data.choices?.[0]?.delta?.reasoning_content});
   const choice=data.choices?.[0];if(!choice)return;
   if(choice.finish_reason)finish=choice.finish_reason;
   const delta=choice.delta?.content;

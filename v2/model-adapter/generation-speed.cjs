@@ -7,6 +7,8 @@ function generationSpeed(calls=[]){
  const ms=rows.reduce((sum,c)=>sum+(decoded?c.timings.predicted_ms:c.elapsedMs),0);
  if(!Number.isFinite(ms)||ms<=0)return null;
  const rate=decoded&&rows.every(c=>Number.isFinite(c.timings.predicted_per_second)&&c.timings.predicted_per_second>0)?rows.reduce((sum,c)=>sum+c.timings.predicted_per_second*c.timings.predicted_ms,0)/ms:tokens*1000/ms;
- return {tokensPerSecond:Math.round(rate*10)/10,tokens,elapsedMs:ms,kind:decoded?'decode':'generation-average',includesThinking:rows.some(c=>(c.usage?.completion_tokens_details?.reasoning_tokens||c.reasoningTokens||0)>0),callCount:rows.length};
+ const inputRows=rows.filter(c=>Number.isFinite(c.timings?.prompt_n)&&c.timings?.prompt_ms>0);
+ const inputTokens=inputRows.reduce((n,c)=>n+c.timings.prompt_n,0),inputMs=inputRows.reduce((n,c)=>n+c.timings.prompt_ms,0);
+ return {inputTokensPerSecond:inputRows.length===rows.length&&inputMs>0?Math.round(inputTokens*10000/inputMs)/10:null,inputTokens,inputElapsedMs:inputMs,tokensPerSecond:Math.round(rate*10)/10,tokens,elapsedMs:ms,kind:decoded?'decode':'generation-average',includesThinking:rows.some(c=>(c.usage?.completion_tokens_details?.reasoning_tokens||c.reasoningTokens||0)>0),callCount:rows.length};
 }
 module.exports={generationSpeed};
