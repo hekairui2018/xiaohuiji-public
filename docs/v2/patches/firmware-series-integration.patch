@@ -1,0 +1,57 @@
+diff --git a/v2/domain/knowledge/resource-service.cjs b/v2/domain/knowledge/resource-service.cjs
+index 38d264b..3fd49a8 100644
+--- a/v2/domain/knowledge/resource-service.cjs
++++ b/v2/domain/knowledge/resource-service.cjs
+@@ -17,7 +17,7 @@ function createResourceService(knowledge,evidence){
+   const guidance=require('./chip-firmware-guidance.cjs').guidance({family,dedicated,decoder,requested,evidence,files:allFiles});
+   facts.push(...guidance.facts);files=guidance.files;
+   const known=new Set(items.flatMap(i=>i.models)),prefix=primary.models[0]?.match(/^[A-Z]+/i)?.[0],nearby=evidence.chips.data.rows.filter(row=>row.firmwareType&&row.models.some(m=>m.match(/^[A-Z]+/i)?.[0]===prefix)).flatMap(row=>row.models.filter(m=>!known.has(m)).map(chip=>({chip,firmware:row.firmwareType,sourceReference:{...evidence.chips.sourceReference,page:row.page},relation:'navigation-only-not-compatibility'}))).slice(0,12);
+-  return {kind:'chips',items,family,files,sourceReferences:[evidence.chips.sourceReference,evidence.display.sourceReference,evidence.suffixes.sourceReference],view:{title:primary.models.join('/')+' · 芯片资料',primary:{chip:primary.models.join(' / '),facts,firmwareFamily:family,isDecoder:decoder},hits:items.map(row=>({chip:row.models.join('/'),firmwareLabel:row.firmwareType,sourceReference:row.sourceReference})),hitCount:items.length,nearby,firmwareItems:files.map(f=>({name:f.file,clean:f.card+' · '+f.file,url:f.publicUrl,conditions:{hardware:f.hwFromFile,variant:f.variant,series:f.series},sourceReference:f.sourceReference})),firmwareSeriesLabel:family?evidence.display.data.firmwareFamilies[family].label:'',source:'芯片选型 '+evidence.chips.data.sourceVersion}};
++  return {kind:'chips',items,family,files,sourceReferences:[evidence.chips.sourceReference,evidence.display.sourceReference,evidence.suffixes.sourceReference],view:{title:primary.models.join('/')+' · 芯片资料',primary:{chip:primary.models.join(' / '),facts,firmwareFamily:family,isDecoder:decoder},hits:items.map(row=>({chip:row.models.join('/'),firmwareLabel:row.firmwareType,sourceReference:row.sourceReference})),hitCount:items.length,nearby,firmwareItems:files.map(f=>({name:f.file,models:f.models||[f.card],versionNote:f.versionNote||'',clean:f.card+' · '+f.file,url:f.publicUrl,conditions:{hardware:f.hwFromFile,variant:f.variant,series:f.series},sourceReference:f.sourceReference})),firmwareSeriesLabel:family?evidence.display.data.firmwareFamilies[family].label:'',source:'芯片选型 '+evidence.chips.data.sourceVersion}};
+  }
+  function query(topic,{providedDevices}={}){
+   if(!topic)return null;const text=String(topic),devices=providedDevices||extractKnownModels(text,{findProducts:id=>knowledge?.findProducts(id)||[]}).map(modelId=>({modelId}));
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index d70cf3b..ac5f5da 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1362,13 +1362,13 @@ function renderChipFirmwareCard(cf) {
+   const fwItems = Array.isArray(cf.firmwareItems) ? cf.firmwareItems : [];
+   if (fwItems.length) {
+     h += `<details class="chip-fw-dl">`;
+-    h += `<summary>📥 接收卡固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 份固件）</summary>`;
+-    h += `<p class="chip-fw-dl-tip">固件必须按手上接收卡的型号刷（看卡上丝印，如 R708），刷错会黑屏/花屏；列表里没有你的卡型、或拿不准，直接把接收卡型号发我。</p>`;
++    h += `<summary>📥 对应固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 份固件）</summary>`;
++    h += `<p class="chip-fw-dl-tip">按设备型号分别选择接收卡或异步卡固件；系列相同不代表文件能互刷，仍需核对硬件和版本条件。</p>`;
+     h += `<div class="search-docs"><div class="doc-group doc-group-firmware">`;
+     for(const it of [...fwItems].sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-Hans-CN'))){
+-      const name=String(it.name||''),parts=name.split('_FPGA_'),card=parts[0].replaceAll('_','/'),version=parts[1]?.match(/^V[0-9.]+/)?.[0]||'';
+-      const label=card+(version?' · '+version.replace(/\.$/,''):'');
+-      h+=`<a class="doc-link fw-link" href="${escHtml(it.url)}" title="${escHtml(name)}" target="_blank" rel="noreferrer" download="${escHtml(name)}">${escHtml(label)}</a>`;
++      const name=String(it.name||'');
++      const info=window.FirmwareLabels?.describe(name,it);
++      h+=`<a class="doc-link fw-link" href="${escHtml(it.url)}" title="${escHtml(name)}" target="_blank" rel="noreferrer" download="${escHtml(name)}">${escHtml(name)}${info?` <small class="fw-series-badge">${escHtml(info.label)}</small>`:''}</a>`;
+     }
+     h += `</div></div></details>`;
+   }
+@@ -1933,7 +1933,7 @@ function docPillEl(it, isFw) {
+   }
+   const label = document.createElement('span'); label.className = 'doc-link-label';
+   label.append(...a.childNodes); a.appendChild(label);
+-  if(isFw){const info=window.FirmwareLabels?.describe(it.name||it.file||'');if(info){const badge=document.createElement('small');badge.className='fw-series-badge';badge.textContent=info.label;label.prepend(badge);a.dataset.firmwareSeries=info.series;}}
++  if(isFw){const info=window.FirmwareLabels?.describe(it.name||it.file||'',it);if(info){const badge=document.createElement('small');badge.className='fw-series-badge';badge.textContent=info.label;label.appendChild(badge);a.dataset.firmwareSeries=info.series;}}
+   if(it.documentEdition==='neutral'||it.brand==='中性版'){const tag=document.createElement('small');tag.className='doc-neutral-tag';tag.textContent='中性版';label.appendChild(tag);}
+   return a;
+ }
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index 0ee3691..d882dc3 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -135,6 +135,7 @@ window.OfflineClient = Object.freeze({
+       const title = make('span', label);
+       title.className = 'v2-chat-file-name';
+       summary.append(badge, title);
++      if(firmware){const description=window.FirmwareLabels?.describe(name,r);if(description){const series=make('small',description.label);series.className='fw-series-badge';summary.append(series);}}
+       details.append(summary);
+       const info = make('div');
+       info.className = 'v2-chat-file-body';

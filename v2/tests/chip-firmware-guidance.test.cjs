@@ -29,3 +29,13 @@ test('chip browsing merges equal series codes and includes C08L in the shared as
  assert.equal(asynchronous.filter(x=>x.endsWith('：70')).length,1);
  assert(asynchronous.find(x=>x.endsWith('：70')).includes('C08L'));
 });
+
+test('chip firmware downloads include approved asynchronous originals without borrowing C16H delivery',()=>{
+ const r=service.chipLookup('ICN1065L');
+ assert(r.files.some(f=>f.models.some(m=>/C16L/.test(m))));
+ assert(r.files.some(f=>f.models.some(m=>/D16/.test(m))));
+ assert(r.files.some(f=>f.models.some(m=>/C08L/.test(m))));
+ assert(!r.files.some(f=>f.models.some(m=>/C16H/.test(m))));
+ const restricted=service.chipLookup('ICN1065L C16L',[{modelId:'HD-C16L'}]);
+ assert(restricted.files.length>0);assert(restricted.files.every(f=>f.models.some(m=>/C16L/.test(m))));
+});

@@ -1,5 +1,6 @@
 'use strict';
 const {modelId}=require('../identity/model-id.cjs');
+const {describe}=require('./firmware-labels.cjs');
 function guidance({family,dedicated,decoder,requested,evidence,files}){
  const facts=[],suffixes=evidence.suffixes.data.rows;
  if(!family||dedicated||decoder)return {facts,files:[]};
@@ -19,6 +20,9 @@ function guidance({family,dedicated,decoder,requested,evidence,files}){
  if(asyncLines.length)facts.push({label:'异步卡固件尾缀',text:asyncLines.join('\n'),sourceReference:evidence.display.sourceReference});
  const matched=files.filter(f=>{
   if(!f.publicUrl?.startsWith('/v2/curated-firmware/'))return false;
+  const info=describe(f.file||f.name,f);
+  if(info?.kind==='asynchronous')return info.confirmed&&info.deliveryVerified&&info.family===family&&
+   (!requested.length||(f.models||[f.card]).some(m=>requested.includes(modelId(m))));
   const parsed=String(f.file||f.name).match(/_FPGA_V\d+\.\d+\.(\d+)\.(\d+)(?:_|\.)/i);
   if(!parsed)return false;
   return selected.some(r=>r.models.some(m=>(f.models||[f.card]).some(v=>modelId(v)===modelId(m)))&&String(r.suffix)===parsed[2]&&(family==='common'?(r.commonCodes||[]).includes(parsed[1]):parsed[1]===family));
