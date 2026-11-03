@@ -1,0 +1,9 @@
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 56e6201..4bae7e6 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -15,0 +16 @@
++  <link rel="stylesheet" href="loading-status.css?v=20261103-04">
+@@ -95 +96 @@
+-  <script src="chat-controller.js?v=20261029-inline-choice-v2"></script>
++  <script src="chat-controller.js?v=20261103-loading-04"></script>
