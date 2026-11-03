@@ -17,8 +17,8 @@ if($ValidateOnly){Write-Output ('Validated '+$Action+'; model unchanged');exit 0
 if($Action -eq 'start'){
  $gpuRows=& nvidia-smi --query-gpu=temperature.gpu,memory.free --format=csv,noheader,nounits
  if($LASTEXITCODE -ne 0 -or !$gpuRows){throw 'GPU state is unavailable'}
- foreach($row in $gpuRows){$values=$row.Split(',');if($values.Count -ne 2 -or [double]$values[0] -ge 85 -or [double]$values[1] -lt 384){throw 'GPU protection threshold reached'}}
- if((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory -lt 1048576){throw 'Host memory protection threshold reached'}
+ foreach($row in $gpuRows){$values=$row.Split(',');if($values.Count -ne 2 -or [double]$values[0] -ge 85 -or [double]$values[1] -lt 256){throw 'GPU protection threshold reached'}}
+ if((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory -lt 524288){throw 'Host memory protection threshold reached'}
 }
 & $Python -X utf8 $Controller $(if($Action -eq 'start'){'on'}else{'off'})
 if($LASTEXITCODE -ne 0){throw 'Model controller did not complete the requested operation'}

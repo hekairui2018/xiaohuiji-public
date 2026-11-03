@@ -2,6 +2,22 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {createExpertProtection}=require('../model-adapter/expert-protection.cjs');
 const at=time=>Date.parse('2026-10-29T'+time+'+08:00');
+test('lower memory reserves allow exact boundary and latch one MiB below it',async()=>{
+ for(const [freeMiB,hostMiB,reason] of [[256,512,null],[300,700,null],[255,8192,'gpu-memory'],[1200,511,'host-memory']]){
+  const guard=createExpertProtection({now:()=>at('10:00:00'),intervalMs:0,hostFreeMiB:()=>hostMiB,probe:async()=>[{temperature:40,freeMiB}]});
+  await guard.refresh();const state=guard.access();assert.equal(state.reason,reason);assert.equal(state.protection.minFreeMiB,256);assert.equal(state.protection.minHostFreeMiB,512);assert.equal(state.protection.temperatureLimit,85);guard.dispose();
+ }
+});
+test('authorized local test lease expires and cannot override GPU protection',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'xhj-lease-')),stateFile=path.join(dir,'state.json');let clock=at('22:00:00'),temperature=40;
+ const guard=createExpertProtection({stateFile,now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature,freeMiB:1500}]});
+ const lease={purpose:'authorized-local-test',startedAt:new Date(clock).toISOString(),expiresAt:new Date(clock+3600000).toISOString()};
+ fs.writeFileSync(stateFile+'.test-window',JSON.stringify(lease));await guard.refresh();assert.equal(guard.access().available,true);
+ clock+=3600000;assert.equal(guard.access().reason,'closed');
+ clock=at('22:00:00');fs.writeFileSync(stateFile+'.test-window',JSON.stringify({...lease,expiresAt:new Date(clock+10800000).toISOString()}));assert.equal(guard.access().reason,'closed');
+ fs.writeFileSync(stateFile+'.test-window',JSON.stringify(lease));temperature=86;await guard.refresh();assert.equal(guard.access().reason,'gpu-hot');
+ guard.dispose();fs.rmSync(dir,{recursive:true});
+});
 test('daily service window has exact boundaries and does not contact model outside hours',async()=>{
  let clock=at('08:29:59'),calls=0;const guard=createExpertProtection({now:()=>clock,intervalMs:0,hostFreeMiB:()=>8192,probe:async()=>[{temperature:40,freeMiB:1300}]});await guard.refresh();
  const expert=guard.wrap({status:async()=>{calls++;return {available:true};},answer:async()=>{calls++;return {status:'answer'};}});
