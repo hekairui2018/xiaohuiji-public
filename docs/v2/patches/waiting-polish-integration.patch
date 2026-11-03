@@ -71,3 +71,17 @@ index 2b82093..59889ae 100644
              }
            }
          } catch {
+
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index dd7530d..7fc62a4 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -93,7 +93,7 @@
+   <script src="product-resources.js?v=20261027-curated-word-preview"></script>
+   <script src="product-card.js?v=20261027-source-label"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261104-waiting-polish-01"></script>
++  <script src="chat-controller.js?v=20261104-waiting-polish-02"></script>
+   <script src="offline-client.js?v=20261104-waiting-polish-01"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261021-chat-composer"></script>
