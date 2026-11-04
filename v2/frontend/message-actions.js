@@ -7,6 +7,14 @@
  const status=document.createElement('div');status.className='v2-message-action-notice';status.setAttribute('role','status');document.body.append(status);let noticeTimer,speaking;
  function notify(text){status.textContent=text;status.classList.add('visible');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>status.classList.remove('visible'),2600);}
  function textOf(row){const bubble=row.querySelector('.ai-msg-bubble');if(!bubble)return '';const clone=bubble.cloneNode(true);clone.querySelectorAll('.v2-answer-process,.v2-answer-time,button,script,style').forEach(n=>n.remove());return clone.textContent.trim();}
+ function exportText(row){
+  const bubble=row.querySelector('.ai-msg-bubble');if(!bubble)return '';
+  const clone=bubble.cloneNode(true);clone.querySelectorAll('.v2-answer-process,.v2-answer-time,button,script,style').forEach(n=>n.remove());
+  for(const link of clone.querySelectorAll('a[href]')){try{const url=new URL(link.getAttribute('href'),location.href);if(!['http:','https:'].includes(url.protocol))continue;const label=link.getAttribute('aria-label')||link.title||link.textContent.trim()||'链接';link.replaceWith(document.createTextNode('\n'+label+'：'+url.href+'\n'));}catch{}}
+  for(const br of clone.querySelectorAll('br'))br.replaceWith(document.createTextNode('\n'));
+  for(const block of [...clone.querySelectorAll('p,div,article,section,details,summary,li,pre,tr,h1,h2,h3,h4,strong,small')].reverse()){block.before(document.createTextNode('\n'));block.after(document.createTextNode('\n'));}
+  return clone.textContent.replace(/[ \t]+\n/g,'\n').replace(/\n[ \t]+/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+ }
  function draft(text){if(!text){notify('这条消息没有可编辑的文字');return;}input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus({preventScroll:true});input.setSelectionRange(input.value.length,input.value.length);notify('已放入输入框，修改后发送；原消息保留');}
  function button(kind,label,action){const b=document.createElement('button');b.type='button';b.title=b.ariaLabel=label;b.dataset.messageAction=kind;b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+paths[kind]+'"/></svg>';b.onclick=action;return b;}
  function stopSpeech(){window.speechSynthesis?.cancel();if(speaking){speaking.setAttribute('aria-pressed','false');speaking.title=speaking.ariaLabel='朗读回答';speaking=null;}}
@@ -21,7 +29,7 @@
    const menu=document.createElement('div');menu.className='v2-message-menu';menu.hidden=true;
    const more=button('more','更多操作',()=>{const open=menu.hidden;closeMenus();menu.hidden=!open;more.setAttribute('aria-expanded',String(open));});more.setAttribute('aria-expanded','false');
    const again=document.createElement('button');again.type='button';again.textContent='重新提问';again.onclick=()=>{let previous=row.previousElementSibling;while(previous&&!previous.classList.contains('ai-msg-user'))previous=previous.previousElementSibling;if(previous)draft(textOf(previous));else notify('没有找到对应的客户消息');closeMenus();};
-   const save=document.createElement('button');save.type='button';save.textContent='保存回答为文本';save.onclick=()=>{const url=URL.createObjectURL(new Blob([textOf(row)],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='小灰机回答.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);closeMenus();};menu.append(again,save);bar.append(more,menu);
+   const save=document.createElement('button');save.type='button';save.textContent='保存回答为文本';save.onclick=()=>{const url=URL.createObjectURL(new Blob([exportText(row)],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='小灰机回答.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);closeMenus();};menu.append(again,save);bar.append(more,menu);
   }
   const at=row.dataset.messageAt,date=new Date(at||'');if(at&&Number.isFinite(date.getTime())){const time=document.createElement('time');time.dateTime=at;time.title=date.toLocaleString('zh-CN',{hour12:false});time.textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});bar.append(time);}
   row.classList.add('v2-action-message');row.append(bar);

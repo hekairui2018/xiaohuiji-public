@@ -5,4 +5,4 @@ index 74cf380..2a96bb9 100644
 @@ -16,0 +17 @@
 +  <link rel="stylesheet" href="message-actions.css?v=20261104-01">
 @@ -108,0 +110 @@
-+  <script src="message-actions.js?v=20261104-01"></script>
++  <script src="message-actions.js?v=20261104-02"></script>
