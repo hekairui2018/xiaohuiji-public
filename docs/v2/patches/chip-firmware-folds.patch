@@ -1,0 +1,46 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index fa3925c..07a9d10 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1365,13 +1365,23 @@ function renderChipFirmwareCard(cf) {
+     h += `<details class="chip-fw-dl">`;
+     h += `<summary>📥 对应固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 份固件）</summary>`;
+     h += `<p class="chip-fw-dl-tip">按设备型号分别选择接收卡或异步卡固件；系列相同不代表文件能互刷，仍需核对硬件和版本条件。</p>`;
+-    h += `<div class="search-docs"><div class="doc-group doc-group-firmware">`;
++    // Display groups use the API's model associations; they do not establish compatibility.
++    const groups=[{key:'cd',label:'C / D 系列 · 异步卡',items:[]},{key:'rk',label:'R / K 系列 · 接收卡',items:[]},{key:'other',label:'其他型号 · 需核对',items:[]}];
+     for(const it of [...fwItems].sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-Hans-CN'))){
+-      const name=String(it.name||'');
+-      const info=window.FirmwareLabels?.describe(name,it);
+-      h+=`<a class="doc-link fw-link" href="${escHtml(it.url)}" title="${escHtml(name)}" target="_blank" rel="noreferrer" download="${escHtml(name)}">${escHtml(name)}${info?` <small class="fw-series-badge">${escHtml(info.label)}</small>`:''}</a>`;
++      const models=(it.models||[]).map(model=>String(model).replace(/^HD[-_ ]?/i,'').toUpperCase());
++      const group=models.length&&models.every(model=>/^[CD]/.test(model))?groups[0]:models.length&&models.every(model=>/^[RK]/.test(model))?groups[1]:groups[2];
++      group.items.push(it);
+     }
+-    h += `</div></div></details>`;
++    for(const group of groups.filter(group=>group.items.length)){
++      h+=`<details class="chip-fw-dl chip-fw-device-group" data-device-group="${group.key}"><summary>${group.label}（${group.items.length} 份）</summary><div class="search-docs"><div class="doc-group doc-group-firmware">`;
++      for(const it of group.items){
++        const name=String(it.name||'');
++        const info=window.FirmwareLabels?.describe(name,it);
++        h+=`<a class="doc-link fw-link" href="${escHtml(it.url)}" title="${escHtml(name)}" target="_blank" rel="noreferrer" download="${escHtml(name)}">${escHtml(name)}${info?` <small class="fw-series-badge">${escHtml(info.label)}</small>`:''}</a>`;
++      }
++      h+='</div></div></details>';
++    }
++    h += `</details>`;
+   }
+   const others = (cf.hits || []).slice(1);
+   if (others.length) {
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 66aa636..b4f2e32 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -104,7 +104,7 @@
+   <script src="firmware-labels.js?v=20261102"></script>
+   <script src="chip-browser.js?v=20261028"></script>
+   <script src="mascot-advice.js?v=20261102"></script>
+-  <script src="app.js?v=20261104-reply-position-01"></script>
++  <script src="app.js?v=20261104-chip-firmware-folds-01"></script>
+   <script src="public-client.js?v=20261026-live-process"></script>
+   <script src="site-compat.js?v=20261022-public-chat"></script>
+   <script src="message-actions.js?v=20261104-02"></script>
