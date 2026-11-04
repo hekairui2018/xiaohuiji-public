@@ -1,0 +1,95 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 07a9d10..abd7bf3 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1354,26 +1354,32 @@ function renderChipFirmwareCard(cf) {
+   let h = `<article class="chip-fw-card"><span class="chip-fw-label">IC固件速查</span>`;
+   h += `<h3 class="chip-fw-title">${escHtml(cf.title)}</h3><dl class="chip-fw-table">`;
+   h += `<div><dt>芯片型号</dt><dd>${escHtml(cf.primary.chip)}</dd></div>`;
++  const deviceFacts={cd:[],rk:[]};
+   // 智能设置/芯片类型/固件尾缀统一由后端 facts 输出，避免“智能设置”与“智能设置选择”重复两行
+   (cf.primary.facts || []).forEach((f) => {
++    if(f.label==='异步卡固件尾缀'){deviceFacts.cd.push(f);return;}
++    if(f.label==='接收卡固件尾缀'){deviceFacts.rk.push(f);return;}
+     h += `<div><dt>${escHtml(f.label)}</dt><dd>${escHtml(f.text || "").replace(/\n/g, "<br>")}</dd></div>`;
+   });
+   h += `</dl>`;
+   // 主驱动芯片：按接收卡型折叠的该系列最新固件下载（译码/借用芯片无 firmwareItems，自动不显示）
+   const fwItems = Array.isArray(cf.firmwareItems) ? cf.firmwareItems : [];
+-  if (fwItems.length) {
++  if (fwItems.length||deviceFacts.cd.length||deviceFacts.rk.length) {
+     h += `<details class="chip-fw-dl">`;
+     h += `<summary>📥 对应固件（${escHtml(cf.firmwareSeriesLabel || "对应系列")} · ${fwItems.length} 份固件）</summary>`;
+     h += `<p class="chip-fw-dl-tip">按设备型号分别选择接收卡或异步卡固件；系列相同不代表文件能互刷，仍需核对硬件和版本条件。</p>`;
+     // Display groups use the API's model associations; they do not establish compatibility.
+-    const groups=[{key:'cd',label:'C / D 系列 · 异步卡',items:[]},{key:'rk',label:'R / K 系列 · 接收卡',items:[]},{key:'other',label:'其他型号 · 需核对',items:[]}];
++    const groups=[{key:'cd',label:'C / D 系列 · 异步卡',items:[],facts:deviceFacts.cd},{key:'rk',label:'R / K 系列 · 接收卡',items:[],facts:deviceFacts.rk},{key:'other',label:'其他型号 · 需核对',items:[],facts:[]}];
+     for(const it of [...fwItems].sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-Hans-CN'))){
+       const models=(it.models||[]).map(model=>String(model).replace(/^HD[-_ ]?/i,'').toUpperCase());
+       const group=models.length&&models.every(model=>/^[CD]/.test(model))?groups[0]:models.length&&models.every(model=>/^[RK]/.test(model))?groups[1]:groups[2];
+       group.items.push(it);
+     }
+-    for(const group of groups.filter(group=>group.items.length)){
+-      h+=`<details class="chip-fw-dl chip-fw-device-group" data-device-group="${group.key}"><summary>${group.label}（${group.items.length} 份）</summary><div class="search-docs"><div class="doc-group doc-group-firmware">`;
++    for(const group of groups.filter(group=>group.items.length||group.facts.length)){
++      h+=`<details class="chip-fw-dl chip-fw-device-group" data-device-group="${group.key}"><summary>${group.label}（${group.items.length} 份）</summary>`;
++      if(group.facts.length){h+='<dl class="chip-fw-table">';for(const fact of group.facts)h+=`<div><dt>${escHtml(fact.label)}</dt><dd>${escHtml(fact.text||'').replace(/\n/g,'<br>')}</dd></div>`;h+='</dl>';}
++      if(!group.items.length)h+='<p class="chip-fw-dl-tip">当前未提供对应原件。</p>';
++      h+='<div class="search-docs"><div class="doc-group doc-group-firmware">';
+       for(const it of group.items){
+         const name=String(it.name||'');
+         const info=window.FirmwareLabels?.describe(name,it);
+@@ -1420,14 +1426,15 @@ function renderSearchResults(results, query, data) {
+   const cf = data && data.chipFirmware;
+   const cat = (activeCat === "software" || activeCat === "video") ? "all" : activeCat; // 软件/视频分类走独立渲染，不进本函数
+   const showChip = !!cf && (cat === "all" || cat === "firmware"); // 芯片固件速查卡只在“全部/固件”下出现
++  const showChipDirectory=!!data?.chipDirectoryQuery&&(cat==='all'||cat==='firmware');
+   const shown = (cat === "all")
+     ? results
+     : results.filter((r) => productHasCat(r, cat, productDocGroups(r).fwGroup));
+-  if (!shown.length && !showChip) {
++  if (!shown.length && !showChip && !showChipDirectory) {
+     const tip = cat === "all"
+       ? `未找到与"${escHtml(query)}"相关的资料`
+       : `没有找到与"${escHtml(query)}"相关的${CAT_LABEL[cat]}，可换个分类或型号试试`;
+-    searchResults.innerHTML = `<div class="search-empty">${tip}</div>`;
++    searchResults.innerHTML = `<div class="search-empty">${data?.chipDirectoryUnavailable?'未找到产品资料；芯片目录暂不可用，请稍后重试。':tip}</div>`;
+     searchResults.style.display = "block";
+     return;
+   }
+@@ -1473,6 +1480,7 @@ function renderSearchResults(results, query, data) {
+     html += `</div>`;
+   }
+   searchResults.innerHTML = html;
++  if(showChipDirectory){const tip=document.createElement('p');tip.className='chip-fw-dl-tip';tip.textContent='找到以下芯片候选，请核对完整型号后选择；未自动指定固件。';searchResults.prepend(tip);window.ChipBrowser?.mount(searchResults,data.chipDirectoryQuery);}
+   searchResults.querySelectorAll('.product-resource-slot').forEach(slot => {
+     const product = shown[Number(slot.dataset.productIndex)];
+     const groups = productDocGroups(product).groups.filter(g => cat === 'all' || (CAT_GROUP_KEYS[cat] || []).includes(g.key));
+@@ -1535,6 +1543,11 @@ async function doSearch() {
+     if (requestId !== quickRequestId) return;
+     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
+     let hwResults = data.results || [];
++    if((activeCat==='all'||activeCat==='firmware')&&!hwResults.length&&!data.chipFirmware&&window.ChipBrowser){
++      let chipMatch=false;try{chipMatch=await window.ChipBrowser.hasMatches(q);}catch{data.chipDirectoryUnavailable=true;}
++      if(requestId!==quickRequestId)return;
++      if(chipMatch){data.chipDirectoryQuery=q;lastSearch={results:hwResults,query:q,data};renderSearchResults(hwResults,q,data);return;}
++    }
+     // One catalogue-based resolver handles incomplete, mistyped and ambiguous identifiers.
+     // Actual exact results remain authoritative; tied candidates require customer selection.
+     const knownModels=officialWikiCategories.map(x=>x.model);
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index b4f2e32..2dba687 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -102,9 +102,9 @@
+   <script src="source-directory-browser.js?v=20261022-lazy-final"></script>
+   <script src="directory-page-cache.js?v=20261102"></script>
+   <script src="firmware-labels.js?v=20261102"></script>
+-  <script src="chip-browser.js?v=20261028"></script>
++  <script src="chip-browser.js?v=20261104-chip-search-entry-01"></script>
+   <script src="mascot-advice.js?v=20261102"></script>
+-  <script src="app.js?v=20261104-chip-firmware-folds-01"></script>
++  <script src="app.js?v=20261104-chip-search-entry-01"></script>
+   <script src="public-client.js?v=20261026-live-process"></script>
+   <script src="site-compat.js?v=20261022-public-chat"></script>
+   <script src="message-actions.js?v=20261104-02"></script>
