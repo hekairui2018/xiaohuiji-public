@@ -1,0 +1,10 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {createCore,sessionId,render,chunks}=require('./core.cjs');
+function mock(available,expert){const calls=[];return {calls,fetchImpl:async(url,opts)=>{const body=opts.body&&JSON.parse(opts.body);calls.push({path:url.pathname,body});let data=url.pathname.endsWith('capabilities')?{expert:{available}}:body.mode==='expert'?expert:{reply:'quick answer',actualMode:'quick'};return {ok:!data.error,status:data.error?503:200,json:async()=>data};}};}
+test('expert available uses same core and stable isolated session',async()=>{const m=mock(true,{reply:'expert answer',actualMode:'expert'}),c=createCore(m);const r=await c.answer('u:alice','hello');assert.equal(r.bridgeMode,'expert');assert.equal(m.calls[1].body.mode,'expert');assert.match(m.calls[1].body.sessionId,/^[A-Za-z0-9_-]{4,70}$/);assert.notEqual(sessionId('u:alice'),sessionId('u:bob'));});
+test('closed expert bypassed for quick',async()=>{const m=mock(false),r=await createCore(m).answer('u:a','hello');assert.equal(r.bridgeMode,'quick');assert.deepEqual(m.calls.filter(x=>x.body).map(x=>x.body.mode),['quick']);});
+test('expert fails after capability probe falls back',async()=>{const m=mock(true,{status:'unavailable',error:'expert-off'}),r=await createCore(m).answer('u:a','hello');assert.equal(r.bridgeMode,'quick');assert.deepEqual(m.calls.filter(x=>x.body).map(x=>x.body.mode),['expert','quick']);});
+test('long quick request explained without silently cutting question',async()=>{const m=mock(false),r=await createCore(m).answer('u:a','字'.repeat(241));assert.match(r.reply,/240/);assert.equal(m.calls.length,1);});
+test('private handles are not exposed and chunks preserve unicode',()=>{const text=render({reply:'[原件](/v2/offline/file?id=1) http://127.0.0.1:8520/x E:\\private\\x',results:[]});assert.doesNotMatch(text,/127\.0|\/v2\/|E:\\/);const raw='中文🙂'.repeat(10000),parts=chunks(raw);assert.equal(parts.join(''),raw);assert.ok(parts.every(p=>Buffer.byteLength(p)<=18000));});
+test('remote core rejected',()=>assert.throws(()=>createCore({baseUrl:'http://example.com'}),/loopback/));
