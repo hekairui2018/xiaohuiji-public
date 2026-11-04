@@ -1,10 +1,19 @@
 'use strict';
 const {createHash,randomUUID}=require('node:crypto');
 const sessionId=key=>'wecom-'+createHash('sha256').update(key).digest('hex').slice(0,48);
-function createCore({baseUrl='http://127.0.0.1:8520',fetchImpl=fetch,timeoutMs=240000}={}){
+function createCore({baseUrl='http://127.0.0.1:8520',fetchImpl=fetch,timeoutMs=240000,retryDelayMs=1000}={}){
  const base=new URL(baseUrl);if(!['127.0.0.1','localhost','[::1]'].includes(base.hostname))throw Error('loopback-core-required');
  async function request(route,body,timeout=timeoutMs){
-  const r=await fetchImpl(new URL(route,base),{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(timeout)});
+  const started=Date.now();let r;
+  for(let attempt=0;;attempt++){
+   try{r=await fetchImpl(new URL(route,base),{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(Math.max(1,timeout-(Date.now()-started)))});break;}
+   catch(error){
+    // Connection refusal proves the request was never accepted. Retry only
+    // this case across a short service restart; never replay an ambiguous POST.
+    if(error?.cause?.code!=='ECONNREFUSED'||attempt>=45||Date.now()-started>=Math.min(45000,timeout))throw error;
+    await new Promise(resolve=>setTimeout(resolve,retryDelayMs));
+   }
+  }
   const data=await r.json();return {ok:r.ok,code:r.status,data};
  }
  async function answer(key,message){
