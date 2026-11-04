@@ -1,0 +1,209 @@
+diff --git a/v2/adapters/http/chat-stream.cjs b/v2/adapters/http/chat-stream.cjs
+index 25b3d3e..674c721 100644
+--- a/v2/adapters/http/chat-stream.cjs
++++ b/v2/adapters/http/chat-stream.cjs
+@@ -5,3 +5,3 @@ function chatStream(req,res){
+  function write(event){if(res.destroyed||res.writableEnded)return;if(!started){res.writeHead(200,{'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff'});started=true;}res.write(JSON.stringify(event)+'\n');}
+- return {progress(summary){if(summary?.version===1)write({type:'progress',summary});},text(text){if(typeof text==='string'&&text)write({type:'text',text});},finish(code,data){if(!started)return false;if(!res.destroyed&&!res.writableEnded)res.end(JSON.stringify({type:'final',code,data})+'\n');return true;}};
++ return {partial(data){if(data&&Array.isArray(data.results))write({type:'partial',data});},progress(summary){if(summary?.version===1)write({type:'progress',summary});},text(text){if(typeof text==='string'&&text)write({type:'text',text});},finish(code,data){if(!started)return false;if(!res.destroyed&&!res.writableEnded)res.end(JSON.stringify({type:'final',code,data})+'\n');return true;}};
+ }
+diff --git a/v2/adapters/http/offline-knowledge.cjs b/v2/adapters/http/offline-knowledge.cjs
+index b39e286..c144c4c 100644
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -411,3 +411,3 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+     expertProgress('evidence-found',{models:route.models||[],results:preparedEvidence||[]});
+-    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
++    let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text)),onPartialResult:data=>req.v2ChatStream.partial({sessionId:state.id,results:data.results})}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+     if(calculatedResult&&output.status==='answer'){output.intent='ordering';output.result=calculatedResult;output.result.deliverySessionId=state.id;output.result.controlBom=require('./control-bom.cjs').controlBom(calculatedResult);}
+diff --git a/v2/frontend/chat-controller.js b/v2/frontend/chat-controller.js
+index adc632d..b72ab6b 100644
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -5,3 +5,3 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',final;
+- const line=value=>{if(!value.trim())return;const event=JSON.parse(value);if(event.type==='text'&&typeof event.text==='string')onText?.(event.text);if(event.type==='progress')onSummary?.(event.summary);if(event.type==='final')final=event.data;};
++ const line=value=>{if(!value.trim())return;const event=JSON.parse(value);if(event.type==='text'&&typeof event.text==='string')onText?.(event.text);if(event.type==='progress')onSummary?.(event.summary);if(event.type==='partial')window.dispatchEvent(new CustomEvent('v2-answer-partial',{detail:event.data}));if(event.type==='final')final=event.data;};
+  try{for(;;){const part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});if(buffer.length>1024*1024)throw Error('回复数据过长');let at;while((at=buffer.indexOf('\n'))>=0){line(buffer.slice(0,at));buffer=buffer.slice(at+1);}}buffer+=decoder.decode();if(buffer.trim())line(buffer);if(!final)throw Error('回复中断，请重试');return final;}finally{reader.releaseLock();}
+@@ -16,4 +16,4 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+  const waitingMessages=[],queuePanel=document.createElement('section');queuePanel.className='v2-message-queue';queuePanel.hidden=true;queuePanel.setAttribute('aria-label','候补消息');ui.input.parentElement.before(queuePanel);
+- function renderQueue(){queuePanel.replaceChildren();const rows=waitingMessages.filter(q=>q.session===ui.getSessionId());queuePanel.hidden=!rows.length;if(!rows.length)return;const title=document.createElement('strong');title.textContent='候补消息 '+rows.length+' 条 · '+(queuePaused?'上次处理未完成，已暂停':'当前回答结束后依次发送');queuePanel.append(title);if(queuePaused){const resume=document.createElement('button');resume.type='button';resume.textContent='继续发送候补';resume.disabled=sending;resume.onclick=()=>{queuePaused=false;renderQueue();drainQueue();};queuePanel.append(resume);}for(const q of rows){const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');text.textContent=q.text;text.title=q.text;remove.type='button';remove.textContent='移除';remove.setAttribute('aria-label','移除此条候补消息');remove.onclick=()=>{waitingMessages.splice(waitingMessages.indexOf(q),1);renderQueue();};row.append(text,remove);queuePanel.append(row);}}
+- function enqueue(){const text=ui.input.value.trim();if(!text)return;if(channel.validate?.(text)===false)return;if(!sending){send();return;}waitingMessages.push({session:ui.getSessionId(),text});ui.input.value='';ui.resizeInput?.();renderQueue();}
++ function renderQueue(){queuePanel.replaceChildren();const rows=waitingMessages.filter(q=>q.session===ui.getSessionId());queuePanel.hidden=!rows.length;if(!rows.length)return;const title=document.createElement('strong');title.textContent='候补 '+rows.length+' 条 · '+(queuePaused?'已停止自动发送':'回答结束后发送');queuePanel.append(title);if(queuePaused){const resume=document.createElement('button');resume.type='button';resume.textContent='继续发送候补';resume.disabled=sending;resume.onclick=()=>{queuePaused=false;renderQueue();drainQueue();};queuePanel.append(resume);}for(const q of rows){const row=document.createElement('div'),text=document.createElement('span'),menu=document.createElement('details'),toggle=document.createElement('summary'),actions=document.createElement('div');row.className='v2-queue-row';text.className='v2-queue-text';text.textContent=q.text;text.title=q.text;menu.className='v2-queue-menu';toggle.textContent='⋯';toggle.setAttribute('aria-label','候补消息操作');actions.className='v2-queue-actions';const remove=()=>{waitingMessages.splice(waitingMessages.indexOf(q),1);renderQueue();};for(const [label,fn]of [['立即发送',()=>{if(!sending||channel.interrupt){remove();send(q.text,undefined,true);}}],['编辑',()=>{const draft=ui.input.value;remove();if(draft.trim())waitingMessages.push({session:ui.getSessionId(),text:draft});ui.input.value=q.text;ui.resizeInput?.();syncSendButton();renderQueue();ui.input.focus();}],['移除',remove]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;actions.append(b);}menu.append(toggle,actions);row.append(text,menu);queuePanel.append(row);}}
++ function enqueue(){const text=ui.input.value.trim();if(!text)return;if(channel.validate?.(text)===false)return;if(!sending){send();return;}waitingMessages.push({session:ui.getSessionId(),text});ui.input.value='';ui.resizeInput?.();syncSendButton();renderQueue();}
+  function drainQueue(){if(sending||queuePaused)return;const index=waitingMessages.findIndex(q=>q.session===ui.getSessionId());if(index<0)return;const next=waitingMessages.splice(index,1)[0];renderQueue();send(next.text,undefined,true);}
+@@ -49,2 +49,6 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+  });
++ function syncSendButton(){const stop=sending&&!!channel.interrupt&&!ui.input.value.trim();ui.sendButton.classList.toggle('v2-stop-generation',stop);ui.sendButton.textContent=stop?'■':'发送';ui.sendButton.setAttribute('aria-label',stop?'停止生成':'发送');ui.sendButton.title=stop?'停止本次处理':'发送';}
++ ui.input.addEventListener('input',syncSendButton);
++ ui.sendButton.addEventListener('click',event=>{if(sending&&channel.interrupt&&!ui.input.value.trim()){event.preventDefault();event.stopImmediatePropagation();stopGeneration();}},true);
++ async function stopGeneration(){if(stopping||!sending||!activeQuery)return;const ticket=++sendVersion;stopping=true;queuePaused=true;ui.sendButton.disabled=true;const session=activeSession,partial=waitingRow?.dataset.streaming==='true'?waitingRow.querySelector('.ai-msg-bubble')?.textContent:'';try{await channel.interrupt(session);await activeQuery?.catch(()=>{});if(ticket!==sendVersion||ui.getSessionId()!==session)return;stopWaiting();ui.removeLoading();ui.addAssistantMessage({reply:partial?partial+'\n（已停止生成）':'已停止本次处理。',results:partialFiles});}catch(error){if(ticket===sendVersion){stopWaiting();ui.removeLoading();ui.addAssistantMessage({reply:'停止未确认：'+error.message,results:partialFiles});}}finally{stopping=false;if(ticket===sendVersion){activeQuery=null;ui.setImageState({dataUrl:null,text:'',busy:false});busy(false);}}}
+  function busy(value,completed=false) {
+@@ -54,3 +58,3 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+   const hint=document.getElementById('aiInputHint');if(hint)hint.textContent=(value&&channel.interrupt?'Enter 打断重发':'Enter 发送')+' · Ctrl+Enter 候补 · Shift+Enter 换行';
+-  channel.setBusy?.(value);
++  channel.setBusy?.(value);syncSendButton();
+   renderQueue();
+@@ -89,2 +93,4 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+  }
++ let partialFiles=[];
++ window.addEventListener('v2-answer-partial',event=>{const d=event.detail;if(!sending||d?.sessionId!==clockSession||ui.getSessionId()!==clockSession||!waitingRow?.isConnected||!Array.isArray(d.results))return;const unique=new Map(partialFiles.map(r=>[r.download||r.url,r]));for(const r of d.results)unique.set(r.download||r.url,r);partialFiles=[...unique.values()];let slot=waitingRow.querySelector('.v2-partial-files');if(!slot){slot=document.createElement('section');slot.className='v2-partial-files';waitingRow.append(slot);}slot.replaceChildren();const label=document.createElement('small');label.textContent='已取得资料，其他内容仍在处理';slot.append(label);channel.renderPartial?.(partialFiles,slot);ui.followChatUpdates?.();});
+  let textFlush=null,pendingText='';
+@@ -102,3 +108,3 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+  function stopWaiting(){clearTimeout(textFlush);textFlush=null;pendingText='';clearInterval(clock);clock=null;waitingObserver?.disconnect();waitingObserver=null;if(waitingRow&&waitingRow.dataset.active!=='false'){waitingRow.dataset.active='false';const dots=waitingRow.querySelector('.v2-wait-dots');if(dots)dots.hidden=true;}}
+- function answerStarted(){document.body.dataset.v2AnswerVisible='true';window.dispatchEvent(new CustomEvent('v2-mascot-reset'));stopWaiting();const row=waitingRow;if(row){row.dataset.streaming='true';for(const node of row.children)if(!node.classList.contains('ai-msg-bubble'))node.hidden=true;}}
++ function answerStarted(){document.body.dataset.v2AnswerVisible='true';window.dispatchEvent(new CustomEvent('v2-mascot-reset'));stopWaiting();const row=waitingRow;if(row){row.dataset.streaming='true';for(const node of row.children)if(!node.classList.contains('ai-msg-bubble')&&!node.classList.contains('v2-partial-files'))node.hidden=true;}}
+  window.addEventListener('v2-answer-progress',event=>{if(event.detail?.sessionId!==clockSession||!sending||waitingRow?.dataset.streaming==='true')return;const stage=event.detail.stage;if(stage)setPhase(stage);});
+@@ -115,3 +121,3 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+  });
+- function startClock(){stopWaiting();clockStarted=performance.now();clockSession=ui.getSessionId();waitStage='understanding';waitPhase=null;stageStarted=clockStarted;roundSeen=0;detailSignature='';document.body.dataset.v2AnswerVisible='false';const row=document.getElementById('aiLoading');waitingRow=row;if(!row)return;row.dataset.active='true';row.dataset.streaming='false';
++ function startClock(){partialFiles=[];stopWaiting();clockStarted=performance.now();clockSession=ui.getSessionId();waitStage='understanding';waitPhase=null;stageStarted=clockStarted;roundSeen=0;detailSignature='';document.body.dataset.v2AnswerVisible='false';const row=document.getElementById('aiLoading');waitingRow=row;if(!row)return;row.dataset.active='true';row.dataset.streaming='false';
+   const bubble=row.querySelector('.ai-msg-bubble');bubble.replaceChildren();bubble.setAttribute('role','status');bubble.setAttribute('aria-live','polite');const dots=document.createElement('span');dots.className='v2-wait-dots';dots.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)dots.append(document.createElement('i'));const button=document.createElement('button');button.type='button';button.className='v2-stage-toggle';button.setAttribute('aria-expanded','false');button.setAttribute('aria-label','展开处理详情');const label=document.createElement('span');label.className='v2-stage-label';button.append(label);bubble.append(dots,button);
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 5499408..0046df6 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -15,3 +15,3 @@
+   <link rel="stylesheet" href="styles.css?v=20261104-ui-consistency-01">
+-  <link rel="stylesheet" href="loading-status.css?v=20261104-ui-consistency-01">
++  <link rel="stylesheet" href="loading-status.css?v=20261105-expert-parallel-ui-04">
+   <link rel="stylesheet" href="message-actions.css?v=20261104-01">
+@@ -101,4 +101,4 @@
+   <script src="image-layout-view.js?v=20261104-explicit-layout-01"></script>
+-  <script src="chat-controller.js?v=20261105-ordering-delivery-05"></script>
+-  <script src="offline-client.js?v=20261105-ordering-delivery-05"></script>
++  <script src="chat-controller.js?v=20261105-expert-parallel-ui-04"></script>
++  <script src="offline-client.js?v=20261105-expert-parallel-ui-04"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+diff --git a/v2/frontend/loading-status.css b/v2/frontend/loading-status.css
+index e8b4409..ca24033 100644
+--- a/v2/frontend/loading-status.css
++++ b/v2/frontend/loading-status.css
+@@ -42 +42,5 @@ body[data-view="ai"] .mascot-bolt.is-active{display:block}
+ @media(max-width:560px){.ai-msg-bubble .v2-chat-files:has(.v2-document-file){grid-template-columns:minmax(0,1fr)}.ai-msg-bubble .v2-document-file{grid-template-columns:minmax(0,1fr)}.v2-document-file>.pr-actions{justify-self:end}}
++
++/* Compact queued drafts and truthful stop/send state. */
++.v2-message-queue .v2-queue-row{min-width:0;margin-top:4px;gap:6px}.v2-queue-text{display:block;line-height:24px;max-height:24px}.v2-queue-menu{position:relative;flex:0 0 auto}.v2-queue-menu>summary{list-style:none;cursor:pointer;font-size:22px;line-height:24px;padding:0 7px}.v2-queue-menu>summary::-webkit-details-marker{display:none}.v2-queue-actions{position:absolute;right:0;bottom:100%;z-index:20;display:flex;flex-direction:column;width:110px;padding:5px;background:white;box-shadow:0 3px 16px #10283824;border:1px solid #dce6eb;border-radius:7px}.v2-message-queue .v2-queue-actions button{border:0;text-align:left;padding:6px}.v2-partial-files{margin-top:8px}.v2-partial-files>small{color:#748491}
++.ai-input-row #aiSendBtn.v2-stop-generation{min-width:36px;width:36px;height:36px;padding:0;border-radius:50%;background:#111;color:#fff;font-size:16px;line-height:36px;align-self:center}
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index c408913..6e1f1f9 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -1171,2 +1171,3 @@ window.OfflineClient = Object.freeze({
+       render,
++      renderPartial(rows,root){const files=make('div');files.className='v2-chat-files';for(const row of rows)files.append(fileCard(row));root.append(files);},
+       legacy: false,
+diff --git a/v2/model-adapter/answer-packet.cjs b/v2/model-adapter/answer-packet.cjs
+index 51e353d..d01cd1d 100644
+--- a/v2/model-adapter/answer-packet.cjs
++++ b/v2/model-adapter/answer-packet.cjs
+@@ -9,2 +9,3 @@ function answerPacket(input,evidence){
+  if(packed.lastToolResult?.evidence)delete packed.lastToolResult.evidence;
++ if(packed.lastToolResult?.parallel)for(const item of packed.lastToolResult.results||[])if(item.result?.evidence)delete item.result.evidence;
+  if(packed.preparedEvidence?.evidence)packed.preparedEvidence.evidence=packed.preparedEvidence.evidence.map(e=>{
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index 7b8a6cd..53d2041 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -17,3 +17,3 @@ const schema={oneOf:[
+ 
+- {type:'object',properties:{action:{const:'search'},query:{type:'string',minLength:1,maxLength:240},kind:{enum:['products','resources','cases','faq','tender','firmware','text','files']},delivery:{enum:['if_complete','review']},candidatePolicy:{enum:['labelled_best','show_choices']},problemDomain:{enum:['display','equipment','unspecified']},goals:{type:'array',maxItems:3,items:{type:'string',maxLength:120}},concepts:{type:'array',minItems:1,maxItems:6,items:{type:'string',minLength:1,maxLength:32}},models:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},chips:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},documents:{type:'array',maxItems:4,items:{type:'string',maxLength:240}},version:{type:'string',maxLength:64,pattern:'^[Vv]?[0-9]+(?:[.][0-9]+){2,3}$'}},required:['action','query','kind','delivery','problemDomain','goals','concepts'],additionalProperties:false},
++ {type:'object',properties:{action:{const:'search'},query:{type:'string',minLength:1,maxLength:240},kind:{enum:['products','resources','cases','faq','tender','firmware','text','files','supplement']},delivery:{enum:['if_complete','review']},candidatePolicy:{enum:['labelled_best','show_choices']},problemDomain:{enum:['display','equipment','unspecified']},goals:{type:'array',maxItems:3,items:{type:'string',maxLength:120}},concepts:{type:'array',minItems:1,maxItems:6,items:{type:'string',minLength:1,maxLength:32}},models:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},chips:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},documents:{type:'array',maxItems:4,items:{type:'string',maxLength:240}},version:{type:'string',maxLength:64,pattern:'^[Vv]?[0-9]+(?:[.][0-9]+){2,3}$'}},required:['action','query','kind','delivery','problemDomain','goals','concepts'],additionalProperties:false},
+ 
+@@ -78,5 +78,7 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+   const safety=require('../domain/safety/technical-safety.cjs');
++  const deliveredFiles=new Map();const partial=result=>{if(options.signal?.aborted)return;const rows=(result.results||[]).filter(r=>r.resourceOnly&&typeof r.download==='string');for(const r of rows)deliveredFiles.set(r.download,r);if(rows.length)options.onPartialResult?.({...result,results:rows});};
+   let output;
+   if(safety.requiresProfessional(options.message,options.sessionState?.messages||[]))output=safety.professionalResponse({actualMode:'expert',modelStatus:'not-used',modelCallCount:0,toolCallCount:0});
+-  else output=await runAnswer({...options,_timing:timing,onAnswerDelta:typeof options.onAnswerDelta==='function'?text=>{if(options.signal?.aborted)return;const checked=safety.guardTechnicalAnswer({reply:text});if(checked.safety)return;if(timing.firstVisibleTextMs===null)timing.firstVisibleTextMs=Math.round(performance.now()-begin);options.onAnswerDelta(text);}:undefined,_hasStream:typeof options.onAnswerDelta==='function',_onModelDelta:()=>{if(timing.firstModelDeltaMs===null)timing.firstModelDeltaMs=Math.round(performance.now()-begin);}});
++  else output=await runAnswer({...options,onPartialResult:partial,_timing:timing,onAnswerDelta:typeof options.onAnswerDelta==='function'?text=>{if(options.signal?.aborted)return;const checked=safety.guardTechnicalAnswer({reply:text});if(checked.safety)return;if(timing.firstVisibleTextMs===null)timing.firstVisibleTextMs=Math.round(performance.now()-begin);options.onAnswerDelta(text);}:undefined,_hasStream:typeof options.onAnswerDelta==='function',_onModelDelta:()=>{if(timing.firstModelDeltaMs===null)timing.firstModelDeltaMs=Math.round(performance.now()-begin);}});
++  if(deliveredFiles.size)output.results=[...new Map([...(output.results||[]),...deliveredFiles.values()].map(r=>[r.download||r.evidenceId||r.url,r])).values()];
+   output=safety.guardTechnicalAnswer(output);
+@@ -91,3 +93,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+ 
+- async function runAnswer({message,sessionState={},execute,route,signal,onProgress=()=>{},preparedEvidence,onAnswerDelta,_timing,_hasStream,_onModelDelta} ){
++ async function runAnswer({message,sessionState={},execute,route,signal,onProgress=()=>{},preparedEvidence,onAnswerDelta,onPartialResult,_timing,_hasStream,_onModelDelta} ){
+ 
+@@ -156,3 +158,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+ 
+-   const cache=new Map(),seenEvidence=new Set(),repeatedCalls=new Map();let toolExecutions=0,stalledToolRounds=0;
++   let partialFileDelivered=false,parallelIncomplete=[];const cache=new Map(),seenEvidence=new Set(),repeatedCalls=new Map();let toolExecutions=0,stalledToolRounds=0;
+ 
+@@ -166,3 +168,4 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+ 
+-     if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['products','resources','cases','faq','tender','firmware','text','files'].includes(args.kind))throw Error('expert-invalid-tool');
++     if(typeof args.query!=='string'||!args.query.trim()||args.query.length>240||!['products','resources','cases','faq','tender','firmware','text','files','supplement'].includes(args.kind))throw Error('expert-invalid-tool');
++     if(args.kind==='supplement'&&(fileDeliveryRequired||!trace.some(t=>t.name==='search_evidence'&&t.arguments?.kind!=='supplement'&&!t.error)))throw Error('expert-invalid-tool');
+ 
+@@ -189,3 +192,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+ 
+-    for(const e of items)evidence.set(e.evidenceId,e);refreshSourceContract();if(items.length)onProgress('evidence-found');
++    for(const e of items){const prior=evidence.get(e.evidenceId);if(!prior?.readPerformed||e.readPerformed)evidence.set(e.evidenceId,e);}refreshSourceContract();if(items.length)onProgress('evidence-found');
+ 
+@@ -246,2 +249,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+     if(searchChoice){
++     if(fileDeliveryRequired||!trace.some(t=>t.name==='search_evidence'&&t.arguments?.kind!=='supplement'&&!t.error))searchChoice.properties.kind.enum=searchChoice.properties.kind.enum.filter(kind=>kind!=='supplement');
+      if(documentNames.length){searchChoice.properties.documents.minItems=1;searchChoice.properties.documents.items={type:'string',enum:documentNames};}else delete searchChoice.properties.documents;
+@@ -251,7 +255,8 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+     }
++    if(canUseTools&&maxToolCalls-toolExecutions>=2){const tasks=structuredClone(choices.filter(c=>['search','quick','read'].includes(c.properties.action.const)));choices.push({type:'object',properties:{action:{const:'parallel'},tasks:{type:'array',minItems:2,maxItems:Math.min(3,maxToolCalls-toolExecutions),items:{oneOf:tasks}}},required:['action','tasks'],additionalProperties:false});}
+     if(deliverable.length)choices.push(deliverySchema);
+     // A request for files needs a current tool result, not a textual replay of history.
+-    if(fileDeliveryRequired&&(canUseTools||deliverable.length))for(let n=choices.length-1;n>=0;n--){const action=choices[n].properties.action.const;if(['answer','analyze'].includes(action)||(action==='clarify'&&canUseTools&&toolExecutions===0&&!evidence.size))choices.splice(n,1);}
++    if(fileDeliveryRequired&&!partialFileDelivered&&(canUseTools||deliverable.length))for(let n=choices.length-1;n>=0;n--){const action=choices[n].properties.action.const;if(['answer','analyze'].includes(action)||(action==='clarify'&&canUseTools&&toolExecutions===0&&!evidence.size))choices.splice(n,1);}
+     const providerChoices=structuredClone(choices);
+-    if(identity.engine==='ninfer')for(const item of providerChoices){const version=item.properties?.version;if(version?.pattern){delete version.maxLength;delete version.minLength;}}
++    if(identity.engine==='ninfer'){const compatible=value=>{if(!value||typeof value!=='object')return;if(value.oneOf){value.anyOf=value.oneOf;delete value.oneOf;}const version=value.properties?.version;if(version?.pattern){delete version.maxLength;delete version.minLength;}for(const child of Object.values(value))if(child&&typeof child==='object')Array.isArray(child)?child.forEach(compatible):compatible(child);};providerChoices.forEach(compatible);}
+ 
+@@ -342,2 +347,11 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+     reasoningRecovery=false;delete input.generationFeedback;
++    if(output.action==='parallel'){
++     if(!canUseTools)throw Error('expert-tool-limit');const batch=require('./parallel-tools.cjs'),tasks=batch.prepare(output.tasks,maxToolCalls-toolExecutions,[...evidence.values()]);
++     const results=await batch.execute(tasks,task=>runTool({search:'search_evidence',quick:'quick_answer',read:'read_document'}[task.action],task,'model-requested-parallel-evidence'),{signal,onResult:(task,tool)=>{const complete=require('./quick-delegation.cjs').delegatedQuickResult(task,tool.directAnswer,{models:task.models||[]});if(complete.allowed&&tool.directAnswer?.results?.every(r=>r.resourceOnly)){partialFileDelivered=true;onPartialResult?.(tool.directAnswer);}}});
++     parallelIncomplete=results.filter((item,i)=>!item.result||!require('./quick-delegation.cjs').delegatedQuickResult(tasks[i],item.result.directAnswer,{models:tasks[i].models||[]}).allowed).map(item=>({query:item.action.query||'原文核对',status:item.error?'failed':item.result?.notice?.status||'incomplete'}));
++     const successful=results.filter(r=>r.result);stalledToolRounds=successful.some(r=>!r.result.noNewEvidence)?0:stalledToolRounds+1;
++     if(successful.length===tasks.length&&results.every((item,i)=>require('./quick-delegation.cjs').delegatedQuickResult(tasks[i],item.result.directAnswer,{models:tasks[i].models||[]}).allowed||(item.result.directAnswer?.status==='not-found'&&['file-registry-columns','drive-file-metadata'].includes(item.result.directAnswer.answerBasis)&&!item.result.directAnswer.error)))return {status:'answer',actualMode:'expert',intent:'mixed',pendingRequests:parallelIncomplete,reply:results.map((item,i)=>tasks[i].query+'：\n'+item.result.directAnswer.reply).filter(Boolean).join('\n\n'),results:[...new Map(results.flatMap(item=>item.result.directAnswer.results||[]).map(e=>[e.download||e.evidenceId||e.url||JSON.stringify(e),e])).values()],answerBasis:'parallel-complete-tool-results',model:identity.model,modelStatus:'available',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
++     for(const item of results)if(item.result)delete item.result.directAnswer;
++     input.lastToolResult={parallel:true,results};input.preparedEvidence={evidence:[...evidence.values()],notice:'并行任务分别返回；逐项保留对象、适用条件与失败，不把部分完成说成全部完成。已交付文件无需重找。'};input.toolBudgetRemaining=maxToolCalls-toolExecutions;phase='answer';continue;
++    }
+     if(['search','read','calculate','quick'].includes(output.action)){
+@@ -363,3 +377,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+      const candidateResult=candidateModels.length?require('../domain/knowledge/numeric-file-delivery.cjs').numericFileDelivery({candidates:candidateModels,rows:selected,policy:candidateModels.length===1?'labelled_best':'show_choices',query:message,input:selected[0].candidateIdentity?.input}):null;
+-     return {...(candidateResult||{}),status:'answer',actualMode:'expert',intent:'resources',model:identity.model,modelStatus:'available',reply:candidateResult?.reply||'找到以下文件，请核对型号和适用条件：\n'+selected.map(e=>e.name).join('\n'),results:selected,delegatedTo:'file-delivery',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
++     return {...(candidateResult||{}),status:'answer',actualMode:'expert',intent:'resources',model:identity.model,modelStatus:'available',reply:(parallelIncomplete.length?'仍未完成：'+parallelIncomplete.map(t=>t.query).join('；')+'。以下为已找到的资料：\n':'')+(candidateResult?.reply||'找到以下文件，请核对型号和适用条件：\n'+selected.map(e=>e.name).join('\n')),pendingRequests:parallelIncomplete,results:selected,delegatedTo:'file-delivery',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
+     }
+diff --git a/v2/model-adapter/expert-working-contract.cjs b/v2/model-adapter/expert-working-contract.cjs
+index 5aa4527..8b538ab 100644
+--- a/v2/model-adapter/expert-working-contract.cjs
++++ b/v2/model-adapter/expert-working-contract.cjs
+@@ -12,3 +12,6 @@ const expertWorkingContract=`你首先是灰度公司产品专家小灰机，围
+ 
++明确单一需求只用一个合适工具；需要多项互不依赖的查资料目标时直接用parallel，不先把独立对象混成一条查询再重试，一批2至3个search/quick/read，不为并行拆同一查询。任务保留各自型号、版本和交付限制；需要前一步确认型号、版本或取得read句柄时顺序执行，calculate保持单独调用。已查到完整文件可先交付，未完成部分继续处理；不把部分完成说成整题完成。
++
+ 可用动作：
++parallel：tasks为独立的search/quick/read动作数组，一批最多3项；同样计入工具总预算，不并行计算或修改状态。
+ answer：依据足够就答；参数、菜单、固件兼容及公司案例结果须有对应资料，不编造。
+diff --git a/v2/tests/chat-composer.browser.cjs b/v2/tests/chat-composer.browser.cjs
+index 0aa8ae7..5268e59 100644
+--- a/v2/tests/chat-composer.browser.cjs
++++ b/v2/tests/chat-composer.browser.cjs
+@@ -21,4 +21,4 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:8520',out=process.env.TE
+   await input.fill('候补丙');await input.press('Control+Enter');
+-  await input.fill('待移除');await input.press('Control+Enter');await queue.getByRole('button',{name:'移除此条候补消息'}).last().click();
+-  assert.equal(calls.length,1);assert.equal(await queue.locator('div').count(),2);
++  await input.fill('待移除');await input.press('Control+Enter');await queue.locator('.v2-queue-menu>summary').last().click();await queue.getByRole('button',{name:'移除',exact:true}).last().click();
++  assert.equal(calls.length,1);assert.equal(await queue.locator('.v2-queue-row').count(),2);
+   assert(!(await page.locator('#aiMessages').innerText()).includes('候补乙'));
+@@ -38,3 +38,3 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:8520',out=process.env.TE
+   await calls[5].route.fulfill({status:503,json:{error:'synthetic-unavailable',reply:'合成服务不可用'}});await page.waitForSelector('#aiLoading',{state:'detached'});
+-  assert.equal(calls.length,6);assert((await queue.innerText()).includes('已暂停'));
++  assert.equal(calls.length,6);assert((await queue.innerText()).includes('已停止自动发送'));
+   await queue.getByRole('button',{name:'继续发送候补'}).click();await until(7);assert.equal(calls[6].body.message,'失败后候补');assert.equal(await input.inputValue(),'失败测试');
+@@ -51,4 +51,6 @@ const base=process.env.TEST_BASE_URL||'http://127.0.0.1:8520',out=process.env.TE
+   await input.fill('OCR候补');await input.press('Control+Enter');await finish(9,'图片检索完成');await until(11);assert.equal(calls[10].body.message,'OCR候补');await finish(10,'OCR候补完成');await page.waitForSelector('#aiLoading',{state:'detached'});
++  await send('停止按钮测试');await until(12);assert.equal(await page.locator('#aiSendBtn').getAttribute('aria-label'),'停止生成');await input.fill('有文字');assert.equal(await page.locator('#aiSendBtn').textContent(),'发送');await input.fill('');await page.locator('#aiSendBtn').click();await page.waitForSelector('#aiLoading',{state:'detached'});assert((await page.locator('#aiMessages').innerText()).includes('已停止本次处理'));assert.equal(await page.locator('#aiSendBtn').textContent(),'发送');
++  await send('先展示文件测试');await until(13);await page.evaluate(()=>window.dispatchEvent(new CustomEvent('v2-answer-partial',{detail:{sessionId:window.__v2SessionId,results:[{resourceOnly:true,name:'合成说明书.pdf',download:'/synthetic.pdf',kind:'manual'}]}})));assert.equal(await page.locator('#aiLoading .v2-partial-files').count(),1);assert(await page.locator('#aiLoading .v2-partial-files').isVisible());await finish(12,'余下内容完成');await page.waitForSelector('#aiLoading',{state:'detached'});
+   assert.deepEqual(errors,[]);
+-  console.log(JSON.stringify({passed:true,controlledApi:true,queueOrder:true,queueRemoval:true,draftPreserved:true,sameSessionInterrupt:true,errorPausesQueue:true,ime:true,mobile:true}));
++  console.log(JSON.stringify({passed:true,controlledApi:true,queueOrder:true,queueRemoval:true,draftPreserved:true,sameSessionInterrupt:true,errorPausesQueue:true,ime:true,mobile:true,stopButton:true,partialFiles:true}));
+  }finally{await browser.close();}
