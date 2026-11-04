@@ -1,0 +1,7 @@
+# Public download traffic protection
+
+- User-approved limit: 50 GB per calendar month (50,000,000,000 bytes, UTC+8). A separate monitor compares hourly OSS billing samples with recent minute traffic by hour, avoiding double counting. Bucket-wide public outbound traffic is counted; a stop affects only the application's approved public file prefix.
+- On reaching the reported threshold, merge a scoped GetObject deny statement into the existing bucket policy, verify it, persist the stopped state, and submit an event to the existing alert contact group. Local original-file access and unrelated bucket prefixes stay unchanged. Recovery is manual.
+- Five targeted tests passed. A temporary real object returned 200 before the scoped deny and 403 afterwards; the temporary policy and object were removed. Existing public PDF and public/local pages remain accessible. A labelled notification test produced a cloud SMS send record; handset receipt is not asserted. The final enabled notification rule was recreated to remove test suppression state.
+- The monitor is running as a hidden user process with user-login startup. Windows denied scheduled-task creation; system privileges were not changed. The development computer must remain online and logged in. Reporting and polling delays permit overrun; this is not a strict byte-level or monetary spending cap.
+- Credentials, account contacts, policy snapshots, raw API receipts and operational configuration stay local. No paid service was purchased and no backend restart was required.
