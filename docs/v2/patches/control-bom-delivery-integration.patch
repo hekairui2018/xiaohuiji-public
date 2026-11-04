@@ -1,0 +1,297 @@
+diff --git a/v2/adapters/http/expert-ordering.cjs b/v2/adapters/http/expert-ordering.cjs
+index ee17016..417c1ec 100644
+--- a/v2/adapters/http/expert-ordering.cjs
++++ b/v2/adapters/http/expert-ordering.cjs
+@@ -27,4 +27,4 @@ function createExpertOrdering({app,userMessages,layout,layoutReviewRequired=fals
+   if(!layout&&result.status==='needs_input'&&count===1&&!unsupportedInterface&&screenMentions.length<=1){
+-   let previous,progressive;
+-   for(const quote of args.userQuotes){progressive=await require('./ordering-session.cjs').progressiveOrdering(app,quote,previous);previous=progressive.orderingState;}
++   const progressive=await require('./ordering-session.cjs').progressiveOrdering(app,text,null,{delta:demand});
++   const previous=progressive.orderingState;
+    orderingState=previous;
+diff --git a/v2/adapters/http/offline-knowledge.cjs b/v2/adapters/http/offline-knowledge.cjs
+index 02b8e22..6b5ed0d 100644
+--- a/v2/adapters/http/offline-knowledge.cjs
++++ b/v2/adapters/http/offline-knowledge.cjs
+@@ -249,2 +249,3 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+   const orderingChat=p==='/v2/ordering/chat',chat=p==='/api/ai/chat'||orderingChat;
++  const selectedBom=['/v2/ordering/bom','/v2/ordering/ssm','/v2/ordering/package'].includes(p)&&u.searchParams.has('sessionId');
+   const legacy=req.method==='GET'&&documentLinks.has(p);
+@@ -252,3 +253,3 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+   const image=p==='/api/ocr',logRoute=p==='/api/huidu/log';
+-  if(!p.startsWith('/v2/offline/')&&!chat&&!legacy&&!original&&!image&&!logRoute)return false;
++  if(!p.startsWith('/v2/offline/')&&!chat&&!legacy&&!original&&!image&&!logRoute&&!selectedBom)return false;
+   const send=(code,value)=>{if(chat&&code===200)value=require('../../domain/safety/technical-safety.cjs').guardTechnicalAnswer(value);const text=JSON.stringify(value,(_k,v)=>typeof v==='string'?clean(v):v);if(req.v2ChatStream?.finish(code,JSON.parse(text)))return true;res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(text);return true;};
+@@ -256,2 +257,23 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+   try{
++   if(selectedBom){
++    if(req.method!=='POST')return send(405,{error:'method-not-allowed'});
++    if(req.v2Public)return send(403,{error:'private-calculation-required'});
++    let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536)return send(413,{error:'body-too-large'});chunks.push(chunk);}let body={};try{if(size)body=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'invalid-json'});}
++    const state=sessions.get(u.searchParams.get('sessionId')),context=state.retrievalHistory?.findLast(r=>r.quickContext?.ordering)?.quickContext;
++    if(state.closedAt)return send(409,{error:'ordering-session-closed'});
++    const token=u.searchParams.get('token');if(!token)return send(400,{error:'selection-token-required'});
++    const selected=require('./ordering-choice.cjs').selectOrderingChoice(context?.ordering,Number(u.searchParams.get('optionId')),token);
++    if(!selected)return send(409,{error:'ordering-choice-expired'});
++    if(context.ordering.datasetVersion&&app.health().datasetVersion!==context.ordering.datasetVersion)return send(409,{error:'ordering-dataset-changed'});
++    if(p!=='/v2/ordering/bom'){
++     try{const pkg=p.endsWith('/package'),exported=require('./ordering-export.cjs').exportSelection(selected,pkg?'package':'ssm',body.deployment||{});
++      res.writeHead(200,{'Content-Type':pkg?'application/zip':'application/xml; charset=utf-8','Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent('方案'+selected.result.selectedOptionId+'-xiaohuiji'+(pkg?'-配置包.zip':'.ssm'))});res.end(pkg?exported.buffer:exported.xml);return true;
++     }catch(error){return send(422,{status:'unsupported',reason:error.message});}
++    }
++    const bom=require('./control-bom.cjs').controlBom(selected.result),format=u.searchParams.get('format')||'json';
++    if(format==='json')return send(200,{status:'ready',bom,modelCallCount:0});
++    if(!['xlsx','csv'].includes(format))return send(400,{error:'unsupported-bom-format'});
++    const buffer=format==='xlsx'?Buffer.from(await (await require('../../domain/ordering/output/control-workbook.cjs').build(bom)).arrayBuffer()):require('../../domain/ordering/output/control-bom-data.cjs').csv(bom);
++    res.writeHead(200,{'Content-Type':format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'text/csv; charset=utf-8','Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(bom.fileStem+'.'+format)});res.end(buffer);return true;
++   }
+    if(logRoute&&req.method==='POST'){if(!logs)return send(503,{error:'log-store-not-configured'});if(!logs.authorized(req.headers['x-upload-key']))return send(403,{error:'upload-key-required'});}
+@@ -363,2 +385,10 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+     if(requestedMode==='expert'){
++     const option=/^配单方案[:：]\s*(\d+)$/.exec(input.message.trim());
++     if(option){
++      const previous=state.retrievalHistory?.findLast(r=>r.quickContext?.ordering)?.quickContext;
++      const selected=require('./ordering-choice.cjs').selectOrderingChoice(previous?.ordering,Number(option[1]),input.orderingSelectionToken);
++      if(!selected){progressCompleted=true;onProgress('completed');return send(200,{status:'clarify',actualMode:'expert',reply:'这份方案已失效，请重新计算后选择。',results:[],modelCallCount:0});}
++      state=sessions.recordResult(state.id,{kind,query:input.message,intent:'ordering',quickContext:{...previous,ordering:selected.orderingState}});
++      const {orderingState,...output}=selected;output.result.deliverySessionId=state.id;output.result.controlBom=require('./control-bom.cjs').controlBom(output.result);state=sessions.recordAnswer(state.id,output);progressCompleted=true;onProgress('completed');return send(200,{...output,requestedMode,sessionState:state});
++     }
+      state=sessions.expertState(state.id);
+@@ -382,3 +412,3 @@ function createOfflineKnowledge({knowledge,resourceBase='http://127.0.0.1:4510',
+     let output;try{output=await expert.answer({message:input.message,sessionState:state,execute,route,signal:controller.signal,onProgress:expertProgress,preparedEvidence,...(req.v2ChatStream?{onAnswerDelta:text=>req.v2ChatStream.text(clean(text))}:{})});}finally{res.off('close',disconnected);if(modelRequests.get(state.id)===controller){modelRequests.delete(state.id);}}
+-    if(calculatedResult&&output.status==='answer'){output.intent='ordering';output.result=calculatedResult;}
++    if(calculatedResult&&output.status==='answer'){output.intent='ordering';output.result=calculatedResult;output.result.deliverySessionId=state.id;output.result.controlBom=require('./control-bom.cjs').controlBom(calculatedResult);}
+     const sourceCases=(output.results?.some(e=>e.sourceKind==='expert-aftersales-sql-original')?output.results:output.evidence||[]).filter(e=>e.sourceKind==='expert-aftersales-sql-original');
+diff --git a/v2/adapters/http/server.cjs b/v2/adapters/http/server.cjs
+index 36cc0fc..de63aa8 100644
+--- a/v2/adapters/http/server.cjs
++++ b/v2/adapters/http/server.cjs
+@@ -206,3 +206,3 @@ function createServer(app=createApp(),{localKnowledge=null,offlineKnowledge=null
+    if(route==='/v2/ordering/commissioning'){const output=await app.exportCommissioning(input);send(output.status==='ready'?200:output.status==='invalid_request'?400:422,output);return;}
+-   if(route==='/v2/ordering/bom'){const output=await app.exportBom(input);if(output.status!=='ready'){send(output.status==='invalid_request'?400:422,output);return;}res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="xiaohuiji-bom.csv"'});res.end(output.csv);return;}
++   if(route==='/v2/ordering/bom'){const output=await app.exportBom(input);if(output.status!=='ready'){send(output.status==='invalid_request'?400:422,output);return;}if(input.format==='json'){send(200,{status:'ready',bom:output.bom});return;}const xlsx=input.format==='xlsx',extension=xlsx?'xlsx':'csv';res.writeHead(200,{'Content-Type':xlsx?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'text/csv; charset=utf-8','Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(output.bom.fileStem+'.'+extension)});res.end(xlsx?Buffer.from(await output.xlsx.arrayBuffer()):output.csv);return;}
+    if(route==='/v2/ordering/package'){const output=await app.exportConfigurationPackage(input);if(output.status!=='ready'){send(output.status==='invalid_request'?400:422,output);return;}
+diff --git a/v2/adapters/http/shared-quick-evidence.cjs b/v2/adapters/http/shared-quick-evidence.cjs
+index f6d088c..6f4bb19 100644
+--- a/v2/adapters/http/shared-quick-evidence.cjs
++++ b/v2/adapters/http/shared-quick-evidence.cjs
+@@ -8,2 +8,3 @@ function sharedQuickEvidence(result){
+   modelIds:r.models||r.modelIds||[],locator:r.locator,download:r.download||r.downloadUrl||null,
++  assets:r.assets,images:r.images,conditions:r.conditions,previewUrl:r.previewUrl,documentVersion:r.documentVersion,
+   ...(r.resourceOnly?{resourceOnly:true,kind:r.kind,sha256:r.sha256,previewUrl:r.previewUrl,brand:r.brand,documentEdition:r.documentEdition,documentLanguage:r.documentLanguage,documentVersion:r.documentVersion,documentDate:r.documentDate,versionNote:r.versionNote,versionBasis:r.versionBasis,metadataBasis:r.metadataBasis,resourceScope:r.resourceScope,sizeBytes:r.sizeBytes}:{}),
+diff --git a/v2/app/bootstrap.cjs b/v2/app/bootstrap.cjs
+index 4994778..ec97fbc 100644
+--- a/v2/app/bootstrap.cjs
++++ b/v2/app/bootstrap.cjs
+@@ -27,3 +27,3 @@ function createApp({dataset=loadDataset(),knowledge=loadKnowledge(),handlers={}}
+   if(!(result.status==='ready'&&result.validation?.passed)&&result.nativeOrdering?.configurationGroups?.status!=='mapped'&&!(result.nativeOrdering?.success&&[1,2].includes(result.nativeOrdering.module?.lampBeadsType)&&!(result.nativeOrdering.receiver?.cardNum>0)))return {status:'unsupported',reason:'requires-a-verified-ordering-calculation'};
+-  try{const api=require('../domain/ordering/output/package-bom.cjs'),bindings=input?.deployment?require('../domain/ordering/output/commissioning.cjs').commissioning(result,input.deployment).bindings:undefined,bom=api.packageBom(result,bindings);return {status:'ready',bom,csv:api.bomCsv(bom)};}catch(error){return {status:'unsupported',reason:error.message};}
++  try{const api=require('../domain/ordering/output/package-bom.cjs'),bindings=input?.deployment?require('../domain/ordering/output/commissioning.cjs').commissioning(result,input.deployment).bindings:undefined,bom=api.packageBom(result,bindings);const controlBom=require('../domain/ordering/output/control-bom-data.cjs').build({...result,selectedOptionId:input.optionId||1,bom:bom.items.map(r=>({...r,modelId:r.model}))});return {status:'ready',bom:controlBom,csv:require('../domain/ordering/output/control-bom-data.cjs').csv(controlBom),xlsx:input.format==='xlsx'?await require('../domain/ordering/output/control-workbook.cjs').build(controlBom):undefined};}catch(error){return {status:'unsupported',reason:error.message};}
+  },async exportCommissioning(input){
+diff --git a/v2/frontend/chat-controller.js b/v2/frontend/chat-controller.js
+index b02df81..adc632d 100644
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -29,6 +29,6 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+   const buttons=root.querySelectorAll('.v2-ordering-choices button');buttons.forEach(b=>b.disabled=true);
+-  const status=document.createElement('p');status.setAttribute('role','status');status.textContent='正在切换方案…';root.append(status);
++  const status=document.createElement('p');status.setAttribute('role','status');status.textContent='正在切换方案…';root.querySelector('.v2-ordering-choices').after(status);
+   let completed=false;
+   try{
+-   const response=await request(payload('配单方案：'+optionId,sessionId));
++   const response=await request({...payload('配单方案：'+optionId,sessionId),orderingSelectionToken:event.detail?.selectionToken});
+    if(ui.getSessionId()!==sessionId||!root.isConnected)return;
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 677bbfa..5499408 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -18,2 +18,3 @@
+   <link rel="stylesheet" href="image-layout.css?v=20261104-01">
++  <link rel="stylesheet" href="evidence-media.css?v=20261105-ordering-delivery-05">
+ </head>
+@@ -92,4 +93,6 @@
+ 
+-  <script src="ordering-workbook.js?v=20261104-explicit-layout-01"></script>
+-  <script src="v2-components.js?v=20261104-explicit-layout-01"></script>
++  <script src="ordering-bom-data.js?v=20261105-ordering-delivery-05"></script>
++  <script src="evidence-media.js?v=20261105-ordering-delivery-05"></script>
++  <script src="ordering-workbook.js?v=20261105-ordering-delivery-05"></script>
++  <script src="v2-components.js?v=20261105-ordering-delivery-05"></script>
+   <script src="product-resources.js?v=20261027-curated-word-preview"></script>
+@@ -98,4 +101,4 @@
+   <script src="image-layout-view.js?v=20261104-explicit-layout-01"></script>
+-  <script src="chat-controller.js?v=20261104-image-layout-01"></script>
+-  <script src="offline-client.js?v=20261104-explicit-layout-01"></script>
++  <script src="chat-controller.js?v=20261105-ordering-delivery-05"></script>
++  <script src="offline-client.js?v=20261105-ordering-delivery-05"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index 9bfad14..c408913 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -670,3 +670,3 @@ window.OfflineClient = Object.freeze({
+       activeMessage = body.message;
+-      if (responseMode === 'expert') await refreshModel();
++      if (responseMode === 'expert'&&!body.orderingSelectionToken) await refreshModel();
+       requestController.signal.throwIfAborted();
+@@ -688,3 +688,3 @@ window.OfflineClient = Object.freeze({
+       let modelSuggestion=null;
+-      if (!ordering)
++      if (!ordering&&!body.orderingSelectionToken)
+         fetchOriginal('/v2/offline/suggestions?q=' + encodeURIComponent(body.message.slice(0, 240)),{signal:requestController.signal})
+@@ -832,2 +832,3 @@ window.OfflineClient = Object.freeze({
+       const messages = document.getElementById('aiMessages');
++      window.EvidenceMedia?.render(bubble,data);
+       ui.appendChatMessage(row);
+diff --git a/v2/frontend/ordering-workbook.js b/v2/frontend/ordering-workbook.js
+index 0bcf0eb..e7e0f77 100644
+--- a/v2/frontend/ordering-workbook.js
++++ b/v2/frontend/ordering-workbook.js
+@@ -1,5 +1,3 @@
++(function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./ordering-bom-data.js'):root.OrderingBomData);if(typeof module==='object'&&module.exports)module.exports=api;else root.OrderingWorkbook=api;})(typeof window==='object'?window:globalThis,(data)=>{
+ 'use strict';
+-// Browser-only OOXML export. Text uses inline strings; numbers stay numeric.
+-// The ZIP uses stored entries so export needs no remote library or service.
+-window.OrderingWorkbook=(()=>{
+  const enc=new TextEncoder(),xml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+@@ -8,31 +6,11 @@ window.OrderingWorkbook=(()=>{
+  function zip(files){const parts=[],central=[];let offset=0,length=0;for(const[name,value]of files){const bytes=typeof value==='string'?enc.encode(value):value,key=enc.encode(name),sum=crc(bytes),local=header(30,[[0,0x04034b50],[4,20,2],[6,0x800,2],[14,sum],[18,bytes.length],[22,bytes.length],[26,key.length,2]]);parts.push(local,key,bytes);const dir=header(46,[[0,0x02014b50],[4,20,2],[6,20,2],[8,0x800,2],[16,sum],[20,bytes.length],[24,bytes.length],[28,key.length,2],[42,offset]]);central.push(dir,key);length+=46+key.length;offset+=30+key.length+bytes.length;}return new Blob([...parts,...central,header(22,[[0,0x06054b50],[8,files.length,2],[10,files.length,2],[12,length],[16,offset]])],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});}
+- async function picture(svg){const img=new Image();img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);await img.decode();const canvas=document.createElement('canvas'),width=1600,height=Math.max(1,Math.round(width*(img.naturalHeight||900)/(img.naturalWidth||1600)));canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,width,height);ctx.drawImage(img,0,0,width,height);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw Error('连接图无法导出');return {bytes:new Uint8Array(await blob.arrayBuffer()),width,height};}
+- async function build(result){
+-  const p=result.plan;if(!p)throw Error('当前方案没有可导出的物料表');
+-  const draft=result.exportAllowed===false,mode=result.provisionalExportDemand||result.normalizedDemand||{},m=p.module,rows=[],merges=[];
+-  const portRows=result.topology?.portSummary||(p.ports||[]).map(port=>({id:port.id,firstReceiverNumber:port.cells[0].id,lastReceiverNumber:port.cells.at(-1).id,receivingUnits:port.cells.length,externalReceivers:port.cells.length,integratedUnits:0,points:port.points})),portCount=portRows.length;
+-  const add=(values,style=0)=>{const r=rows.length+1;rows.push('<row r="'+r+'" ht="26" customHeight="1">'+values.map((v,i)=>'<c r="'+String.fromCharCode(65+i)+r+'" s="'+style+'"'+(typeof v==='number'?'><v>'+v+'</v>':' t="inlineStr"><is><t xml:space="preserve">'+xml(v)+'</t></is>')+'</c>').join('')+'</row>');return r;};
+-  const wide=(text,style=0)=>{const n=add([text,'','','','',''],style);merges.push('A'+n+':F'+n);};
+-  wide('小灰机 · LED屏配单BOM',1);wide('方案状态：'+(p.layout?'布局草稿（HDSet实际导入未验证）':draft?'暂定方案':'已计算方案')+'    生成日期：'+new Date().toLocaleDateString('zh-CN',{timeZone:'Asia/Singapore'}));
+-  add(['整屏分辨率',p.screen.pixelWidth+'×'+p.screen.pixelHeight+' 像素','使用网口',portCount,'点间距','P'+m.dotPitch.spacing],2);
+-  if(p.specialCanvas?.logicalMap){const map=p.specialCanvas.logicalMap;add(['折叠画布',map.width+'×'+map.height+' 像素','空白画布',map.unusedPixels,'SSM坐标','折叠后'],2);}
+-  if(p.cabinet){const b=p.cabinet;add(['箱体排列',b.columns+'×'+b.rows,'箱体数量',b.columns*b.rows,'每箱模组',b.moduleColumns+'×'+b.moduleRows],2);}
+-  if(p.layout)add(['已确认箱体',p.layout.cabinets.length,'接收卡约束','一箱一卡','空区','不计入采购'],2);
+-  add([p.layout?'模组外框（含空区）':'模组排列',p.screen.columns+'×'+p.screen.rows,'模组像素',m.resolution.join('×'),'模组尺寸',m.size.join('×')+' mm']);
+-  add(['环境',mode.environment==='outdoor'?'户外':mode.environment==='indoor'?'室内':'未确认','模式',mode.controlMode==='async'?'异步':mode.controlMode==='sync'?'同步':'未确认','接口',m.interface]);
+-  wide('采用条件：'+(result.defaults?.length?'默认 '+result.defaults.map(d=>d.label).join('、')+'。':'')+(result.assumptions?.length?'候选条件需按现场核对。':'按当前计算条件生成。')+' 不含未经核算的电源、线材及备件数量。');
+-  add(['序号','物料名称','型号／规格','数量','单位','备注'],1);
+-  for(const[itemIndex,item]of (result.bom||result.previewBom||[]).filter(item=>item.quantity>0).entries())add([itemIndex+1,item.kind==='module'?'LED模组':item.kind==='receiver'?'接收卡':'主控',item.kind==='module'?'P'+m.dotPitch.spacing+' / '+m.resolution.join('×')+'点':item.modelId,item.quantity,item.kind==='module'?'块':item.kind==='receiver'?'张':'台',item.kind==='module'?(p.layout?'按箱体实际模组数量，空区不计入':'横'+p.screen.columns+'×竖'+p.screen.rows):item.kind==='controller'?'使用'+portCount+'个网口':'按下方连接图分配'],2);
+-  wide('网口分配',1);add(['网口','首卡（全局）','尾卡（全局）','连屏单元数','像素数','说明'],1);
+-  for(const port of portRows)add([port.id,'R'+port.firstReceiverNumber,'R'+port.lastReceiverNumber,port.receivingUnits,port.points,port.integratedUnits?'内置'+port.integratedUnits+'＋外置'+port.externalReceivers+'；内置不另购':'按该口走线顺序']);
+-  if(p.architecture==='direct'){wide('直控HUB逻辑接口（不计接收卡）',1);add(['HUB接口','模组列','模组行','宽像素','高像素','说明'],1);for(const o of p.directOutputs)add([o.hubId,o.col+1,o.row+1,o.pixelWidth,o.pixelHeight,'逻辑分配；现场排线需核对']);}
+-  wide('连接图（与当前选中方案一致）',1);const anchor=rows.length;
+-  const image=await picture(result.hdsetSvg||result.topologySvg);const displayWidth=820,displayHeight=Math.round(displayWidth*image.height/image.width),bottom=anchor+Math.ceil(displayHeight/26)+2;
+-  for(let i=anchor;i<bottom;i++)add(['','','','','','']);
+-  const ns='http://schemas.openxmlformats.org',rel='http://schemas.openxmlformats.org/package/2006/relationships',docrel=ns+'/officeDocument/2006/relationships';
+-  const relationship=(items)=>'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="'+rel+'">'+items.map(([id,type,target])=>'<Relationship Id="'+id+'" Type="'+docrel+'/'+type+'" Target="'+target+'"/>').join('')+'</Relationships>';
+-  const files=[['[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'+[['/xl/workbook.xml','spreadsheetml.sheet.main'],['/xl/worksheets/sheet1.xml','spreadsheetml.worksheet'],['/xl/styles.xml','spreadsheetml.styles'],['/xl/drawings/drawing1.xml','drawing']].map(([name,type])=>'<Override PartName="'+name+'" ContentType="application/vnd.openxmlformats-officedocument.'+type+'+xml"/>').join('')+'</Types>'],['_rels/.rels',relationship([['rId1','officeDocument','xl/workbook.xml']])],['xl/workbook.xml','<workbook xmlns="'+ns+'/spreadsheetml/2006/main" xmlns:r="'+docrel+'"><sheets><sheet name="配单BOM" sheetId="1" r:id="rId1"/></sheets></workbook>'],['xl/_rels/workbook.xml.rels',relationship([['rId1','worksheet','worksheets/sheet1.xml'],['rId2','styles','styles.xml']])],['xl/styles.xml','<styleSheet xmlns="'+ns+'/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Microsoft YaHei"/></font><font><b/><sz val="12"/><color rgb="FFFFFFFF"/><name val="Microsoft YaHei"/></font><font><b/><sz val="11"/><color rgb="FF1677C8"/><name val="Microsoft YaHei"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF176BB0"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/><diagonal/></border></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="3">'+[0,1,2].map(i=>'<xf numFmtId="0" fontId="'+i+'" fillId="'+(i===1?2:0)+'" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>').join('')+'</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],['xl/worksheets/sheet1.xml','<worksheet xmlns="'+ns+'/spreadsheetml/2006/main" xmlns:r="'+docrel+'"><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><cols>'+[10,23,35,13,14,32].map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('')+'</cols><sheetData>'+rows.join('')+'</sheetData><mergeCells count="'+merges.length+'">'+merges.map(r=>'<mergeCell ref="'+r+'"/>').join('')+'</mergeCells><pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/><drawing r:id="rId1"/></worksheet>'],['xl/worksheets/_rels/sheet1.xml.rels',relationship([['rId1','drawing','../drawings/drawing1.xml']])],['xl/drawings/_rels/drawing1.xml.rels',relationship([['rId1','image','../media/connection.png']])],['xl/media/connection.png',image.bytes],['xl/drawings/drawing1.xml','<xdr:wsDr xmlns:xdr="'+ns+'/drawingml/2006/spreadsheetDrawing" xmlns:a="'+ns+'/drawingml/2006/main"><xdr:oneCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>'+anchor+'</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="'+displayWidth*9525+'" cy="'+displayHeight*9525+'"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="配单连接图"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip xmlns:r="'+docrel+'" r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>']];
+-  return zip(files);
+- }
+- return {build,async download(result){const blob=await build(result),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='xiaohuiji-bom.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}};
+-})();
++
++ async function build(input){const bom=input.schemaVersion==='xhj-control-bom/1'?input:input.controlBom||data.build(input);const rows=[[bom.title],['状态',bom.provisional?'暂定方案':'已计算方案'],bom.columns,...bom.items.map(data.values),...bom.warnings.map(w=>['','','','','','','备注：'+w])];const sheet=rows.map((r,i)=>'<row r="'+(i+1)+'" ht="'+(i===0?32:i>2?70:26)+'" customHeight="1">'+r.map((v,j)=>'<c r="'+String.fromCharCode(65+j)+(i+1)+'" s="'+(i===0?1:i===2?2:0)+'"'+(typeof v==='number'?'><v>'+v+'</v>':' t="inlineStr"><is><t xml:space="preserve">'+xml(v)+'</t></is>')+'</c>').join('')+'</row>').join('');const files=[
++ ['[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
++ ['_rels/.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
++ ['xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="控制系统BOM" sheetId="1" r:id="rId1"/></sheets></workbook>'],
++ ['xl/_rels/workbook.xml.rels','<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
++ ['xl/styles.xml','<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Microsoft YaHei"/></font><font><b/><sz val="14"/><name val="Microsoft YaHei"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE7F2F8"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="3"><xf fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf fontId="1" fillId="0" borderId="0" xfId="0"/><xf fontId="0" fillId="2" borderId="0" xfId="0"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
++ ['xl/worksheets/sheet1.xml','<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>'+[7,18,24,58,9,8,58].map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join('')+'</cols><sheetData>'+sheet+'</sheetData><mergeCells count="1"><mergeCell ref="A1:G1"/></mergeCells><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>']];return zip(files);}
++ return {build,async download(result){const bom=result.controlBom||data.build(result),blob=await build(bom),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=bom.fileStem+'.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}};
++});
+diff --git a/v2/frontend/v2-components.js b/v2/frontend/v2-components.js
+index 91915ae..a3ab9d8 100644
+--- a/v2/frontend/v2-components.js
++++ b/v2/frontend/v2-components.js
+@@ -1 +1,7 @@
++function orderingExportUrl(route,result){if(!result.selectionToken||!result.deliverySessionId)return route;return route+'?'+new URLSearchParams({sessionId:result.deliverySessionId,optionId:result.selectedOptionId||1,token:result.selectionToken});}
++function appendControlBom(root,result){
++ const controlBom=result.controlBom||window.OrderingBomData.build(result);result.controlBom=controlBom;
++ const bomTitle=document.createElement('h3');bomTitle.className='ord-bom-title';bomTitle.textContent=controlBom.title;root.append(bomTitle);
++ const wrap=document.createElement('div');wrap.style.overflowX='auto';const table=document.createElement('table');table.className='ord-control-bom';const header=document.createElement('tr');for(const name of controlBom.columns){const th=document.createElement('th');th.textContent=name;header.append(th);}table.append(header);for(const item of controlBom.items){const tr=document.createElement('tr');for(const value of window.OrderingBomData.values(item)){const td=document.createElement('td');td.textContent=value;tr.append(td);}table.append(tr);}wrap.append(table);root.append(wrap);for(const warning of controlBom.warnings){const note=document.createElement('small');note.textContent=warning;root.append(note);}
++}
+ 'use strict';
+@@ -44,3 +50,3 @@ function appendV2CommissioningEditor(root,result){
+    const save=document.createElement('button');save.type='submit';save.className='ord-topo-btn ord-commissioning-download';save.textContent='校验并下载工程配置包';const status=document.createElement('p');status.className='ord-commissioning-status';status.setAttribute('role','status');form.append(save,status);
+-   form.onsubmit=async event=>{event.preventDefault();save.disabled=true;try{const deployment={calculationId:model.calculationId,bindings:readers.map(r=>r()).filter(Boolean),windows:windowReaders.map(r=>r()).filter(Boolean),builtIn:builtInReaders.map(r=>r()).filter(Boolean)},cascade=cascadeReader();if(cascade)deployment.cascade=cascade;const request={demand,deployment};const check=await fetch('/v2/ordering/commissioning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)}),review=await check.json();if(!check.ok)throw Error(review.reason||'设置校验失败');const download=await fetch('/v2/ordering/package',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});if(!download.ok){const error=await download.json();throw Error(error.reason||'生成失败');}const url=URL.createObjectURL(await download.blob()),a=document.createElement('a');a.href=url;a.download='xiaohuiji-engineering-settings.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);root._v2Deployment=deployment;const c=review.commissioning;showDiagram(c);status.textContent='工程设置已保存。'+(c.missing.length?'仍缺：'+[...new Set(c.missing.map(m=>m.label))].join('、'):'填写项校验通过。')+(c.blockers.length?'；'+c.blockers.join('；'):'')+'；未生成完整硬件下发文件。';}catch(error){status.textContent='校验失败：'+error.message;}finally{save.disabled=false;}};
++   form.onsubmit=async event=>{event.preventDefault();save.disabled=true;try{const deployment={calculationId:model.calculationId,bindings:readers.map(r=>r()).filter(Boolean),windows:windowReaders.map(r=>r()).filter(Boolean),builtIn:builtInReaders.map(r=>r()).filter(Boolean)},cascade=cascadeReader();if(cascade)deployment.cascade=cascade;const request={demand,deployment};const check=await fetch('/v2/ordering/commissioning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)}),review=await check.json();if(!check.ok)throw Error(review.reason||'设置校验失败');const download=await fetch(orderingExportUrl('/v2/ordering/package',result),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});if(!download.ok){const error=await download.json();throw Error(error.reason||'生成失败');}const url=URL.createObjectURL(await download.blob()),a=document.createElement('a');a.href=url;a.download='xiaohuiji-engineering-settings.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);root._v2Deployment=deployment;const c=review.commissioning;showDiagram(c);status.textContent='工程设置已保存。'+(c.missing.length?'仍缺：'+[...new Set(c.missing.map(m=>m.label))].join('、'):'填写项校验通过。')+(c.blockers.length?'；'+c.blockers.join('；'):'')+'；未生成完整硬件下发文件。';}catch(error){status.textContent='校验失败：'+error.message;}finally{save.disabled=false;}};
+    panel.append(form);
+@@ -56,3 +62,3 @@ function appendV2ConfigurationPackage(root,result){
+  if(mapping?.groups?.length){const list=document.createElement('ul');list.className='ord-output-groups';for(const g of mapping.groups){const row=document.createElement('li');row.textContent='组'+g.id+' · '+g.plan.controller.model+' · '+g.plan.screen.pixelWidth+'×'+g.plan.screen.pixelHeight+'像素 · '+g.plan.cells.length+'张接收卡 / '+g.plan.ports.length+'个网口'+(g.origin?' · 整屏原点('+g.origin.x+','+g.origin.y+')':' · 局部坐标');list.append(row);}root.append(list);}
+- button.onclick=async()=>{button.disabled=true;try{const response=await fetch('/v2/ordering/package',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(root._v2Deployment?{demand:result.nativeDemand||result.provisionalExportDemand||result.normalizedDemand,deployment:root._v2Deployment}:result.nativeDemand||result.provisionalExportDemand||result.normalizedDemand)});if(!response.ok){const error=await response.json();throw Error(error.reason||'配置包生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='xiaohuiji-'+kind+'-connections.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);button.textContent=labels[kind]+'（已下载）';}catch(error){note.textContent='下载失败：'+error.message;}finally{button.disabled=false;}};root.append(button,note);if(!folded)appendV2CommissioningEditor(root,result);
++ button.onclick=async()=>{button.disabled=true;try{const response=await fetch(orderingExportUrl('/v2/ordering/package',result),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(root._v2Deployment?{demand:result.nativeDemand||result.provisionalExportDemand||result.normalizedDemand,deployment:root._v2Deployment}:result.nativeDemand||result.provisionalExportDemand||result.normalizedDemand)});if(!response.ok){const error=await response.json();throw Error(error.reason||'配置包生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='方案'+(result.selectedOptionId||1)+'-xiaohuiji-'+kind+'-connections.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);button.textContent=labels[kind]+'（已下载）';}catch(error){note.textContent='下载失败：'+error.message;}finally{button.disabled=false;}};root.append(button,note);if(!folded)appendV2CommissioningEditor(root,result);
+ }
+@@ -64,6 +70,6 @@ function renderV2Ordering(result){
+   const packageButton=document.createElement('button');packageButton.type='button';packageButton.className='ord-explicit-package';packageButton.textContent='下载布局交付包';
+-  packageButton.onclick=async()=>{packageButton.disabled=true;try{const response=await fetch('/v2/ordering/package',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.normalizedDemand)});if(!response.ok){const e=await response.json();throw Error(e.reason||'布局包生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='xiaohuiji-layout-draft.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='布局交付包已下载，BOM、接线图、逐卡坐标和SSM共用同一方案；HDSet导入及现场运行仍未验证。';}catch(error){status.textContent='下载失败：'+error.message;}finally{packageButton.disabled=false;}};root.append(packageButton);
++  packageButton.onclick=async()=>{packageButton.disabled=true;try{const response=await fetch(orderingExportUrl('/v2/ordering/package',result),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.normalizedDemand)});if(!response.ok){const e=await response.json();throw Error(e.reason||'布局包生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='方案'+(result.selectedOptionId||1)+'-xiaohuiji-layout-draft.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='布局交付包已下载，BOM、接线图、逐卡坐标和SSM共用同一方案；HDSet导入及现场运行仍未验证。';}catch(error){status.textContent='下载失败：'+error.message;}finally{packageButton.disabled=false;}};root.append(packageButton);
+  }
+  const direct=result.plan?.architecture==='direct';
+- if(result.options?.length>1){const choices=document.createElement('div');choices.className='v2-ordering-choices';choices.setAttribute('role','group');choices.setAttribute('aria-label','切换配单方案');for(const [index,option]of result.options.entries()){const b=document.createElement('button');b.type='button';b.className='ord-choice';b.setAttribute('aria-pressed',String(index===0));const label=document.createElement('strong');const goals=option.goals||[],primary=goals.filter(g=>g!=='cards-alternative'&&g!=='async');label.textContent=goals.includes('async')?'异步方案':primary.length===3?'三项兼顾':primary.map(g=>({ports:'最省网口',cards:'最省接收卡',neat:'排列整齐'})[g]).filter(Boolean).join(' / ')||'接收卡备选';const mode=document.createElement('span');mode.textContent=(option.controlMode==='async'?'异步播放':'同步显示')+' · 方案'+option.id;const detail=document.createElement('small');detail.textContent=option.metrics?option.controller+' · '+option.receiver?.modelId?.replace(/^HD-/,'')+' '+option.metrics.cards+'张 · '+option.metrics.ports+'口 · '+(option.metrics.opening==='double'?'含对开':'单开'):'模组候选 '+option.moduleId;b.append(label,mode,detail);b.onclick=()=>root.dispatchEvent(new CustomEvent('v2-ordering-select',{bubbles:true,detail:{optionId:option.id}}));choices.appendChild(b);}root.appendChild(choices);}
++ if(result.options?.length>1){const choices=document.createElement('div');choices.className='v2-ordering-choices';choices.setAttribute('role','group');choices.setAttribute('aria-label','切换配单方案');for(const [index,option]of result.options.entries()){const b=document.createElement('button');b.type='button';b.className='ord-choice';b.setAttribute('aria-pressed',String(option.id===(result.selectedOptionId||result.options[0].id)));const label=document.createElement('strong');const goals=option.goals||[],primary=goals.filter(g=>g!=='cards-alternative'&&g!=='async');label.textContent=primary.length===3?(option.controlMode==='async'?'异步 · 三项兼顾':'同步 · 三项兼顾'):goals.includes('async')?'异步优选':primary.map(g=>({ports:'最省网口',cards:'最省接收卡',neat:'排列整齐'})[g]).filter(Boolean).join(' / ')||(option.receiver?.modelId?.replace(/^HD-/,'')+'方案');const mode=document.createElement('span');mode.textContent=(option.controlMode==='async'?'异步播放':'同步显示')+' · 方案'+option.id;const detail=document.createElement('small');detail.textContent=option.metrics?option.controller+' · '+option.receiver?.modelId?.replace(/^HD-/,'')+' '+option.metrics.cards+'张 · '+option.metrics.ports+'口 · '+(option.metrics.opening==='double'?'含对开':'单开'):'模组候选 '+option.moduleId;b.append(label,mode,detail);b.onclick=()=>{if(b.getAttribute('aria-pressed')==='true')return;root.dispatchEvent(new CustomEvent('v2-ordering-select',{bubbles:true,detail:{optionId:option.id,selectionToken:result.selectionToken}}));};choices.appendChild(b);}root.appendChild(choices);}
+  if(result.nativeOrdering){const native=result.nativeOrdering;
+@@ -81,3 +87,3 @@ function renderV2Ordering(result){
+   appendV2ConfigurationPackage(root,result);
+-  if(native.configurationGroups?.status==='mapped'||native.success&&[1,2].includes(native.module?.lampBeadsType)){const bom=document.createElement('button');bom.type='button';bom.className='ord-bom-download';bom.textContent='下载BOM表';bom.onclick=async()=>{bom.disabled=true;try{const response=await fetch('/v2/ordering/bom',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(root._v2Deployment?{demand:result.nativeDemand||result.normalizedDemand,deployment:root._v2Deployment}:result.nativeDemand||result.normalizedDemand)});if(!response.ok){const error=await response.json();throw Error(error.reason||'BOM生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='xiaohuiji-BOM.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){bom.title=error.message;bom.textContent='BOM下载失败，点击重试';}finally{bom.disabled=false;}};root.append(bom);}
++  if(result.controlBom){appendControlBom(root,result);const bom=document.createElement('button');bom.type='button';bom.className='ord-bom-download';bom.textContent='下载BOM表';bom.onclick=async()=>{bom.disabled=true;try{await window.OrderingWorkbook.download(result);}catch(e){bom.textContent='下载失败，点击重试';bom.title=e.message;}finally{bom.disabled=false;}};root.append(bom);}
+   const button=document.createElement('button');button.type='button';button.textContent='下载官网计算结果包（非SSM）';button.onclick=()=>{const blob=new Blob([JSON.stringify({format:'xiaohuiji-official-result-1',hardwareConfiguration:false,demand:result.nativeDemand,calculation:native},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='xiaohuiji-official-result.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};root.appendChild(button);return root;
+@@ -85,4 +91,3 @@ function renderV2Ordering(result){
+  const heading=document.createElement('p');heading.className='ord-key-summary';heading.textContent=`整屏 ${result.plan.screen.pixelWidth}×${result.plan.screen.pixelHeight} 像素，`+(direct?`${result.plan.directOutputs.length} 个逻辑HUB接口区域`:`${result.topology?.ports?.length??result.plan.ports.length} 个网口`);root.appendChild(heading);
+- const list=document.createElement('ul');
+- for(const item of (result.bom||result.previewBom||[]).filter(item=>item.quantity>0)){const li=document.createElement('li');li.className='ord-key-material';const name=item.kind==='module'?`P${result.plan.module.dotPitch.spacing} 模组 ${result.plan.module.resolution.join('×')}`:item.kind==='receiver'?`接收卡 ${item.modelId}`:`主控 ${item.modelId}`;li.textContent=`${name}：${item.quantity}${item.kind==='module'?'块':item.kind==='receiver'?'张':'台'}`;list.appendChild(li);}root.appendChild(list);
++ appendControlBom(root,result);
+  const bomButton=document.createElement('button');bomButton.type='button';bomButton.className='ord-bom-download';bomButton.textContent='下载BOM表';
+@@ -93,3 +98,3 @@ function renderV2Ordering(result){
+   const img=document.createElement('img');img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);img.alt=caption||'网口与接收卡区域规划，点击放大';img.style.cssText='width:100%;max-height:440px;object-fit:contain;cursor:zoom-in';
+-  const open=()=>{const dialog=document.createElement('dialog');dialog.className='ord-image-dialog';dialog.style.cssText='width:94vw;max-width:94vw;height:90vh;padding:16px;border:1px solid #ccd8e2;border-radius:12px';const close=document.createElement('button');close.type='button';close.textContent='关闭';const viewport=document.createElement('div');viewport.style.cssText='overflow:auto;height:calc(100% - 45px);margin-top:10px';const full=document.createElement('img');full.src=img.src;full.alt='放大的配单连接图';full.style.cssText='width:1600px;max-width:none;height:auto';viewport.append(full);close.onclick=()=>dialog.close();dialog.addEventListener('close',()=>dialog.remove());dialog.append(close,viewport);document.body.append(dialog);dialog.showModal();};
++  const open=()=>{if(window.EvidenceMedia)return window.EvidenceMedia.open(img.src,img.alt);const dialog=document.createElement('dialog');dialog.className='ord-image-dialog';dialog.style.cssText='width:94vw;max-width:94vw;height:90vh;padding:16px;border:1px solid #ccd8e2;border-radius:12px';const close=document.createElement('button');close.type='button';close.textContent='关闭';const viewport=document.createElement('div');viewport.style.cssText='overflow:auto;height:calc(100% - 45px);margin-top:10px';const full=document.createElement('img');full.src=img.src;full.alt='放大的配单连接图';full.style.cssText='width:1600px;max-width:none;height:auto';viewport.append(full);close.onclick=()=>dialog.close();dialog.addEventListener('close',()=>dialog.remove());dialog.append(close,viewport);document.body.append(dialog);dialog.showModal();};
+   img.onclick=open;img.tabIndex=0;img.setAttribute('role','button');img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};
+@@ -98,5 +103,5 @@ function renderV2Ordering(result){
+   const zoom=document.createElement('button');zoom.type='button';zoom.className='ord-image-zoom';zoom.textContent='👁';zoom.title='放大查看连接图';zoom.setAttribute('aria-label',zoom.title);zoom.onclick=open;
+-  const download=document.createElement('a');download.className='ord-image-download';download.href=img.src;download.download=fileName;download.textContent='↓';download.title=caption?'下载'+caption:'下载连接图';download.setAttribute('aria-label',download.title);download.style.cssText='padding:3px 8px;font-size:20px';tools.append(zoom,download);frame.append(img,tools);root.append(frame);
++  const download=document.createElement('a');download.className='ord-image-download';download.href=img.src;download.download='方案'+(result.selectedOptionId||1)+'-'+fileName;download.textContent='↓';download.title=caption?'下载'+caption:'下载连接图';download.setAttribute('aria-label',download.title);download.style.cssText='padding:3px 8px;font-size:20px';tools.append(zoom,download);frame.append(img,tools);root.append(frame);
+  }
+- if(direct||result.plan.builtInRegions?.length){if(!direct){appendV2ConfigurationPackage(root,result);const ssm=document.createElement('button');ssm.type='button';ssm.className='ord-topo-btn ord-c16-ssm';ssm.textContent='下载 C16 混合连屏 SSM';ssm.onclick=async()=>{ssm.disabled=true;try{const response=await fetch('/v2/ordering/ssm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.provisionalExportDemand||result.normalizedDemand)});if(!response.ok){const error=await response.json();throw Error(error.reason||'SSM生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='xiaohuiji-C16-mixed.ssm';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){ssm.title=error.message;ssm.textContent='下载失败，点击重试';}finally{ssm.disabled=false;}};root.append(ssm);}const note=document.createElement('p');note.textContent=direct?'直控方案不生成接收卡连屏文件；逻辑接口区域需按对应设备资料核对实际排线。':'连屏单元共'+(result.plan.cells.length+1)+'个：内置1个、外置'+result.plan.cells.length+'个；本次只更新连屏，不改写模组芯片参数。';root.appendChild(note);return root;}
++ if(direct||result.plan.builtInRegions?.length){if(!direct){appendV2ConfigurationPackage(root,result);const ssm=document.createElement('button');ssm.type='button';ssm.className='ord-topo-btn ord-c16-ssm';ssm.textContent='下载 C16 混合连屏 SSM';ssm.onclick=async()=>{ssm.disabled=true;try{const response=await fetch(orderingExportUrl('/v2/ordering/ssm',result),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.provisionalExportDemand||result.normalizedDemand)});if(!response.ok){const error=await response.json();throw Error(error.reason||'SSM生成失败');}const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download='方案'+(result.selectedOptionId||1)+'-xiaohuiji-C16-mixed.ssm';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){ssm.title=error.message;ssm.textContent='下载失败，点击重试';}finally{ssm.disabled=false;}};root.append(ssm);}const note=document.createElement('p');note.textContent=direct?'直控方案不生成接收卡连屏文件；逻辑接口区域需按对应设备资料核对实际排线。':'连屏单元共'+(result.plan.cells.length+1)+'个：内置1个、外置'+result.plan.cells.length+'个；本次只更新连屏，不改写模组芯片参数。';root.appendChild(note);return root;}
+  const draft=!!result.provisionalExportDemand||!!result.plan.layout;
+@@ -109,5 +114,5 @@ function renderV2Ordering(result){
+  if(result.plan.ports.length>16)message.textContent+=' 超过16口，仍需对应口数设备验证。';
+- button.onclick=async()=>{button.disabled=true;try{const response=await fetch('/v2/ordering/ssm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.provisionalExportDemand||result.normalizedDemand)});
++ button.onclick=async()=>{button.disabled=true;try{const response=await fetch(orderingExportUrl('/v2/ordering/ssm',result),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result.provisionalExportDemand||result.normalizedDemand)});
+   if(!response.ok){const error=await response.json();throw Error(error.reason||error.message||(typeof error.error==='string'?error.error:'当前方案不能导出（'+response.status+'）'));}
+-  const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=draft?'xiaohuiji-v2-draft.ssm':'xiaohuiji-v2.ssm';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message.textContent=(draft?'暂定方案SSM':'SSM')+'已下载；这仅表示文件生成，尚未验证本次HDSet导入及现场映射。'+(result.plan.ports.length>16?' 超过16口，仍需对应口数设备验证。':'');
++  const blob=await response.blob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='方案'+(result.selectedOptionId||1)+'-'+(draft?'xiaohuiji-v2-draft.ssm':'xiaohuiji-v2.ssm');link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message.textContent=(draft?'暂定方案SSM':'SSM')+'已下载；这仅表示文件生成，尚未验证本次HDSet导入及现场映射。'+(result.plan.ports.length>16?' 超过16口，仍需对应口数设备验证。':'');
+  }catch(error){message.textContent='下载失败：'+error.message;}finally{button.disabled=false;}};
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index de78788..8e1b3aa 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -273,3 +273,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+     if((route?.hintIntent||route?.intent)==='aftersales'||[...evidence.values()].some(e=>e.sourceKind==='indexed-case-record'))messages[0].content+='\n'+require('../domain/aftersales/case-advice-contract.cjs').caseAdviceInstructions;
+-    if(/控标|投标|招标/.test(message))messages[0].content+='\n控标回答：按客户所问范围归纳原文，概览优先给6至8项主要技术指标，总正文控制在1000字以内。每项只引用必要短编号，不重复堆砌来源编号，不复制整份文档。只陈述资料有据的指标，不将控标文字当成检测认证结论。认证、跌落试验等只能按“控标文件列出/要求”转述；本轮没有查验对应正式证书或检测报告时，不写成“已通过、已取得、可以提供有效证书”。同一产品的整机高度与单网口高度是不同范围，不因数值不同就称为矛盾；原文同一字段有不同数值才并列说明，不能自行把4000改为4096等近似值。';
++    if(/控标|投标|招标/.test(message))messages[0].content+='\n控标回答：按客户所问范围归纳原文，仅概览优先给6至8项主要技术指标；客户给出逐条要求则按原序号完整对应，不受概览项数限制，删重复而不删需求。每项只引用必要短编号，不重复堆砌来源编号，不复制整份文档。只陈述资料有据的指标，不将控标文字当成检测认证结论。认证、跌落试验等只能按“控标文件列出/要求”转述；本轮没有查验对应正式证书或检测报告时，不写成“已通过、已取得、可以提供有效证书”。同一产品的整机高度与单网口高度是不同范围，不因数值不同就称为矛盾；原文同一字段有不同数值才并列说明，不能自行把4000改为4096等近似值。';
+     if([...evidence.values()].some(e=>e.sourceKind==='structured-comparison-original'||e.sourceKind==='structured-tender-original'))messages[0].content+='\n结构化原文规则：参数对比、控标内容均是资料事实，应写在claims正文并引用来源，不能放进通用排查建议。客户只问参数或对比时，不添加排障建议。对比先概括主要差异，再按参数项列型号对照；缺失值不当作不支持，来源冲突不擅自选值，品牌及型号后缀保留。';
+@@ -292,3 +292,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+     if(input.sourceContract?.sourceOwnershipOnly)messages[0].content+='\nsourceContract.customerModelMentions是客户文本/会话中的称呼，sourceSubjects是各资料声明的型号；两者不能互相替代。仍可使用通用原理或明确标注的对照资料，是否缺少客户关键条件由你判断。';
+-    if(input.caseReview)messages[0].content+='\n本轮复审任务：你正在纠正技术客服答案。仅输出answer或clarify，不再检索。按caseReview.criteria修改answerDraftForReview：保留最相关的一至两项有据事实，不堆砌不同型号历史方案；删除未确认适用于当前现场的复位、升级或具体调参建议。给一项有判别价值的观察或关键追问即可。不能把原草稿当事实来源，不承诺后台未执行的后续工作。'+languageInstructions+'\n'+require('../domain/aftersales/case-advice-contract.cjs').caseAdviceInstructions;
++    if(input.caseReview)messages[0].content+='\n本轮复审任务：你正在纠正技术客服答案。仅输出answer或clarify，不再检索。按caseReview.criteria修改answerDraftForReview：保留最相关的一至两项有据事实，不堆砌不同型号历史方案；删除未确认适用于当前现场的复位、升级或具体调参建议。客户只要案例时交付案例，不追加观察或追问；客户请求诊断时才给有判别价值的观察或关键追问。不能把原草稿当事实来源，不承诺后台未执行的后续工作。'+languageInstructions+'\n'+require('../domain/aftersales/case-advice-contract.cjs').caseAdviceInstructions;
+     const enforceFormat=!social&&(!streaming||identity.engine==='ninfer');
+diff --git a/v2/model-adapter/expert-working-contract.cjs b/v2/model-adapter/expert-working-contract.cjs
+index db95901..e017c5b 100644
+--- a/v2/model-adapter/expert-working-contract.cjs
++++ b/v2/model-adapter/expert-working-contract.cjs
+@@ -7,2 +7,6 @@ const expertWorkingContract=`你首先是灰度公司产品专家小灰机，围
+ 
++本轮每个独立诉求分别保留对象、动作和限制；客户要部件资料，主设备只用于确认关联，不代替所求部件。多项需求已完成先交付，缺项单列，if_complete须覆盖本轮所求交付。短追问继承对应任务，纠正替换旧条件，明确新目标切任务。
++证据逐项核对对象、模式、方向、版本及条件：输入接口数、可切换源数、同步开窗数、异步素材解码与输出带载不能互作证明；未知条件不补成客户已具备。对比标满足、不满足、未查明或附加条件满足，保留指定型号，替代型号单列。
++要内容和文件就简述原文并给源文件；工具所带条件、图片、手册和视频关联须保留，不能猜图或重造链接。图片由页面按信息价值紧凑展示，不要求固定张数。工具失败不当成无资料；补查针对新缺口，不要求穷尽全库。
++
+ 可用动作：
+diff --git a/v2/tests/ordering-web-export.test.cjs b/v2/tests/ordering-web-export.test.cjs
+index 44db6a5..3d532e8 100644
+--- a/v2/tests/ordering-web-export.test.cjs
++++ b/v2/tests/ordering-web-export.test.cjs
+@@ -10,4 +10,4 @@ test('Website renders validated BOM and its download exports the same actual eng
+   const ctx={document:{createElement:tag=>new Element(tag)},fetch:(url,args)=>fetch(base+url,args),URL:{createObjectURL:value=>{blob=value;return 'blob:test';},revokeObjectURL:()=>{}},setTimeout:()=>{}};
+-  vm.createContext(ctx);vm.runInContext(fs.readFileSync('v2/frontend/v2-components.js','utf8'),ctx);const root=ctx.renderV2Ordering(result),button=root.children.find(n=>n.tag==='button'&&n.textContent==='下载 HDSet 连屏文件');
+-  assert.ok(root.children.find(n=>n.tag==='ul').children.some(n=>n.textContent.includes('HD-R716')));await button.onclick();assert.ok(downloaded);assert.equal(button.disabled,false);
++  ctx.window=ctx;vm.createContext(ctx);vm.runInContext(fs.readFileSync('v2/frontend/ordering-bom-data.js','utf8'),ctx);vm.runInContext(fs.readFileSync('v2/frontend/v2-components.js','utf8'),ctx);const root=ctx.renderV2Ordering(result),button=root.children.find(n=>n.tag==='button'&&n.textContent==='下载 HDSet 连屏文件');
++  assert.ok(JSON.stringify(root.children).includes('HD-R716'));assert.ok(JSON.stringify(root.children).includes('备注'));assert.ok(!JSON.stringify(root.children).includes('LED模组'));await button.onclick();assert.ok(downloaded);assert.equal(button.disabled,false);
+   const xml=await blob.text();assert.equal(parseSsm(xml).packetCount,25);assert.ok(parseSsm(xml).packets.every(p=>p.crcOk));
