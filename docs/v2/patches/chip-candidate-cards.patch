@@ -1,0 +1,90 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index abd7bf3..6b97e1f 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1349,10 +1349,10 @@ function escHtml(s) {
+ }
+ 
+ // IC固件速查卡：芯片数字/全名反查灰度自家卡型固件尾缀
+-function renderChipFirmwareCard(cf) {
++function renderChipFirmwareCard(cf, candidateModel) {
+   if (!cf) return "";
+   let h = `<article class="chip-fw-card"><span class="chip-fw-label">IC固件速查</span>`;
+-  h += `<h3 class="chip-fw-title">${escHtml(cf.title)}</h3><dl class="chip-fw-table">`;
++  h += `<h3 class="chip-fw-title">${escHtml(candidateModel?candidateModel+' · 芯片资料':cf.title)}</h3><dl class="chip-fw-table">`;
+   h += `<div><dt>芯片型号</dt><dd>${escHtml(cf.primary.chip)}</dd></div>`;
+   const deviceFacts={cd:[],rk:[]};
+   // 智能设置/芯片类型/固件尾缀统一由后端 facts 输出，避免“智能设置”与“智能设置选择”重复两行
+@@ -1426,11 +1426,11 @@ function renderSearchResults(results, query, data) {
+   const cf = data && data.chipFirmware;
+   const cat = (activeCat === "software" || activeCat === "video") ? "all" : activeCat; // 软件/视频分类走独立渲染，不进本函数
+   const showChip = !!cf && (cat === "all" || cat === "firmware"); // 芯片固件速查卡只在“全部/固件”下出现
+-  const showChipDirectory=!!data?.chipDirectoryQuery&&(cat==='all'||cat==='firmware');
++  const candidateCards=(cat==='all'||cat==='firmware')?data?.chipCandidateCards||[]:[];
+   const shown = (cat === "all")
+     ? results
+     : results.filter((r) => productHasCat(r, cat, productDocGroups(r).fwGroup));
+-  if (!shown.length && !showChip && !showChipDirectory) {
++  if (!shown.length && !showChip && !candidateCards.length) {
+     const tip = cat === "all"
+       ? `未找到与"${escHtml(query)}"相关的资料`
+       : `没有找到与"${escHtml(query)}"相关的${CAT_LABEL[cat]}，可换个分类或型号试试`;
+@@ -1438,7 +1438,7 @@ function renderSearchResults(results, query, data) {
+     searchResults.style.display = "block";
+     return;
+   }
+-  let html = showChip ? renderChipFirmwareCard(cf) : "";
++  let html=candidateCards.length?`<p class="chip-fw-dl-tip">匹配 ${candidateCards.length} 个芯片候选，请核对完整型号；各型号资料分别列出。</p>`+candidateCards.map(item=>item.card?renderChipFirmwareCard(item.card,item.model):`<article class="chip-fw-card"><span class="chip-fw-label">芯片候选</span><h3 class="chip-fw-title">${escHtml(item.model)}</h3><p class="chip-fw-dl-tip">${escHtml(item.error||'目录中有此候选，当前速查接口未返回可核对的详细映射。')}</p></article>`).join(''):showChip?renderChipFirmwareCard(cf):'';
+   if (shown.length) {
+     if(data?.approximateMatch){const match=data.approximateMatch;html+=`<div class="search-count">已按 ${escHtml(match.selected)} 查询；${match.candidates.length>1?'还有其他匹配型号，请核对型号。':'请核对型号。'}</div>`;if(match.candidates.length>1){html+='<div class="related-chips"><span class="related-label">其他匹配型号：</span>';for(const model of match.candidates.filter(m=>m!==match.selected))html+=`<button type="button" class="related-chip" data-q="${escHtml(model)}">${escHtml(model)}</button>`;html+='</div>';}}
+     html += `<div class="search-count">${cat === "all" ? `找到 ${shown.length} 条产品结果` : `${CAT_LABEL[cat]} · ${shown.length} 个产品`}</div>`;
+@@ -1480,7 +1480,6 @@ function renderSearchResults(results, query, data) {
+     html += `</div>`;
+   }
+   searchResults.innerHTML = html;
+-  if(showChipDirectory){const tip=document.createElement('p');tip.className='chip-fw-dl-tip';tip.textContent='找到以下芯片候选，请核对完整型号后选择；未自动指定固件。';searchResults.prepend(tip);window.ChipBrowser?.mount(searchResults,data.chipDirectoryQuery);}
+   searchResults.querySelectorAll('.product-resource-slot').forEach(slot => {
+     const product = shown[Number(slot.dataset.productIndex)];
+     const groups = productDocGroups(product).groups.filter(g => cat === 'all' || (CAT_GROUP_KEYS[cat] || []).includes(g.key));
+@@ -1543,10 +1542,22 @@ async function doSearch() {
+     if (requestId !== quickRequestId) return;
+     if (!resp.ok || data.error) throw new Error(data.error || "资料服务暂不可用");
+     let hwResults = data.results || [];
+-    if((activeCat==='all'||activeCat==='firmware')&&!hwResults.length&&!data.chipFirmware&&window.ChipBrowser){
+-      let chipMatch=false;try{chipMatch=await window.ChipBrowser.hasMatches(q);}catch{data.chipDirectoryUnavailable=true;}
++    if((activeCat==='all'||activeCat==='firmware')&&!hwResults.length&&window.ChipBrowser){
++      let candidates=[];try{candidates=await window.ChipBrowser.candidates(q);}catch{data.chipDirectoryUnavailable=true;}
+       if(requestId!==quickRequestId)return;
+-      if(chipMatch){data.chipDirectoryQuery=q;lastSearch={results:hwResults,query:q,data};renderSearchResults(hwResults,q,data);return;}
++      const isForModel=(card,model)=>String(card?.primary?.chip||'').split('/').some(name=>wikiModelKey(name)===wikiModelKey(model));
++      const returned=(data.chipFirmware?.hits||[]).flatMap(hit=>String(hit.chip||'').split('/').map(name=>name.trim())).filter(model=>model&&wikiModelKey(model).includes(wikiModelKey(q)));
++      candidates=[...new Set([...candidates,...returned])];
++      if(candidates.length){
++        const cards=new Array(candidates.length);let next=0;
++        const worker=async()=>{while(next<candidates.length&&requestId===quickRequestId){const index=next++,model=candidates[index];try{
++          let card=data.chipFirmware;
++          if(!isForModel(card,model)){const response=await fetch('/api/search?q='+encodeURIComponent(model),{signal:controller.signal}),body=await response.json();if(!response.ok||body.error)throw Error('该候选资料暂未读取成功，请重新搜索。');card=body.chipFirmware;}
++          cards[index]={model,card:isForModel(card,model)?card:null};
++        }catch(error){if(error.name==='AbortError')throw error;cards[index]={model,error:'该候选资料暂未读取成功，请重新搜索。'};}}};
++        await Promise.all(Array.from({length:Math.min(3,candidates.length)},worker));if(requestId!==quickRequestId)return;
++        data.chipCandidateCards=cards;lastSearch={results:hwResults,query:q,data};renderSearchResults(hwResults,q,data);return;
++      }
+     }
+     // One catalogue-based resolver handles incomplete, mistyped and ambiguous identifiers.
+     // Actual exact results remain authoritative; tied candidates require customer selection.
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 2dba687..3031152 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -102,9 +102,9 @@
+   <script src="source-directory-browser.js?v=20261022-lazy-final"></script>
+   <script src="directory-page-cache.js?v=20261102"></script>
+   <script src="firmware-labels.js?v=20261102"></script>
+-  <script src="chip-browser.js?v=20261104-chip-search-entry-01"></script>
++  <script src="chip-browser.js?v=20261104-chip-candidate-cards-01"></script>
+   <script src="mascot-advice.js?v=20261102"></script>
+-  <script src="app.js?v=20261104-chip-search-entry-01"></script>
++  <script src="app.js?v=20261104-chip-candidate-cards-01"></script>
+   <script src="public-client.js?v=20261026-live-process"></script>
+   <script src="site-compat.js?v=20261022-public-chat"></script>
+   <script src="message-actions.js?v=20261104-02"></script>

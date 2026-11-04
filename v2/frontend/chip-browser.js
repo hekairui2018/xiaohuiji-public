@@ -5,7 +5,8 @@ window.ChipBrowser=(()=>{
  const key=s=>String(s).normalize('NFKC').replace(/[\s,_，、—–-]/g,'').toUpperCase();
  const matches=(item,q)=>key(item.label+' '+item.records.flatMap(r=>r.models).join(' ')).includes(q);
  function load(){return pending??=fetch('/v2/chip-browser').then(async r=>{if(!r.ok)throw Error('芯片目录暂不可用');return r.json()}).catch(e=>{pending=null;throw e});}
- async function hasMatches(query){if(!query.trim()||document.body.dataset.audience==='public')return false;const data=await load(),q=key(query);return data.groups.some(g=>g.items.some(item=>matches(item,q)));}
+ async function candidates(query){if(!query.trim()||document.body.dataset.audience==='public')return [];const data=await load(),q=key(query);return [...new Set(data.groups.flatMap(g=>g.items.filter(item=>matches(item,q)).flatMap(item=>{const models=item.records.flatMap(r=>r.models),matched=models.filter(model=>key(model).includes(q));return matched.length?matched:models;})))];}
+ async function hasMatches(query){return (await candidates(query)).length>0;}
  async function mount(parent,initial=''){
   if(document.body.dataset.audience==='public')return;
   const shell=make('details');shell.className='doc-cat-group chip-browser';const summary=make('summary','芯片');shell.append(summary);parent.append(shell);shell.open=!!initial;
@@ -34,5 +35,5 @@ window.ChipBrowser=(()=>{
    search.oninput=()=>{shell.open=true;render()};select.onchange=()=>{active=select.value;render()};render();
   }catch{loading.textContent='芯片表暂不可用，请重试';}
  }
- return {mount,hasMatches};
+ return {mount,hasMatches,candidates};
 })();
