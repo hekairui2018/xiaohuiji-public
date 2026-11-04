@@ -1,0 +1,12 @@
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index 2948c72..fdc2220 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -742,5 +742,5 @@ window.OfflineClient = Object.freeze({
+           },
+-          (text) => window.dispatchEvent(new CustomEvent('v2-answer-text', { detail: { sessionId, text } })),
++          (text) => {if(!requestController.signal.aborted)window.dispatchEvent(new CustomEvent('v2-answer-text', { detail: { sessionId, text } }));},
+           (summary) =>
+-            window.dispatchEvent(new CustomEvent('v2-answer-summary', { detail: { sessionId, summary } })),
++            {if(!requestController.signal.aborted)window.dispatchEvent(new CustomEvent('v2-answer-summary', { detail: { sessionId, summary } }));},
+         );

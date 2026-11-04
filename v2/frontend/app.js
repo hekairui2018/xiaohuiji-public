@@ -2518,6 +2518,7 @@ if (quickCats) {
     }
     function showAdvice(advice,interaction=false){
       if(!advice?.message||(!interaction&&Date.now()<quietUntil))return;
+      bubble.dataset.interaction=String(interaction);
       if(!interaction){lastAdvice=advice;delete el.dataset.mood;}
       clearTimeout(adviceTimer);
       const text=el.querySelector('.xm-bubble-text');text.replaceChildren();
@@ -2575,19 +2576,27 @@ if (quickCats) {
     ["dragstart", "selectstart"].forEach((evName) => orb.addEventListener(evName, (e2) => e2.preventDefault()));
     let dragging = false, moved = false, startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-    let tapCount=0,lastTap=0,coolUntil=0,motion=null;
+    let tapCount=0,lastTap=0,coolUntil=0,motion=null,restTimer=null;
     orb.setAttribute('role','button');orb.tabIndex=0;orb.setAttribute('aria-label',d.label+'，点击互动，按住可拖动');
     function react(){
       if(dragging||moved)return;
-      const now=Date.now();if(now<coolUntil)return;
-      tapCount=now-lastTap<1500?tapCount+1:1;lastTap=now;
-      const stage=tapCount>=10?'rest':tapCount>=6?'dizzy':tapCount>=3?'bounce':'wave';el.dataset.mood=stage;
-      motion?.cancel();if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
+      const now=Date.now(),resting=now<coolUntil;
+      if(!resting){tapCount=now-lastTap<1500?tapCount+1:1;lastTap=now;}
+      const stage=resting||tapCount>=10?'rest':tapCount>=6?'dizzy':tapCount>=3?'bounce':'wave';el.dataset.mood=stage;
+      motion?.cancel();if(!resting&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
         const frames=stage==='dizzy'?[{transform:'rotate(-14deg)'},{transform:'rotate(14deg)'},{transform:'rotate(0)'}]:stage==='bounce'?[{transform:'translateY(0)'},{transform:'translateY(-14px) scale(1.08)'},{transform:'translateY(0)'}]:[{transform:'rotate(0)'},{transform:'rotate(-10deg)'},{transform:'rotate(10deg)'},{transform:'rotate(0)'}];
         motion=orb.animate(frames,{duration:450,iterations:1});
       }
-      if(stage==='rest')coolUntil=now+6000;
-      const message=stage==='rest'?'收到十连击！让我缓六秒，再陪你玩。':stage==='dizzy'?'转晕啦，按钮在下面，正事我也没忘。':stage==='bounce'?'我在我在！这么有精神，要不要一起解决个问题？':'我在！轻点找我，拖动可以给我挪个位置。';
+      if(stage==='rest'&&!resting){
+        coolUntil=now+6000;clearTimeout(restTimer);
+        restTimer=setTimeout(()=>{
+          coolUntil=0;tapCount=0;
+          if(el.dataset.mood!=='rest')return;
+          delete el.dataset.mood;
+          if(el.classList.contains('is-active')&&bubble.classList.contains('show'))showAdvice({title:'小灰机 · 休息好了',message:'我在呢，轻点找我，拖动也可以给我挪位置。',actions:[{label:d.view==='quick'?'去客服问答':'去资料搜索',type:'navigate',view:d.target}]},true);
+        },6000);
+      }
+      const message=stage==='rest'?(resting?'我还在，再休息 '+Math.max(1,Math.ceil((coolUntil-now)/1000))+' 秒就恢复互动。':'收到十连击！让我缓六秒，再陪你玩。'):stage==='dizzy'?'转晕啦，按钮在下面，正事我也没忘。':stage==='bounce'?'我在我在！这么有精神，要不要一起解决个问题？':'我在！轻点找我，拖动可以给我挪个位置。';
       const actions=[{label:d.view==='quick'?'去客服问答':'去资料搜索',type:'navigate',view:d.target}];
       showAdvice({title:'小灰机 · '+({wave:'收到啦',bounce:'精神满满',dizzy:'有点晕',rest:'休息一下'}[stage]),message,actions},true);
       const text=el.querySelector('.xm-bubble-text');

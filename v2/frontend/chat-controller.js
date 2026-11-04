@@ -12,11 +12,13 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   return window.ChatController.readResponse(response,text=>window.dispatchEvent(new CustomEvent('v2-answer-text',{detail:{sessionId:body.sessionId,text}})),summary=>window.dispatchEvent(new CustomEvent('v2-answer-summary',{detail:{sessionId:body.sessionId,summary}})));
  });
  let sending = false;
- let composing = false,sendVersion=0,activeQuery=null;
+ let composing = false,sendVersion=0,activeQuery=null,activeSession=null,stopping=false,queuePaused=false;
  const waitingMessages=[],queuePanel=document.createElement('section');queuePanel.className='v2-message-queue';queuePanel.hidden=true;queuePanel.setAttribute('aria-label','候补消息');ui.input.parentElement.before(queuePanel);
- function renderQueue(){queuePanel.replaceChildren();const rows=waitingMessages.filter(q=>q.session===ui.getSessionId());queuePanel.hidden=!rows.length;if(!rows.length)return;const title=document.createElement('strong');title.textContent='候补消息 '+rows.length+' 条 · 当前处理结束后依次发送';queuePanel.append(title);for(const q of rows){const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');text.textContent=q.text;remove.type='button';remove.textContent='移除';remove.onclick=()=>{waitingMessages.splice(waitingMessages.indexOf(q),1);renderQueue();};row.append(text,remove);queuePanel.append(row);}}
+ function renderQueue(){queuePanel.replaceChildren();const rows=waitingMessages.filter(q=>q.session===ui.getSessionId());queuePanel.hidden=!rows.length;if(!rows.length)return;const title=document.createElement('strong');title.textContent='候补消息 '+rows.length+' 条 · '+(queuePaused?'上次处理未完成，已暂停':'当前回答结束后依次发送');queuePanel.append(title);if(queuePaused){const resume=document.createElement('button');resume.type='button';resume.textContent='继续发送候补';resume.disabled=sending;resume.onclick=()=>{queuePaused=false;renderQueue();drainQueue();};queuePanel.append(resume);}for(const q of rows){const row=document.createElement('div'),text=document.createElement('span'),remove=document.createElement('button');text.textContent=q.text;text.title=q.text;remove.type='button';remove.textContent='移除';remove.setAttribute('aria-label','移除此条候补消息');remove.onclick=()=>{waitingMessages.splice(waitingMessages.indexOf(q),1);renderQueue();};row.append(text,remove);queuePanel.append(row);}}
  function enqueue(){const text=ui.input.value.trim();if(!text)return;if(channel.validate?.(text)===false)return;if(!sending){send();return;}waitingMessages.push({session:ui.getSessionId(),text});ui.input.value='';ui.resizeInput?.();renderQueue();}
- function drainQueue(){if(sending)return;const index=waitingMessages.findIndex(q=>q.session===ui.getSessionId());if(index<0)return;const next=waitingMessages.splice(index,1)[0];renderQueue();const draft=ui.input.value;send(next.text);if(draft){ui.input.value=draft;ui.resizeInput?.();}}
+ function drainQueue(){if(sending||queuePaused)return;const index=waitingMessages.findIndex(q=>q.session===ui.getSessionId());if(index<0)return;const next=waitingMessages.splice(index,1)[0];renderQueue();send(next.text,undefined,true);}
+ ui.events?.addEventListener('session-change',renderQueue);
+ ui.input.title='回车发送；回答中回车打断并重新处理；Ctrl＋回车加入候补；Shift＋回车换行';
 
  ui.messages.addEventListener('v2-ordering-select',async event=>{
   const root=event.target,optionId=event.detail?.optionId;
@@ -26,6 +28,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   const sessionId=ui.getSessionId();busy(true);
   const buttons=root.querySelectorAll('.v2-ordering-choices button');buttons.forEach(b=>b.disabled=true);
   const status=document.createElement('p');status.setAttribute('role','status');status.textContent='正在切换方案…';root.append(status);
+  let completed=false;
   try{
    const response=await request(payload('配单方案：'+optionId,sessionId));
    if(ui.getSessionId()!==sessionId||!root.isConnected)return;
@@ -34,8 +37,9 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
    if(description&&description!==root&&['DIV','P'].includes(description.tagName)&&typeof response.reply==='string')description.textContent=response.reply;
    root.replaceWith(renderV2Ordering(response.result));
    window.__v2LastReply=response;
-  }catch(error){if(ui.getSessionId()===sessionId&&root.isConnected)status.textContent='切换失败：'+error.message;}
-  finally{busy(false);buttons.forEach(b=>b.disabled=false);}
+   completed=true;queuePaused=false;
+  }catch(error){queuePaused=true;if(ui.getSessionId()===sessionId&&root.isConnected)status.textContent='切换失败：'+error.message;}
+  finally{busy(false,completed);buttons.forEach(b=>b.disabled=false);}
  });
  ui.input.addEventListener('compositionstart',()=>{composing=true;});
  ui.input.addEventListener('compositionend',()=>{composing=false;});
@@ -43,12 +47,14 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   if(event.key!=='Enter'||event.shiftKey||event.isComposing||composing||event.keyCode===229)return;
   event.preventDefault();if(event.repeat)return;if(event.ctrlKey||event.metaKey)enqueue();else send();
  });
- function busy(value) {
+ function busy(value,completed=false) {
   sending = value;
   ui.input.disabled = false;
   ui.sendButton.disabled = value && !channel.interrupt;
+  const hint=document.getElementById('aiInputHint');if(hint)hint.textContent=(value&&channel.interrupt?'Enter 打断重发':'Enter 发送')+' · Ctrl+Enter 候补 · Shift+Enter 换行';
   channel.setBusy?.(value);
-  if(!value)queueMicrotask(drainQueue);
+  renderQueue();
+  if(!value&&completed)queueMicrotask(drainQueue);
  }
  function payload(text, sessionId, imageId) {
   return {message:text, sessionId, ...(legacy ? {history:ui.state.history.slice(-8),source:ui.isSelftestEnv()?'web-selftest':'quick-site'} : {}), ...(imageId ? {images:[imageId]} : {})};
@@ -90,7 +96,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   let phrases=stagePhrases[waitStage]||stagePhrases.understanding;if(waitStage==='composing'&&waitPhase)phrases=waitPhase==='reasoning'?['模型思考中…','正在分析本轮条件与已有资料…']:waitPhase==='answer'?['正在生成本轮结果…','正在整理并校验本轮结果…']:['正在读取输入…','正在处理本轮上下文…'];
   writeText(row.querySelector('.v2-stage-label'),phrases[now-stageStarted>=6000?1:0]||phrases[0]);
   const n=row.dataset.generatedTokens;writeText(row.querySelector('.v2-token-count'),n===undefined?'累计处理：等待计数':'累计处理 '+Number(n).toLocaleString()+' tokens');writeText(row.querySelector('.v2-elapsed'),'耗时 '+(Math.floor(elapsed*4)/4).toFixed(1)+' s');
-  const hint=elapsed<8?'':elapsed<20?'可以继续补充条件；Ctrl＋回车加入候补。':'还在处理。型号说错也没关系，直接补一句更正。';const tip=row.querySelector('.v2-wait-tip');writeText(tip,hint);tip.hidden=!hint;
+  const hint=elapsed<8?'':elapsed<20?'回车打断并重新处理；Ctrl＋回车加入候补。':'还在处理。型号说错也没关系，直接补一句更正。';const tip=row.querySelector('.v2-wait-tip');writeText(tip,hint);tip.hidden=!hint;
  }
  function stopWaiting(){clearInterval(clock);clock=null;waitingObserver?.disconnect();waitingObserver=null;if(waitingRow&&waitingRow.dataset.active!=='false'){waitingRow.dataset.active='false';const dots=waitingRow.querySelector('.v2-wait-dots');if(dots)dots.hidden=true;}}
  function answerStarted(){document.body.dataset.v2AnswerVisible='true';window.dispatchEvent(new CustomEvent('v2-mascot-reset'));stopWaiting();const row=waitingRow;if(row){row.dataset.streaming='true';for(const node of row.children)if(!node.classList.contains('ai-msg-bubble'))node.hidden=true;}}
@@ -110,30 +116,31 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   const details=document.createElement('details');details.className='v2-answer-process v2-live-summary';details.id='v2-live-details-'+Math.random().toString(36).slice(2);const title=document.createElement('summary');title.textContent='处理详情';const facts=document.createElement('ol');facts.className='v2-live-facts';details.append(title,facts);button.setAttribute('aria-controls',details.id);button.onclick=()=>{details.open=!details.open;};details.addEventListener('toggle',()=>{button.setAttribute('aria-expanded',String(details.open));button.setAttribute('aria-label',details.open?'收起处理详情':'展开处理详情');});
   row.append(timer,speed,tip,details);paintWaiting();clock=setInterval(paintWaiting,250);waitingObserver=new MutationObserver(()=>{if(!row.isConnected||ui.getSessionId()!==clockSession)stopWaiting();});waitingObserver.observe(ui.messages,{childList:true});
  }
- async function send(value, display) {
+ async function send(value, display, fromQueue=false) {
   let text = typeof value==='string'?value:ui.input.value;
   if (legacy) text=text.trim();
-  if (!text.trim() || sending&&!channel.interrupt || ui.sendButton.disabled) return;
+  if (!text.trim() || stopping || sending&&(!channel.interrupt||!activeQuery) || ui.sendButton.disabled) return;
   if (legacy && !ui.prepareLegacyMessage(text,value)) return;
   if (channel.validate?.(text)===false) return;
   const ticket=++sendVersion,sessionId=ui.getSessionId();
-  if(sending&&channel.interrupt){try{await channel.interrupt(sessionId);await activeQuery?.catch(()=>{});}catch(error){if(ticket===sendVersion)ui.addAssistantMessage({model:'v2-offline-search',reply:'前一条仍在停止，请稍后重发。'});return;}if(ticket!==sendVersion)return;ui.removeLoading();clearInterval(clock);}
+  const draftAtSend=ui.input.value;
+  if(sending&&channel.interrupt){stopping=true;try{await channel.interrupt(activeSession);await activeQuery?.catch(()=>{});}catch(error){if(ticket===sendVersion){queuePaused=true;stopWaiting();ui.removeLoading();ui.setImageState({dataUrl:null,text:'',busy:false});activeQuery=null;busy(false);ui.addAssistantMessage({model:'v2-offline-search',reply:'前一条停止未确认：'+error.message+'。新消息仍在输入框，请稍后重试。'});}return;}finally{stopping=false;}ui.setImageState({dataUrl:null,text:'',busy:false});if(ticket!==sendVersion||ui.getSessionId()!==sessionId){activeQuery=null;busy(false);return;}ui.removeLoading();stopWaiting();}
   channel.beforeSend?.();
   const displayText=legacy?(display!==undefined?display:text.replace(/\[[A-Z_]+\]/g,'')).trim():display||text;
-  ui.input.value='';ui.resizeInput?.();busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());startClock();const started=performance.now();
-  try {activeQuery=query(text,sessionId,undefined,ticket);await activeQuery;}
+  if(!fromQueue&&ui.input.value===draftAtSend)ui.input.value='';ui.resizeInput?.();busy(true);ui.addUserMessage(displayText);ui.addLoading(channel.loadingLabel?.());startClock();const started=performance.now();let completed=false;
+  try {activeSession=sessionId;activeQuery=query(text,sessionId,undefined,ticket);completed=await activeQuery;if(completed)queuePaused=false;}
   catch(error) {
    if (ui.getSessionId()!==sessionId||ticket!==sendVersion) return;
-   ui.removeLoading();
+   queuePaused=true;stopWaiting();ui.removeLoading();
    if(!ui.input.value.trim())ui.input.value=text;ui.resizeInput?.();
    if (!legacy) {ui.addAssistantMessage({model:'v2-offline-search',reply:'请求失败：'+error.message+'。输入已保留，可重试。'});appendDetails({clientElapsedMs:performance.now()-started});}
    else {const row=document.createElement('div');row.className='ai-msg ai-msg-assistant';const bubble=document.createElement('div');bubble.className='ai-msg-bubble';bubble.style.color='#c00';bubble.textContent='请求失败：'+error.message;row.append(bubble);ui.messages.append(row);}
-  } finally {if(ticket===sendVersion){clearInterval(clock);busy(false);ui.resizeInput?.();ui.input.focus({preventScroll:true});}}
+  } finally {if(ticket===sendVersion){activeQuery=null;stopWaiting();busy(false,completed);ui.resizeInput?.();ui.input.focus({preventScroll:true});}}
  }
  async function sendImage(dataUrl) {
   if(channel.allowImages?.()===false)return;
   if (sending || ui.sendButton.disabled) return;
-  channel.beforeSend?.();const sessionId=ui.getSessionId();
+  channel.beforeSend?.();const sessionId=ui.getSessionId(),ticket=++sendVersion;let completed=false;
   ui.setImageState({dataUrl,text:'',busy:true});busy(true);ui.addUserMessage('',dataUrl);ui.addLoading(legacy?'识别图片中…':'本地识别图片文字…');
   try {
    const response=await fetch('/api/ocr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:dataUrl})});
@@ -144,11 +151,12 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
     ui.addAssistantMessage({model:'v2-offline-search',reply:result.message||'图片未识别到文字，请输入文字。'});return;
    }
    if (channel.acceptOcr?.(result)===false) return;
-   ui.addLoading(legacy?'思考中…':'检索资料…');startClock();await query(result.text,sessionId,result.imageId);
+   ui.addLoading(legacy?'思考中…':'检索资料…');startClock();activeSession=sessionId;activeQuery=query(result.text,sessionId,result.imageId,ticket);completed=await activeQuery;if(completed)queuePaused=false;
   } catch {
-   if(ui.getSessionId()!==sessionId)return;
+   if(ui.getSessionId()!==sessionId||ticket!==sendVersion)return;
+   queuePaused=true;
    ui.removeLoading();ui.addAssistantMessage({model:'v2-offline-search',reply:'本地图片识别未完成，可继续文字查询。'});
-  } finally {clearInterval(clock);ui.setImageState({dataUrl:null,text:'',busy:false});busy(false);}
+  } finally {if(ticket===sendVersion){if(!completed)queuePaused=true;activeQuery=null;stopWaiting();ui.setImageState({dataUrl:null,text:'',busy:false});busy(false,completed);}}
  }
  return Object.freeze({send,sendImage});
 }});
