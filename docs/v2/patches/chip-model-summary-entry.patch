@@ -1,0 +1,26 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 6b97e1f..e4414da 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1362,0 +1363,11 @@ function renderChipFirmwareCard(cf, candidateModel) {
++// Display membership is limited to registered software firmware entries; originals stay intact.
++function renderChipModelSummary(facts,items){
++ const modelKey=value=>String(value||'').replace(/^HD[-_ ]?/i,'').replace(/[（(][^）)]*[）)]/g,'').replace(/\s+(?:Green|Red)\b/gi,'').trim().replace(/\s+/g,' ').toUpperCase();
++ const available=new Map();for(const item of items)for(const model of item.models||[]){const key=modelKey(model);if(!available.has(key))available.set(key,String(model).replace(/^HD[-_ ]?/i,'').replace(/[（(][^）)]*[）)]/g,'').replace(/\s+(?:Green|Red)\b/gi,'').trim());}
++ const groups=new Map();
++ for(const fact of facts)for(const line of String(fact.text||'').split('\n')){const at=line.lastIndexOf('：');if(at<0)continue;const series=line.slice(at+1).trim();if(!groups.has(series))groups.set(series,new Set());for(const name of line.slice(0,at).split('/')){const key=modelKey(name);if(available.has(key))groups.get(series).add(key);}}
++ let html='<dl class="chip-fw-table">';
++ for(const [series,keys]of groups){const models=[...keys].map(k=>available.get(k));if(!models.length)continue;html+=`<div><dt>固件系列</dt><dd>${escHtml(series)}</dd></div><div><dt>可下载型号</dt><dd><span>${models.slice(0,6).map(escHtml).join('、')}${models.length>6?'…':''}</span>${models.length>6?`<details class="chip-model-list"><summary>展开全部 ${models.length} 个型号</summary><p>${models.map(escHtml).join('、')}</p></details>`:''}</dd></div>`;}
++ return html+'</dl>';
++}
++
+@@ -1380 +1391 @@ function renderChipFirmwareCard(cf, candidateModel) {
+-      if(group.facts.length){h+='<dl class="chip-fw-table">';for(const fact of group.facts)h+=`<div><dt>${escHtml(fact.label)}</dt><dd>${escHtml(fact.text||'').replace(/\n/g,'<br>')}</dd></div>`;h+='</dl>';}
++      if(group.facts.length)h+=renderChipModelSummary(group.facts,group.items);
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 3031152..1f19f89 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -107 +107 @@
+-  <script src="app.js?v=20261104-chip-candidate-cards-01"></script>
++  <script src="app.js?v=20261104-chip-model-summary-01"></script>
