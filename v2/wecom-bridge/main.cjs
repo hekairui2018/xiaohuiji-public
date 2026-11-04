@@ -23,7 +23,7 @@ client.on('error',error=>diagnostic('connection',error));
 const responder=createResponder({client,core,documents,presentation,state,onError:diagnostic,onRecord:record});
 for(const kind of ['text','image','mixed'])client.on('message.'+kind,frame=>responder.handle(frame).catch(error=>{state.failed++;diagnostic('dispatch',error);}));
 client.on('message.voice',frame=>client.replyStream(frame,randomUUID(),'请用文字或图片发送问题。',true).catch(error=>diagnostic('voice-notice',error)));
-const server=http.createServer((req,res)=>{if(req.url!=='/health'){res.writeHead(404);return res.end();}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({service:'xiaohuiji-v2-wecom',version:'20261104-04',pid:process.pid,...state,active:responder.active()}));});
+const server=http.createServer((req,res)=>{if(req.url!=='/health'){res.writeHead(404);return res.end();}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({service:'xiaohuiji-v2-wecom',version:'20261105-05',pid:process.pid,...state,active:responder.active()}));});
 server.on('error',error=>{diagnostic('health-server',error);client.disconnect();process.exit(1);});
 server.listen(cfg.port||8522,'127.0.0.1',()=>client.connect());
 process.on('SIGTERM',()=>{client.disconnect();server.close(()=>process.exit(0));});

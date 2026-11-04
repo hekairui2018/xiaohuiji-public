@@ -2,6 +2,7 @@
 const {randomUUID}=require('node:crypto');
 const {render,chunks}=require('./core.cjs');
 const {createPresentation}=require('./presentation.cjs');
+const {orderingLabel}=require('./ordering-label.cjs');
 function createResponder({client,core,documents,presentation=createPresentation({core,documents}),state,onError=()=>{},onRecord=()=>{}}){
  const pending=new Map(),seen=new Map(),choices=new Map(),lastResults=new Map();
  function problem(stage,error){
@@ -44,12 +45,16 @@ function createResponder({client,core,documents,presentation=createPresentation(
     const selection=/^(?:选择|回复)?\s*(\d{1,2})[、.)）]?$/.exec(message),saved=choices.get(key);
     if(selection&&saved&&saved.expires>Date.now()&&saved.rows[Number(selection[1])-1])message=saved.rows[Number(selection[1])-1].message;
     stage='core';let data;
+    const previousResult=lastResults.get(key),batch=message==='全部方案';
+    if(batch&&!(previousResult?.result?.options?.length)){await finish('当前会话没有可逐项交付的配单方案，请先提出配单需求。');state.completed++;return;}
     if(message==='重发附件'&&lastResults.has(key))data=lastResults.get(key);
+    else if(batch)data=previousResult;
     else data=await core.answer(key,message,{onText:update,onProgress:summary=>{const steps=(summary?.steps||[]).filter(s=>s.label&&s.detail).slice(-2);if(steps.length)update(steps.map(s=>s.label+'：'+s.detail).join('\n'));}});
+    async function deliverData(data,batchMode=false){
     record('core-result',{data});lastResults.set(key,data);
     stage='presentation';const plan=presentation.plan(data);choices.set(key,{rows:plan.choices||[],expires:Date.now()+900000});
     const receipt={planned:plan.items.length,sent:0,failed:0,notices:0,handled:plan.handled};record('planned',{items:plan.items.map(i=>({id:i.id,type:i.type,name:i.name})),handled:plan.handled});
-    stage='final-reply';await finish(plan.text+(plan.notices?.length?'\n\n'+plan.notices.join('\n'):''));
+    stage='final-reply';const body=plan.text+(plan.notices?.length?'\n\n'+plan.notices.join('\n'):'');if(batchMode){for(const piece of chunks(body,3000))await markdown(target,piece);}else await finish(body);
     for(const item of plan.items){
      try{
       const output=await presentation.resolve(item);
@@ -64,6 +69,21 @@ function createResponder({client,core,documents,presentation=createPresentation(
     }
     state.lastDelivery=receipt;if(receipt.failed)state.partial=(state.partial||0)+1;else state.completed++;
     record('completed',{status:receipt.failed?'partial':'complete',receipt});state.lastMode=data.bridgeMode;state.lastCompletedAt=new Date().toISOString();
+    }
+    if(!batch)await deliverData(data);
+    else{
+     const ids=data.result.options.map(o=>o.id).filter(id=>Number.isSafeInteger(id)&&id>0);
+     if(ids.length>20)throw Error('too-many-ordering-options');
+     const originalId=orderingLabel(data.result)?.id;
+     await finish('开始按方案依次发送，共'+ids.length+'个。每个方案的正文和附件均带方案标识。');
+     let switched=false;
+     let batchFinished=false;
+     try{for(const optionId of ids){stage='select-batch-option';const selected=await core.answer(key,'配单方案：'+optionId);if(selected.result?.selectedOptionId!==optionId||!selected.result?.plan&&!selected.result?.nativeOrdering)throw Error('ordering-option-not-confirmed');switched=true;await deliverData(selected,true);}batchFinished=true;}
+     catch(error){await markdown(target,'全部方案交付中断，尚未发送的方案不会冒用其他方案数据，请重新选择需要的方案。');throw error;}
+     finally{
+      if(switched&&originalId){try{const restored=await core.answer(key,'配单方案：'+originalId);if(restored.result?.selectedOptionId!==originalId)throw Error('restore-not-confirmed');lastResults.set(key,restored);const p=presentation.plan(restored);choices.set(key,{rows:p.choices||[],expires:Date.now()+900000});await markdown(target,(batchFinished?'全部方案交付结束':'批量交付已中断')+'，当前选择恢复为方案'+originalId+'。');}catch(error){problem('restore-option',error);await markdown(target,'批量交付后未能恢复原方案，请回复方案序号重新选择。');}}
+     }
+    }
    }catch(error){state.failed++;problem(stage,error);record('failed',{stage,code:state.lastError.code});if(!delivered)await finish(stage==='core'?'问答服务暂时未能连接，本次查询未完成，请稍后重试。':'本次查询未完成，请稍后重试；图片问题也可以直接发文字。').catch(error=>problem('failure-notice',error));}
   });
   pending.set(key,work);try{await work;}finally{if(pending.get(key)===work)pending.delete(key);}

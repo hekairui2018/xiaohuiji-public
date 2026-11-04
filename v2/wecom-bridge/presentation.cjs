@@ -2,6 +2,7 @@
 // Channel conversion only. All models, quantities and drawings come from the core.
 const {render}=require('./core.cjs');
 const {createHash}=require('node:crypto');
+const {orderingLabel}=require('./ordering-label.cjs');
 const csv=value=>'"'+String(value??'').replace(/^[=+@-]/,"'$&").replace(/"/g,'""')+'"';
 const csvBuffer=rows=>Buffer.from('\ufeff'+rows.map(row=>row.map(csv).join(',')).join('\r\n'),'utf8');
 const key=item=>createHash('sha256').update(item.type+'\0'+item.name+'\0'+(item.sha256||item.route||item.svg||item.url||'')).digest('hex').slice(0,24);
@@ -18,6 +19,7 @@ function createPresentation({core,documents,media,internalWebOrigin}={}){
   const add=item=>{item.id=key(item);if(!items.some(i=>i.id===item.id))items.push(item);};
   const r=data.result,normal=r?.plan,native=r?.nativeOrdering;
   if(normal||native){
+   const label=orderingLabel(r);blocks.unshift('【'+label.title+'】');
    handled.push('ordering');
    const bom=r.bom||r.previewBom;
    if(bom?.length){const rows=[['物料','型号／规格','数量','单位'],...bom.filter(i=>i.quantity>0).map(i=>[i.kind==='module'?'模组':i.kind==='receiver'?'接收卡':'主控',i.kind==='module'&&normal?.module?'P'+normal.module.dotPitch.spacing+' '+normal.module.resolution.join('×')+'点':i.modelId,i.quantity,i.kind==='module'?'块':i.kind==='receiver'?'张':'台'])];blocks.push((r.previewBom?'暂定物料表':'物料表')+'\n'+rows.slice(1).map(row=>row.join('｜')).join('\n'));add({type:'file',name:r.previewBom?'暂定物料表.csv':'物料表.csv',buffer:csvBuffer(rows)});}
@@ -35,6 +37,8 @@ function createPresentation({core,documents,media,internalWebOrigin}={}){
    if(native&&!bom&&demand&&(mapped||native.success&&[1,2].includes(native.module?.lampBeadsType)))add({type:'file',name:'配单物料表.csv',route:'/v2/ordering/bom',demand});
    if(r.provisionalExportDemand||layout||r.previewBom)notices.push('附件沿用当前暂定条件／布局草稿；文件生成不等于现场条件已确认或设备下发已验证。');
    for(const option of r.options||[]){const goals=(option.goals||[]).map(g=>({ports:'省网口',cards:'省接收卡',neat:'排列整齐',async:'异步','cards-alternative':'接收卡备选'})[g]).filter(Boolean);choices.push({label:'方案'+option.id+'：'+goals.join('／')+'，'+option.controller+'，'+model(option.receiver)+' '+(option.metrics?.cards??'?')+'张／'+(option.metrics?.ports??'?')+'口',message:'配单方案：'+option.id});}
+   for(const item of items){item.name=label.prefix+'-'+item.name;item.id=key(item);item.optionId=label.id;}
+   if((r.options||[]).length>1)blocks.push('本次仅发送'+(label.id?'方案'+label.id:'当前方案')+'的附件；其他方案回复序号选择。需要逐个交付所有方案，请回复“全部方案”。');
   }
   if(data.parameterComparison?.rows?.length){handled.push('parameterComparison');const table=comparison(data.parameterComparison);blocks.push(table.text);add({type:'file',name:'参数对比.csv',buffer:csvBuffer(table.rows)});}
   for(const card of data.caseCards||[]){handled.push('caseCards');const lines=['案例：'+card.title,card.conditions?'原现场条件：'+card.conditions:null,card.match?.relation?'与本次关系：'+card.match.relation:null,card.match?.differentObjects?.length?'明确差异：'+card.match.differentObjects.map(d=>d.requested+'／'+d.recorded?.join('、')).join('；'):null,card.outcomeEvidence?.length?'原文结果：'+card.outcomeEvidence.map(x=>typeof x==='string'?x:x.text||JSON.stringify(x)).join('；'):null,internalLink(card.preview,'查看完整原文与图片（内部入口）'),card.assets?.length?'该案例含'+card.assets.length+'项原文附件，沿用内部访问权限，不转传到企微云端。':null];blocks.push(lines.filter(Boolean).join('\n'));}
