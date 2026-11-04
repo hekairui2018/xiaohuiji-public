@@ -1,0 +1,10 @@
+.image-layout { width: min(100%, 720px); box-sizing: border-box; }
+.image-layout svg { display: block; max-width: 100%; width: auto; height: 320px; margin: 12px auto; }
+.image-layout label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.image-layout select { max-width: 100%; padding: 6px; border: 1px solid var(--border, #E5EBEF); border-radius: 6px; background: #fff; }
+.image-layout-note { color: var(--muted, #748491); font-size: 12px; }
+.image-layout-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.image-layout-actions button { white-space: normal; border: 1px solid var(--border, #E5EBEF); border-radius: 8px; padding: 8px 12px; background: var(--accent-soft, #E9F6F9); color: var(--accent, #168FA9); cursor: pointer; }
+.image-layout-actions button:disabled { opacity: .5; cursor: default; }
+.image-layout :is(button,select,input,summary):focus-visible { outline: 2px solid var(--accent, #168FA9); outline-offset: 2px; }
+@media(max-width:600px) { .image-layout svg { height: 260px; } .image-layout { max-width: 100%; } }

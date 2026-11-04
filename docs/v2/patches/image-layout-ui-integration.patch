@@ -1,0 +1,64 @@
+diff --git a/v2/frontend/chat-controller.js b/v2/frontend/chat-controller.js
+index 5e1bf96..b02df81 100644
+--- a/v2/frontend/chat-controller.js
++++ b/v2/frontend/chat-controller.js
+@@ -152,7 +152,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
+    const result=await response.json();window.__v2LastOCR=result;
+    if (ui.getSessionId()!==sessionId) return;
+    ui.removeLoading();
+-   if (!response.ok || !result.ok || !result.text) {
++    if (!response.ok || !result.ok || (!result.text && result.layout?.status!=='candidate')) {
+     ui.addAssistantMessage({model:'v2-offline-search',reply:result.message||'图片未识别到文字，请输入文字。'});return;
+    }
+    if (channel.acceptOcr?.(result)===false) return;
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index 1f19f89..6975e0b 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -15,6 +15,7 @@
+   <link rel="stylesheet" href="styles.css?v=20261104-ui-consistency-01">
+   <link rel="stylesheet" href="loading-status.css?v=20261104-ui-consistency-01">
+   <link rel="stylesheet" href="message-actions.css?v=20261104-01">
++  <link rel="stylesheet" href="image-layout.css?v=20261104-01">
+ </head>
+ <body data-client="rules" data-view="quick">
+   <header class="site-header">
+@@ -94,8 +95,9 @@
+   <script src="product-resources.js?v=20261027-curated-word-preview"></script>
+   <script src="product-card.js?v=20261027-source-label"></script>
+   <script src="session-id.js?v=20261019"></script>
+-  <script src="chat-controller.js?v=20261104-reply-position-01"></script>
+-  <script src="offline-client.js?v=20261104-chat-queue-02"></script>
++  <script src="image-layout-view.js?v=20261104-01"></script>
++  <script src="chat-controller.js?v=20261104-image-layout-01"></script>
++  <script src="offline-client.js?v=20261104-image-layout-01"></script>
+   <script src="local-knowledge.js?v=20261020-video-scope-review"></script>
+   <script src="conversation-client.js?v=20261104-wiki-file-delivery-05"></script>
+   <script src="video-groups.js?v=20261021-video-nature"></script>
+diff --git a/v2/frontend/offline-client.js b/v2/frontend/offline-client.js
+index fdc2220..8191bee 100644
+--- a/v2/frontend/offline-client.js
++++ b/v2/frontend/offline-client.js
+@@ -1203,6 +1203,22 @@ window.OfflineClient = Object.freeze({
+             ? '正在阅读资料并思考…'
+             : '检索资料…',
+       acceptOcr(result) {
++          if (result.layout?.status === 'candidate' && window.V2ImageLayout) {
++            window.V2ImageLayout.show({ui, result, onConfirm(summary) {
++              originalMessage.value = summary;
++              conditions.hidden = false;
++              conditions.open = false;
++              ui.input.value = '请按已确认的图片布局核对配单条件，缺少的参数请列出。';
++              ui.resizeInput?.();
++              ui.input.focus({preventScroll:true});
++            }, onText() {
++              originalMessage.value = result.text || '';
++              conditions.hidden = false;
++              conditions.open = true;
++              ui.input.focus({preventScroll:true});
++            }});
++            return false;
++          }
+         if (result.text.length <= 240) return true;
+         originalMessage.value = result.text.slice(0, 8000);
+         conditions.hidden = false;
