@@ -1,15 +1,15 @@
 'use strict';
 const fs=require('node:fs/promises'),path=require('node:path'),{createHash}=require('node:crypto');
-function createDocuments({manifestFile,rootDirectory,maxFiles=12}={}){
+function createDocuments({manifestFile,manifestFiles=[],rootDirectory,maxFiles=12}={}){
  async function prepare(results){
-  if(!manifestFile||!rootDirectory)return [];
-  const root=await fs.realpath(rootDirectory),manifest=JSON.parse(await fs.readFile(manifestFile,'utf8'));
-  if(manifest.schemaVersion!=='xhj-curated-documents-1')throw Error('unapproved-document-manifest');
+  if(!manifestFile&&!manifestFiles.length||!rootDirectory)return [];
+  const root=await fs.realpath(rootDirectory),items=[];
+  for(const file of [...new Set([manifestFile,...manifestFiles].filter(Boolean))]){const m=JSON.parse(await fs.readFile(file,'utf8'));if(!['xhj-curated-documents-1','xhj-curated-videos-1','xhj-curated-firmware-1'].includes(m.schemaVersion))throw Error('unapproved-document-manifest');items.push(...m.items);}
   const files=[],seen=new Set();
   for(const r of results||[]){
    if(files.length>=maxFiles)break;
    if(r.accessRestricted||r.classificationConflict||!/^[a-f0-9]{64}$/.test(r.sha256||'')||seen.has(r.sha256))continue;
-   const item=manifest.items.find(i=>i.name===r.name&&i.sha256===r.sha256&&['spec','manual'].includes(i.kind));
+   const item=items.find(i=>i.name===r.name&&i.sha256===r.sha256);
    if(!item||!Number.isSafeInteger(item.size)||item.size<=0||item.size>20*1024*1024||/[\\/\0\r\n]/.test(item.name))continue;
    try{
     const file=await fs.realpath(path.resolve(root,item.relativePath)),relative=path.relative(root,file);
