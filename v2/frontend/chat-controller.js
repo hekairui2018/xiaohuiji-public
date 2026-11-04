@@ -65,7 +65,7 @@ window.ChatController = Object.freeze({async readResponse(response,onText,onSumm
   response.clientElapsedMs=performance.now()-started;
   if (ui.getSessionId() !== sessionId || ticket!==sendVersion) return false;
   answerStarted();ui.removeLoading();ui.addAssistantMessage(response);
-  appendDetails(response);
+  appendDetails(response);ui.revealChatReply?.();
   ui.state.history.push({role:'user',content:text},{role:'assistant',content:legacy?ui.assistantTextOf(response):response.reply||''});
   return true;
  }

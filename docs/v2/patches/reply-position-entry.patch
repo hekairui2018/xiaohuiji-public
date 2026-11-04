@@ -1,0 +1,19 @@
+diff --git a/v2/frontend/app.js b/v2/frontend/app.js
+index 5b772e0..fa3925c 100644
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -39,0 +40 @@ function scrollChatToBottom(){manualChatScroll=false;followChat=true;readingRepl
++function revealChatReply(){if(manualChatScroll)return;readingReply=aiMessages.querySelector('.ai-msg-assistant:last-child');followChat=true;aiMessages.scrollTop=replyStart();followChatUpdates();}
+@@ -2670 +2671 @@ Object.assign(FrontendApp, {
+- input:aiInput,sendButton:aiSendBtn,messages:aiMessages,resizeInput:resizeAiInput,appendChatMessage,scrollChatToBottom,followChatUpdates,
++ input:aiInput,sendButton:aiSendBtn,messages:aiMessages,resizeInput:resizeAiInput,appendChatMessage,scrollChatToBottom,revealChatReply,followChatUpdates,
+diff --git a/v2/frontend/index.html b/v2/frontend/index.html
+index c4375ee..66aa636 100644
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -97 +97 @@
+-  <script src="chat-controller.js?v=20261104-chat-queue-02"></script>
++  <script src="chat-controller.js?v=20261104-reply-position-01"></script>
+@@ -107 +107 @@
+-  <script src="app.js?v=20261104-mascot-wake-01"></script>
++  <script src="app.js?v=20261104-reply-position-01"></script>
