@@ -1,0 +1,81 @@
+diff --git a/v2/adapters/http/section-answers.cjs b/v2/adapters/http/section-answers.cjs
+index e7afa46..d454fa7 100644
+--- a/v2/adapters/http/section-answers.cjs
++++ b/v2/adapters/http/section-answers.cjs
+@@ -53 +53 @@ function createSectionAnswers(sectionSearch, { materials = null, chipLookup = nu
+-    const request = projectQuickRequest(query);
++    const request = projectQuickRequest(require('../../domain/knowledge/business-language.cjs').canonicalBusinessText(query));
+@@ -112 +112 @@ function createSectionAnswers(sectionSearch, { materials = null, chipLookup = nu
+-      const found = await sectionSearch.registry(query, { limit: 20 });
++      const found = await sectionSearch.registry(plan.query, { limit: 20 });
+@@ -115,0 +116 @@ function createSectionAnswers(sectionSearch, { materials = null, chipLookup = nu
++      if(plan.software.length)rows=rows.filter(r=>plan.software.some(s=>resourceTermMatches(s,[r.name,r.software,...r.folders||[],...(r.softwareIds||[])].filter(Boolean).join(' '))));
+diff --git a/v2/domain/knowledge/media-catalog.cjs b/v2/domain/knowledge/media-catalog.cjs
+index a14fa73..2f007fd 100644
+--- a/v2/domain/knowledge/media-catalog.cjs
++++ b/v2/domain/knowledge/media-catalog.cjs
+@@ -14 +14 @@ function createMediaCatalog(assets){
+-  const q=norm(query);return software.filter(s=>!q||[s.name,...s.aliases].some(a=>q.includes(norm(a)))).map(s=>{
++  const business=require('./business-language.cjs'),q=norm(business.canonicalBusinessText(query));return software.filter(s=>!q||[s.name,...s.aliases].some(a=>q.includes(norm(a)))).map(s=>{
+@@ -19 +19 @@ function createMediaCatalog(assets){
+-   return {...s,group:group.key,groupLabel:group.label,download,hasDownloader:Boolean(download),downloadUrl:download?.publicUrl||null,manuals:manuals.map(m=>({...m,name:m.label,url:m.publicUrl})),videos:{primary:related[0]?{...related[0],url:related[0].publicUrl}:null,more:related.slice(1).map(v=>({...v,url:v.publicUrl}))}};
++   return {...s,aliases:[...new Set([...(s.aliases||[]),...(business.softwareAliases[s.id]||[])])],group:group.key,groupLabel:group.label,download,hasDownloader:Boolean(download),downloadUrl:download?.publicUrl||null,manuals:manuals.map(m=>({...m,name:m.label,url:m.publicUrl})),videos:{primary:related[0]?{...related[0],url:related[0].publicUrl}:null,more:related.slice(1).map(v=>({...v,url:v.publicUrl}))}};
+diff --git a/v2/domain/knowledge/resource-answer-need.cjs b/v2/domain/knowledge/resource-answer-need.cjs
+index 52974bd..1015ade 100644
+--- a/v2/domain/knowledge/resource-answer-need.cjs
++++ b/v2/domain/knowledge/resource-answer-need.cjs
+@@ -5,0 +6 @@ function resourceAnswerNeed(plan) {
++  if (plan.fileRequested) return 'resource';
+diff --git a/v2/domain/knowledge/resource-query.cjs b/v2/domain/knowledge/resource-query.cjs
+index 912501b..10a252d 100644
+--- a/v2/domain/knowledge/resource-query.cjs
++++ b/v2/domain/knowledge/resource-query.cjs
+@@ -207 +207 @@ function planResourceQuery(
+-      const text = normalize(original),
++      const text = normalize(interpreted.query),
+@@ -221 +221,2 @@ function planResourceQuery(
+-  const operation = !!languagePlan.how || softwareSelection || operationPattern.test(original);
++  const businessRelations=interpreted.businessRelations||[];
++  const operation = !!languagePlan.how || softwareSelection || operationPattern.test(original)||businessRelations.some(r=>r.kind==='procedure');
+@@ -222,0 +224 @@ function planResourceQuery(
++  if(businessRelations.some(r=>r.id==='module-configuration'))categories.push('module-config');
+@@ -282,0 +285,5 @@ function planResourceQuery(
++  const fileRequested=/(?:文档|资料|文件)/.test(original)&&
++    (software.length>0||models.length>0||/(?:发|给|找|下载|提供|索取).{0,24}(?:文档|资料|文件)/.test(original))&&
++    !operation&&!/(?:文档|资料|文件)(?:中|里)|根据|对比|比较|是否|支持|兼容/.test(original);
++  if(fileRequested&&!categories.length)remainder=remainder.replace(/介绍文档|介绍资料|介绍文件|文档|资料|文件|介绍|信息发布系统|信息发布|信发/g,' ').replace(/^\s*(?:发|给|找|提供|下载)\s*/,' ').replace(/^\s*得\s*$/,' ');
++  if(fileRequested&&software.length&&!categories.length)categories.push('manual');
+@@ -364 +371 @@ function planResourceQuery(
+-  const overview = !categories.length && /功能|特点|概述|介绍/.test(original);
++  const overview = !fileRequested && !categories.length && /功能|特点|概述|介绍/.test(original);
+@@ -467,0 +475 @@ function planResourceQuery(
++    fileRequested,
+@@ -573,0 +582,2 @@ function planResourceQuery(
++    businessRelations,
++    identityCandidates:require('./business-language.cjs').identityCandidates(original,registeredModels),
+diff --git a/v2/domain/parser/chat-intent.cjs b/v2/domain/parser/chat-intent.cjs
+index b5ed8d6..17eba1c 100644
+--- a/v2/domain/parser/chat-intent.cjs
++++ b/v2/domain/parser/chat-intent.cjs
+@@ -108 +108,3 @@ function chatIntent(text,lookup,state={}){
+- return {intent:decision.intent,query,models,software,unknownModels,decision,demand,social:decision.social,category:decision.categories[0]||null,hardwareRequested:/硬件(?:版本)?[：:\s]*[A-Za-z0-9]/i.test(query)};
++ const business=require('../knowledge/business-language.cjs'),products=typeof lookup.products==='function'?lookup.products():[];
++ const businessContext={relations:business.relationsFor(query),identityCandidates:business.identityCandidates(query,products.map(p=>p.modelId).filter(Boolean))};
++ return {intent:decision.intent,query,models,software,unknownModels,decision,demand,businessContext,social:decision.social,category:decision.categories[0]||null,hardwareRequested:/硬件(?:版本)?[：:\s]*[A-Za-z0-9]/i.test(query)};
+diff --git a/v2/domain/parser/customer-language.cjs b/v2/domain/parser/customer-language.cjs
+index d83519d..9db016f 100644
+--- a/v2/domain/parser/customer-language.cjs
++++ b/v2/domain/parser/customer-language.cjs
+@@ -16 +16,4 @@ function interpretCustomerText(value){
+- return {original,query,corrections};
++ const business=require('../knowledge/business-language.cjs');
++ const canonicalQuery=business.canonicalBusinessText(query);
++ if(canonicalQuery!==query)corrections.push({from:query,to:canonicalQuery,basis:'user-confirmed-business-alias'});
++ return {original,query:canonicalQuery,corrections,businessRelations:business.relationsFor(original)};
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index 98bf3fb..de78788 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -122,0 +123,2 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
++   const business=route?.businessContext||{relations:require('../domain/knowledge/business-language.cjs').relationsFor(message),identityCandidates:filePlan.identityCandidates||[]};
++   if(business.relations?.length||business.identityCandidates?.length)input.businessContext=business;
