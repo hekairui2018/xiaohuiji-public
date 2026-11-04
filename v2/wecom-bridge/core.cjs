@@ -32,7 +32,7 @@ function render(data){
  text=text.replace(/\[([^\]]+)\]\((?:\/(?:v2|api)\/|https?:\/\/(?:localhost|127\.0\.0\.1|192\.168\.)|file:)[^)]+\)/gi,'$1');
  text=text.replace(/https?:\/\/(?:localhost|127\.0\.0\.1|192\.168\.)[^\s）)<>]*/gi,'[请在内部网页查看]');
  text=text.replace(/(?:[A-Z]:[\\/])[^\s<>"|]+/gi,'[内部位置]');
- const names=[...new Set((data.results||[]).map(r=>r.name).filter(Boolean))];
+ const names=[...new Set((data.results||[]).map(r=>r.name).filter(n=>n&&!text.includes(n)))];
  if(names.length)text+='\n\n相关资料：\n'+names.slice(0,12).map(n=>'• '+n).join('\n');
  if(data.bridgeMode==='quick')text='专家模式暂不可用，本次使用快速模式。\n\n'+text;
  return text;
