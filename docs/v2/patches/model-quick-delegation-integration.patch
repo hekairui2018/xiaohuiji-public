@@ -1,0 +1,89 @@
+diff --git a/v2/adapters/http/section-tools.cjs b/v2/adapters/http/section-tools.cjs
+index 8b584c5..311a6fe 100644
+--- a/v2/adapters/http/section-tools.cjs
++++ b/v2/adapters/http/section-tools.cjs
+@@ -29,4 +29 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
+-  if(name==='search_evidence'&&expertMaterials&&['products','text'].includes(args.kind)){
+-   const records=expertMaterials.evidence(args.query,{models:args.models||[],targetedOnly:true});
+-   if(records.length)return {evidence:register(records),notice:{scope:'expert-structured-original-tables',compatibilityConfirmed:false}};
+-  }
++
+@@ -34 +31,2 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
+-  if(['resources','files'].includes(args.kind)||name==='quick_answer'){
++  const fileNeed=require('../../domain/knowledge/resource-query.cjs').planResourceQuery(args.query).answerNeed;
++  if(['resources','files'].includes(args.kind)||name==='quick_answer'&&['resource','resource-candidates'].includes(fileNeed)){
+@@ -36 +34,13 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
+-    if(candidates.length&&resourceAnswer){const parts=await Promise.all(candidates.slice(0,6).map(m=>resourceAnswer(m+' '+(/固件|firmware/i.test(args.query)?'固件':/说明书|操作手册/i.test(args.query)&&!/规格书/i.test(args.query)?'说明书':'规格书'),{signal:signal()})));const matches=parts.filter(Boolean).flatMap(p=>p.results||[]).filter(r=>r.resourceOnly&&(r.models||r.modelIds||[]).some(m=>candidates.includes(m))&&(r.download||r.downloadUrl));const records=register(sharedQuickEvidence({results:matches}).map(e=>({...e,candidateIdentity:{input:numericInputs.join('、'),model:e.modelIds?.[0]||candidates[0],confirmed:false}})));return {evidence:records,notice:{status:'model-candidates',requestedModels:numericInputs,candidateModels:candidates,identityConfirmed:false,meaning:'客户使用数字简称。这些是登记库中数字段相同的候选，不是已确认型号。结合客户原话与登记资料选最相近的一个，回复先说“您说的是〈候选型号〉吧？如果不对请补充。”随后直接给该候选的已有资料，不等待确认，不继续搜索无关型号，不只让客户补完整型号。多个型号仍保留英文前后缀，其他候选供客户选择。'}};}
++    if(candidates.length&&resourceAnswer){
++     const requested=candidates.slice(0,6);
++     const parts=await Promise.all(requested.map(model=>{
++      let query=args.query;
++      for(const number of numericInputs)query=query.replace(new RegExp('(?<![A-Za-z0-9.])'+number+'(?![A-Za-z0-9.])','g'),model);
++      return resourceAnswer(query,{signal:signal()});
++     }));
++     const matches=parts.flatMap((part,index)=>(part?.results||[]).filter(r=>r.resourceOnly&&(r.models||r.modelIds||[]).some(m=>m===requested[index])&&(r.download||r.downloadUrl)));
++     const directAnswer=require('../../domain/knowledge/numeric-file-delivery.cjs').numericFileDelivery({candidates,rows:matches,policy:args.candidatePolicy||'show_choices',query:args.query,input:numericInputs.join('、')});
++     const selected=directAnswer?.results||matches;
++     const records=register(sharedQuickEvidence({results:selected}).map(e=>({...e,candidateIdentity:{input:numericInputs.join('、'),model:e.modelIds?.[0]||candidates[0],confirmed:false}})));
++     return {evidence:records,directAnswer,intent:'resources',notice:{status:'model-candidates',requestedModels:numericInputs,candidateModels:candidates,identityConfirmed:false,meaning:'客户使用数字简称；这些是登记库中数字段相同的候选，不是已确认型号。保留前后缀、语言、版别和版本限制。若模型授权快速模式完成，按所选candidatePolicy交付；否则由模型核对后决定。选定一个候选时只交付该型号文件，其他型号供选择，不能混入同一候选。'}};
++    }
+@@ -39,0 +50,15 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
++  // A model-selected completion policy may use the same full quick-mode executor
++  // through either tool name. No customer-wording classifier chooses this path.
++  let quickAttempt=null,quickQuery=null;
++  if(name==='search_evidence'&&args.delivery==='if_complete'&&resourceAnswer&&!['cases','faq','tender'].includes(args.kind)&&!args.documents?.length){
++   quickQuery=[...(args.models||[]),...(args.chips||[]),args.version||'',args.query].filter(Boolean).join(' ');
++   if(quickQuery.length<=240){
++    quickAttempt=await resourceAnswer(quickQuery,{signal:signal()});
++    if(require('../../model-adapter/quick-delegation.cjs').delegatedQuickResult({...args,action:'search'},quickAttempt,{models:args.models||[]}).allowed)
++     return {evidence:register(sharedQuickEvidence(quickAttempt)),directAnswer:quickAttempt,intent:quickAttempt.intent,notice:{scope:'model-delegated-shared-quick',compatibilityConfirmed:false}};
++   }
++  }
++  if(name==='search_evidence'&&expertMaterials&&['products','text'].includes(args.kind)){
++   const records=expertMaterials.evidence(args.query,{models:args.models||[],targetedOnly:true});
++   if(records.length)return {evidence:register(records),notice:{scope:'expert-structured-original-tables',compatibilityConfirmed:false}};
++  }
+@@ -46 +71 @@ function createSectionTools({resourceSearch,resourceAnswer,expertMaterials,tende
+-   const parts=await Promise.all(queries.map(query=>resourceAnswer(query,{signal:signal()})));
++   const parts=await Promise.all(queries.map(query=>quickAttempt&&query===quickQuery?quickAttempt:resourceAnswer(query,{signal:signal()})));
+diff --git a/v2/model-adapter/evidence-expert.cjs b/v2/model-adapter/evidence-expert.cjs
+index b1171d0..225e521 100644
+--- a/v2/model-adapter/evidence-expert.cjs
++++ b/v2/model-adapter/evidence-expert.cjs
+@@ -18 +18 @@ const schema={oneOf:[
+- {type:'object',properties:{action:{const:'search'},query:{type:'string',minLength:1,maxLength:240},kind:{enum:['products','resources','cases','faq','tender','firmware','text','files']},problemDomain:{enum:['display','equipment','unspecified']},goals:{type:'array',maxItems:3,items:{type:'string',maxLength:120}},concepts:{type:'array',minItems:1,maxItems:6,items:{type:'string',minLength:1,maxLength:32}},models:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},chips:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},documents:{type:'array',maxItems:4,items:{type:'string',maxLength:240}},version:{type:'string',maxLength:64,pattern:'^[Vv]?[0-9]+(?:[.][0-9]+){2,3}$'}},required:['action','query','kind','problemDomain','goals','concepts'],additionalProperties:false},
++ {type:'object',properties:{action:{const:'search'},query:{type:'string',minLength:1,maxLength:240},kind:{enum:['products','resources','cases','faq','tender','firmware','text','files']},delivery:{enum:['if_complete','review']},candidatePolicy:{enum:['labelled_best','show_choices']},problemDomain:{enum:['display','equipment','unspecified']},goals:{type:'array',maxItems:3,items:{type:'string',maxLength:120}},concepts:{type:'array',minItems:1,maxItems:6,items:{type:'string',minLength:1,maxLength:32}},models:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},chips:{type:'array',maxItems:4,items:{type:'string',maxLength:64}},documents:{type:'array',maxItems:4,items:{type:'string',maxLength:240}},version:{type:'string',maxLength:64,pattern:'^[Vv]?[0-9]+(?:[.][0-9]+){2,3}$'}},required:['action','query','kind','delivery','problemDomain','goals','concepts'],additionalProperties:false},
+@@ -29 +29 @@ const schema={oneOf:[
+- {type:'object',properties:{action:{const:'quick'},query:{type:'string',minLength:1,maxLength:240}},required:['action','query'],additionalProperties:false},
++ {type:'object',properties:{action:{const:'quick'},query:{type:'string',minLength:1,maxLength:240},delivery:{enum:['if_complete','review']},candidatePolicy:{enum:['labelled_best','show_choices']}},required:['action','query','delivery'],additionalProperties:false},
+@@ -169 +169 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-     canonical=JSON.stringify([name,args.kind,args.query.normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase(),args.concepts||[],args.models||[],args.chips||[],args.version||'',args.documents||[],args.problemDomain||'unspecified']);
++     canonical=JSON.stringify([name,args.kind,args.query.normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase(),args.concepts||[],args.models||[],args.chips||[],args.version||'',args.documents||[],args.problemDomain||'unspecified',args.candidatePolicy||'show_choices',args.delivery||'legacy']);
+@@ -171 +171 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-    }else if(name==='quick_answer'&&typeof args.query==='string'&&args.query.trim()&&args.query.length<=240)canonical=JSON.stringify([name,args.query]);else if(name==='calculate_ordering'&&Array.isArray(args.userQuotes))canonical=JSON.stringify([name,args.userQuotes]);else if(name==='read_document'&&Number.isInteger(args.blockId)&&args.blockId>0)canonical=JSON.stringify([name,args.blockId,args.offset||0]);else throw Error('expert-invalid-tool');
++    }else if(name==='quick_answer'&&typeof args.query==='string'&&args.query.trim()&&args.query.length<=240)canonical=JSON.stringify([name,args.query,args.candidatePolicy||'show_choices']);else if(name==='calculate_ordering'&&Array.isArray(args.userQuotes))canonical=JSON.stringify([name,args.userQuotes]);else if(name==='read_document'&&Number.isInteger(args.blockId)&&args.blockId>0)canonical=JSON.stringify([name,args.blockId,args.offset||0]);else throw Error('expert-invalid-tool');
+@@ -266 +266 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-    if(fileDeliveryRequired)messages[0].content+='\n本轮索取文件：用quick或search取得当前文件结果，有downloadAvailable就用deliver交付。历史回答不代替本轮文件工具；版别、语言、版本和已有说明由工具卡片展示，不再重写。';
++    if(fileDeliveryRequired)messages[0].content+='\n本轮索取文件：优先quick、delivery="if_complete"，需复核才review或search；不为复述文件另加思考。query保留型号、语言、版别及版本。';
+@@ -348 +348,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-     if(require('./answer-integrity.cjs').quickDelivery(tool.directAnswer,{models:[...route?.models||[],...output.models||[]]}).allowed)return {...tool.directAnswer,actualMode:'expert',delegatedTo:'model-selected-tool',model:identity.model,modelStatus:'available',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
++     const delegation=require('./quick-delegation.cjs').delegatedQuickResult(output,tool.directAnswer,{models:route?.models||[]});
++     const legacyDelivery=!output.delivery&&require('./answer-integrity.cjs').quickDelivery(tool.directAnswer,{models:[...route?.models||[],...output.models||[]]}).allowed;
++     if(delegation.allowed||legacyDelivery)return {...tool.directAnswer,actualMode:'expert',delegatedTo:delegation.allowed?'model-delegated-quick-completion':'model-selected-tool',completionDecision:delegation.allowed?{action:output.action,delivery:output.delivery,reason:delegation.reason}:undefined,model:identity.model,modelStatus:'available',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
+@@ -357 +359,3 @@ function createEvidenceExpert({baseUrl='http://127.0.0.1:8080',transport=require
+-     return {status:'answer',actualMode:'expert',intent:'resources',model:identity.model,modelStatus:'available',reply:(selected[0].candidateIdentity?.confirmed===false?'您说的是 '+String(selected[0].candidateIdentity.model).replace(/^HD-/i,'')+' 吧？如果不对请补充。\n以下是这个候选型号的资料：\n':'找到以下文件，请核对型号和适用条件：\n')+selected.map(e=>e.name).join('\n'),results:selected,delegatedTo:'file-delivery',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
++     const candidateModels=[...new Set(selected.filter(e=>e.candidateIdentity?.confirmed===false).map(e=>e.candidateIdentity.model))];
++     const candidateResult=candidateModels.length?require('../domain/knowledge/numeric-file-delivery.cjs').numericFileDelivery({candidates:candidateModels,rows:selected,policy:candidateModels.length===1?'labelled_best':'show_choices',query:message,input:selected[0].candidateIdentity?.input}):null;
++     return {...(candidateResult||{}),status:'answer',actualMode:'expert',intent:'resources',model:identity.model,modelStatus:'available',reply:candidateResult?.reply||'找到以下文件，请核对型号和适用条件：\n'+selected.map(e=>e.name).join('\n'),results:selected,delegatedTo:'file-delivery',evidence:[...evidence.values()],toolTrace:trace,toolCallCount:trace.filter(t=>!t.cached).length,toolRequestCount:trace.length,modelCallCount:modelCalls.length,generationSpeed:require('./generation-speed.cjs').generationSpeed(modelCalls),usage,modelCalls,elapsedMs:Date.now()-started};
+diff --git a/v2/model-adapter/expert-working-contract.cjs b/v2/model-adapter/expert-working-contract.cjs
+index 04089da..db95901 100644
+--- a/v2/model-adapter/expert-working-contract.cjs
++++ b/v2/model-adapter/expert-working-contract.cjs
+@@ -10,2 +10,2 @@ answer：依据足够就答；参数、菜单、固件兼容及公司案例结
+-quick：查参数或文件；工具已有明确答案或入口就直接交付，候选不确定或未命中才补查。
+-search：text查原文，cases/faq查历史记录，tender查条款，products查参数原表，resources/files查目录，firmware查固件。芯片支持须查映射，不能从bin清单推断；未命中不等于不存在。
++quick：快速模式查文件、参数、表对比、已知操作。quick/search的delivery="if_complete"完整即交付、不足返回；需分析选"review"。query保留限制。candidatePolicy可标候选或列选择，文件按型号分开。
++search：text原文，cases/faq案例，tender控标，products原表，resources/files文件；芯片支持查映射，不从bin清单推断。
+@@ -17 +17 @@ ${require('./response-contract.cjs').responseInstructions}
+-交付：先结论及必要说明，客户要细节才展开。文件可交付就给，不反问是否需要。无后台后续任务，不承诺稍后补发。不展示内部协议或编号。“目录最新”不等于全网最新。历史操作不等于当前适用，未知设备不列多套复位步骤；无新证据停止重复查询，说明缺口。仅输出一项JSON动作。`;
++交付：先结论，细节按需展开；文件直接给。无后台后续任务，不承诺稍后补发。不展示内部协议或编号。“目录最新”不等于全网最新。历史操作不等于当前适用，未知设备不列多套复位步骤；无新证据停止重复查询，说明缺口。仅输出一项JSON动作。`;
