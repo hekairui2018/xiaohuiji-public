@@ -1,0 +1,21 @@
+--- a/v2/frontend/app.js
++++ b/v2/frontend/app.js
+@@ -1360,3 +1360,7 @@
+-    if(f.label==='异步卡固件尾缀'){deviceFacts.cd.push(f);return;}
+-    if(f.label==='接收卡固件尾缀'){deviceFacts.rk.push(f);return;}
+-    h += `<div><dt>${escHtml(f.label)}</dt><dd>${escHtml(f.text || "").replace(/\n/g, "<br>")}</dd></div>`;
++    if(f.label==='异步卡固件尾缀'){deviceFacts.cd.push(f);}
++    if(f.label==='接收卡固件尾缀'){deviceFacts.rk.push(f);}
++    const isSuffix = f.label === '异步卡固件尾缀' || f.label === '接收卡固件尾缀';
++    const value = isSuffix
++      ? [...new Set(String(f.text || '').split('\n').map(line => line.slice(line.lastIndexOf('：') + 1).trim()).filter(Boolean))].join(' / ')
++      : f.text || "";
++    h += `<div><dt>${escHtml(f.label)}</dt><dd>${escHtml(value).replace(/\n/g, "<br>")}</dd></div>`;
+@@ -1370 +1374 @@
+- for(const [series,keys]of groups){const models=[...keys].map(k=>available.get(k));if(!models.length)continue;html+=`<div><dt>固件系列</dt><dd>${escHtml(series)}</dd></div><div><dt>可下载型号</dt><dd><span>${models.slice(0,6).map(escHtml).join('、')}${models.length>6?'…':''}</span>${models.length>6?`<details class="chip-model-list"><summary>展开全部 ${models.length} 个型号</summary><p>${models.map(escHtml).join('、')}</p></details>`:''}</dd></div>`;}
++ for(const [series,keys]of groups){const models=[...keys].map(k=>available.get(k));if(!models.length)continue;html+=`<div><dt>可下载型号${groups.size > 1 ? `（${escHtml(series)}）` : ""}</dt><dd><span>${models.slice(0,6).map(escHtml).join('、')}${models.length>6?'…':''}</span>${models.length>6?`<details class="chip-model-list"><summary>展开全部 ${models.length} 个型号</summary><p>${models.map(escHtml).join('、')}</p></details>`:''}</dd></div>`;}
+--- a/v2/frontend/index.html
++++ b/v2/frontend/index.html
+@@ -112 +112 @@
+-  <script src="app.js?v=20261104-chip-model-summary-01"></script>
++  <script src="app.js?v=20261105-chip-suffix-visible-01"></script>
